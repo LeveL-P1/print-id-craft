@@ -1,0 +1,159 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  MANUFACTURER
+  TEACHER
+}
+
+enum SchoolStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum FieldType {
+  TEXT
+  DATE
+  SELECT
+  PHOTO
+  SIGNATURE
+}
+
+enum StudentStatus {
+  PENDING
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  FLAGGED
+}
+
+enum CardSide {
+  FRONT
+  BACK
+}
+
+enum Orientation {
+  PORTRAIT
+  LANDSCAPE
+}
+
+enum PrintBatchStatus {
+  QUEUED
+  GENERATING
+  READY
+  DOWNLOADED
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  role      Role     @default(TEACHER)
+  schoolId  String?
+  school    School?  @relation(fields: [schoolId], references: [id])
+  createdAt DateTime @default(now())
+
+  flags     FlagNote[]
+}
+
+model School {
+  id           String       @id @default(uuid())
+  name         String
+  logo         String?
+  address      String?
+  primaryColor String?
+  status       SchoolStatus @default(ACTIVE)
+  createdAt    DateTime     @default(now())
+
+  users        User[]
+  classes      ClassGroup[]
+  fields       SubmissionField[]
+  templates    CardTemplate[]
+  batches      PrintBatch[]
+}
+
+model ClassGroup {
+  id             String   @id @default(uuid())
+  schoolId       String
+  name           String
+  submissionLink String   @unique @default(uuid())
+  isActive       Boolean  @default(true)
+
+  school         School   @relation(fields: [schoolId], references: [id])
+  students       Student[]
+  batches        PrintBatch[]
+}
+
+model SubmissionField {
+  id         String    @id @default(uuid())
+  schoolId   String
+  fieldName  String
+  fieldType  FieldType
+  isRequired Boolean   @default(false)
+  sortOrder  Int       @default(0)
+
+  school     School    @relation(fields: [schoolId], references: [id])
+}
+
+model Student {
+  id           String        @id @default(uuid())
+  classGroupId String
+  serialNumber String        @unique
+  formData     Json
+  photoUrl     String?
+  signatureUrl String?
+  status       StudentStatus @default(PENDING)
+  submittedAt  DateTime?     @default(now())
+  qrToken      String        @unique @default(uuid())
+
+  classGroup   ClassGroup    @relation(fields: [classGroupId], references: [id])
+  flags        FlagNote[]
+}
+
+model CardTemplate {
+  id           String      @id @default(uuid())
+  schoolId     String
+  side         CardSide
+  templateJson Json
+  width        Float
+  height       Float
+  dpi          Int
+  orientation  Orientation
+  isPublished  Boolean     @default(false)
+
+  school       School      @relation(fields: [schoolId], references: [id])
+}
+
+model PrintBatch {
+  id           String           @id @default(uuid())
+  schoolId     String
+  classGroupId String?
+  side         CardSide
+  status       PrintBatchStatus @default(QUEUED)
+  pdfUrl       String?
+  manifestUrl  String?
+  generatedAt  DateTime?
+  studentCount Int              @default(0)
+
+  school       School           @relation(fields: [schoolId], references: [id])
+  classGroup   ClassGroup?      @relation(fields: [classGroupId], references: [id])
+}
+
+model FlagNote {
+  id        String   @id @default(uuid())
+  studentId String
+  teacherId String
+  note      String
+  createdAt DateTime @default(now())
+  resolved  Boolean  @default(false)
+
+  student   Student  @relation(fields: [studentId], references: [id])
+  teacher   User     @relation(fields: [teacherId], references: [id])
+}
