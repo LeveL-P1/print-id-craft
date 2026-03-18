@@ -1,0 +1,34 @@
+
+> print-id-craft@0.1.0 build
+> next build
+
+  ▲ Next.js 14.2.35
+  - Environments: .env
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Linting and checking validity of types ...
+
+Failed to compile.
+
+./src/app/api/schools/route.ts
+14:27  Error: 'req' is defined but never used.  @typescript-eslint/no-unused-vars
+17:38  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+21:45  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+46:38  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+50:45  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+
+./src/app/login/page.tsx
+49:14  Error: 'err' is defined but never used.  @typescript-eslint/no-unused-vars
+
+./src/app/page.tsx
+12:33  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+
+./src/lib/auth.ts
+46:31  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+47:35  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+53:26  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+54:26  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+55:26  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+
+info  - Need to disable some ESLint rules? Learn more here: https://nextjs.org/docs/basic-features/eslint#disabling-rules

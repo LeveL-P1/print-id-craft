@@ -45,6 +45,7 @@ enum Orientation {
 }
 
 enum PrintBatchStatus {
+  PENDING
   QUEUED
   GENERATING
   READY
@@ -71,6 +72,7 @@ model School {
   primaryColor String?
   status       SchoolStatus @default(ACTIVE)
   createdAt    DateTime     @default(now())
+  manufacturerId String?
 
   users        User[]
   classes      ClassGroup[]
@@ -121,11 +123,12 @@ model CardTemplate {
   id           String      @id @default(uuid())
   schoolId     String
   side         CardSide
-  templateJson Json
-  width        Float
-  height       Float
-  dpi          Int
-  orientation  Orientation
+  templateJson Json        @default("[]")
+  background   String      @default("#ffffff")
+  width        Float       @default(600)
+  height       Float       @default(950)
+  dpi          Int         @default(300)
+  orientation  Orientation @default(PORTRAIT)
   isPublished  Boolean     @default(false)
 
   school       School      @relation(fields: [schoolId], references: [id])
@@ -135,12 +138,14 @@ model PrintBatch {
   id           String           @id @default(uuid())
   schoolId     String
   classGroupId String?
-  side         CardSide
+  side         CardSide?
   status       PrintBatchStatus @default(QUEUED)
   pdfUrl       String?
   manifestUrl  String?
   generatedAt  DateTime?
   studentCount Int              @default(0)
+  studentIds   Json             @default("[]")
+  createdAt    DateTime         @default(now())
 
   school       School           @relation(fields: [schoolId], references: [id])
   classGroup   ClassGroup?      @relation(fields: [classGroupId], references: [id])
