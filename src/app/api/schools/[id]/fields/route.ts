@@ -4,13 +4,14 @@ import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { z } from "zod"
 
-const fieldTypeEnum = z.enum(["TEXT", "DATE", "SELECT", "PHOTO", "SIGNATURE"])
+// Fields are stored as JSON in Template.fieldConfig
+// This route provides CRUD for those fields
 
 const fieldSchema = z.object({
-  fieldName: z.string().min(1),
-  fieldType: fieldTypeEnum,
-  isRequired: z.boolean().default(false),
-  sortOrder: z.number().int().default(0),
+  key: z.string().min(1),
+  label: z.string().min(1),
+  type: z.string().default("text"),
+  required: z.boolean().default(false),
 })
 
 export async function GET(req: Request, { params }: { params: { id: string } }) {
@@ -20,17 +21,12 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
     }
 
-    // Verify school
-    const school = await prisma.school.findUnique({
-      where: { id: params.id, manufacturerId: session.user.id }
-    })
-    if (!school) return NextResponse.json({ success: false, error: "Not found" }, { status: 404 })
-
-    const fields = await prisma.submissionField.findMany({
+    const template = await prisma.template.findUnique({
       where: { schoolId: params.id },
-      orderBy: { sortOrder: "asc" }
+      select: { fieldConfig: true },
     })
 
+    const fields = (template?.fieldConfig || []) as any[]
     return NextResponse.json({ success: true, data: fields, error: null })
   } catch (error) {
     return NextResponse.json({ success: false, error: "Internal Server Error" }, { status: 500 })
@@ -44,23 +40,23 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
     }
 
-    const school = await prisma.school.findUnique({
-      where: { id: params.id, manufacturerId: session.user.id }
-    })
-    
-    if (!school) return NextResponse.json({ success: false, error: "Not found" }, { status: 404 })
-
     const body = await req.json()
-    const validatedData = fieldSchema.parse(body)
+    const validated = fieldSchema.parse(body)
 
-    const newField = await prisma.submissionField.create({
-      data: {
-        ...validatedData,
-        schoolId: params.id,
-      }
+    const template = await prisma.template.findUnique({
+      where: { schoolId: params.id },
+      select: { fieldConfig: true },
     })
 
-    return NextResponse.json({ success: true, data: newField, error: null }, { status: 201 })
+    const fields = (template?.fieldConfig || []) as any[]
+    fields.push(validated)
+
+    await prisma.template.update({
+      where: { schoolId: params.id },
+      data: { fieldConfig: fields },
+    })
+
+    return NextResponse.json({ success: true, data: validated, error: null }, { status: 201 })
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ success: false, error: error.issues }, { status: 400 })

@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 
+// This route is kept for backward compat but redirects to the template route
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
     const session = await getServerSession(authOptions)
@@ -10,16 +11,11 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
     }
 
-    const school = await prisma.school.findUnique({
-      where: { id: params.id, manufacturerId: session.user.id }
-    })
-    if (!school) return NextResponse.json({ success: false, error: "Not found" }, { status: 404 })
-
-    const templates = await prisma.cardTemplate.findMany({
-      where: { schoolId: params.id }
+    const template = await prisma.template.findUnique({
+      where: { schoolId: params.id },
     })
 
-    return NextResponse.json({ success: true, data: templates, error: null })
+    return NextResponse.json({ success: true, data: template ? [template] : [], error: null })
   } catch (error) {
     return NextResponse.json({ success: false, error: "Internal Server Error" }, { status: 500 })
   }
@@ -32,44 +28,30 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
     }
 
-    const school = await prisma.school.findUnique({
-      where: { id: params.id, manufacturerId: session.user.id }
-    })
-    if (!school) return NextResponse.json({ success: false, error: "Not found" }, { status: 404 })
-
     const body = await req.json()
-    const { side, templateJson, background, width, height, orientation } = body
+    const { frontLayout, backLayout, cardWidthMm, cardHeightMm, orientation, fieldConfig } = body
 
-    // Upsert template for this side
-    const existing = await prisma.cardTemplate.findFirst({
-      where: { schoolId: params.id, side: side }
+    const template = await prisma.template.upsert({
+      where: { schoolId: params.id },
+      update: {
+        frontLayout: frontLayout || undefined,
+        backLayout: backLayout || undefined,
+        cardWidthMm: cardWidthMm || undefined,
+        cardHeightMm: cardHeightMm || undefined,
+        orientation: orientation || undefined,
+        fieldConfig: fieldConfig || undefined,
+      },
+      create: {
+        schoolId: params.id,
+        frontLayout: frontLayout || [],
+        backLayout: backLayout || [],
+        fieldConfig: fieldConfig || [],
+        cardWidthMm: cardWidthMm || 85.6,
+        cardHeightMm: cardHeightMm || 54.0,
+        printDpi: 300,
+        orientation: orientation || "PORTRAIT",
+      },
     })
-
-    let template;
-    if (existing) {
-      template = await prisma.cardTemplate.update({
-        where: { id: existing.id },
-        data: {
-          templateJson: templateJson || existing.templateJson,
-          background: background !== undefined ? background : existing.background,
-          width: width || existing.width,
-          height: height || existing.height,
-          orientation: orientation || existing.orientation
-        }
-      })
-    } else {
-      template = await prisma.cardTemplate.create({
-        data: {
-          schoolId: params.id,
-          side: side,
-          templateJson: templateJson || [],
-          background: background || "#ffffff",
-          width: width || 600,
-          height: height || 950,
-          orientation: orientation || "PORTRAIT"
-        }
-      })
-    }
 
     return NextResponse.json({ success: true, data: template, error: null })
   } catch (error: any) {

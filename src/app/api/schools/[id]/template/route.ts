@@ -17,7 +17,16 @@ const templateSchema = z.object({
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
     const session = await getServerSession(authOptions)
-    if (!session || session.user?.role !== "MANUFACTURER") {
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    // Manufacturer can access any school's template; Teacher can only access their own
+    if (session.user?.role === "TEACHER") {
+      if (session.user.schoolId !== params.id) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
+    } else if (session.user?.role !== "MANUFACTURER") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 

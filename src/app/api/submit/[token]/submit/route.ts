@@ -7,7 +7,15 @@ import QRCode from "qrcode"
 
 const submitSchema = z.object({
   formData: z.record(z.string(), z.any()),
-  photoUrl: z.string().optional().default(""),
+  photoUrl: z.string().optional().default("").refine((url) => {
+    if (!url) return true // empty is OK
+    // Only allow expected Supabase storage URLs or empty string
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
+    if (supabaseUrl && url.startsWith(supabaseUrl)) return true
+    // Also allow common Supabase storage patterns
+    if (url.includes("supabase.co/storage/")) return true
+    return false
+  }, { message: "Invalid photo URL origin" }),
 })
 
 export async function POST(req: Request, { params }: { params: { token: string } }) {

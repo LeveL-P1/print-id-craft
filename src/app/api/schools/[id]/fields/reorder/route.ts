@@ -7,10 +7,12 @@ import { z } from "zod"
 const reorderSchema = z.object({
   fields: z.array(
     z.object({
-      id: z.string(),
-      sortOrder: z.number().int(),
+      key: z.string(),
+      label: z.string(),
+      type: z.string(),
+      required: z.boolean(),
     })
-  )
+  ),
 })
 
 export async function PUT(req: Request, { params }: { params: { id: string } }) {
@@ -20,30 +22,18 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
     }
 
-    // Verify school
-    const school = await prisma.school.findUnique({
-      where: { id: params.id, manufacturerId: session.user.id }
-    })
-    
-    if (!school) return NextResponse.json({ success: false, error: "Not found" }, { status: 404 })
-
     const body = await req.json()
-    const validatedData = reorderSchema.parse(body)
+    const validated = reorderSchema.parse(body)
 
-    // Run updates in a transaction to ensure all or nothing
-    await prisma.$transaction(
-      validatedData.fields.map((field) => 
-        prisma.submissionField.update({
-          where: { id: field.id },
-          data: { sortOrder: field.sortOrder }
-        })
-      )
-    )
+    await prisma.template.update({
+      where: { schoolId: params.id },
+      data: { fieldConfig: validated.fields },
+    })
 
     return NextResponse.json({ success: true, data: null, error: null })
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json({ success: false, error: (error as any).errors }, { status: 400 })
+      return NextResponse.json({ success: false, error: error.issues }, { status: 400 })
     }
     return NextResponse.json({ success: false, error: "Internal Server Error" }, { status: 500 })
   }

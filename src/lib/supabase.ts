@@ -1,9 +1,17 @@
 import { createClient } from "@supabase/supabase-js"
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ""
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
 
-export const supabase = createClient(supabaseUrl, supabaseKey)
+// Use service role key on server-side for signed URL generation
+// Falls back to anon key if service key not available
+const serverKey = supabaseServiceKey || supabaseAnonKey
+
+export const supabase = createClient(supabaseUrl, serverKey)
+
+// Client-side supabase for uploads from the browser
+export const supabaseClient = createClient(supabaseUrl, supabaseAnonKey)
 
 // Retry wrapper for storage operations
 export async function uploadWithRetry(
@@ -28,7 +36,37 @@ export async function uploadWithRetry(
   return { data: null, error: lastError }
 }
 
+// Generate a signed URL (1-hour expiry) for private bucket access
+// Falls back to public URL if signed URL generation fails
+export async function getSignedUrl(bucket: string, path: string, expiresIn = 3600): Promise<string> {
+  try {
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .createSignedUrl(path, expiresIn)
+    if (!error && data?.signedUrl) {
+      return data.signedUrl
+    }
+  } catch (e) {
+    // Fallback to public URL
+  }
+  return getPublicUrl(bucket, path)
+}
+
 export function getPublicUrl(bucket: string, path: string): string {
   const { data } = supabase.storage.from(bucket).getPublicUrl(path)
   return data.publicUrl
+}
+
+// MIME type validation
+const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"]
+const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
+
+export function validateImageFile(file: { type: string; size: number }): { valid: boolean; error?: string } {
+  if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+    return { valid: false, error: `Invalid file type. Allowed: JPEG, PNG, WebP. Got: ${file.type}` }
+  }
+  if (file.size > MAX_FILE_SIZE) {
+    return { valid: false, error: `File too large. Maximum: 5MB. Got: ${(file.size / 1024 / 1024).toFixed(1)}MB` }
+  }
+  return { valid: true }
 }

@@ -17,6 +17,10 @@ export async function PUT(
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
+    // Teachers can only update students from their own school
+    if (session.user?.role === "TEACHER" && session.user.schoolId !== params.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    }
 
     const body = await req.json()
     const validated = statusSchema.parse(body)

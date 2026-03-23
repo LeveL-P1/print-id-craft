@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { toast } from "sonner"
+import IDCardPreview from "@/components/IDCardPreview"
 
 type FieldConfig = { key: string; label: string; type: string; required: boolean }
 type TemplateElement = {
@@ -50,6 +51,9 @@ export default function TemplatePage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [history, setHistory] = useState<TemplateData[]>([])
   const [historyIndex, setHistoryIndex] = useState(-1)
+  const [hasUnsaved, setHasUnsaved] = useState(false)
+  const [showPreview, setShowPreview] = useState(false)
+  const [bgColor, setBgColor] = useState("#ffffff")
 
   const currentLayout = side === "front" ? template.frontLayout : template.backLayout
   const selectedElement = currentLayout.find(el => el.id === selectedId)
@@ -90,6 +94,7 @@ export default function TemplatePage() {
     }
     setTemplate(newTemplate)
     pushHistory(newTemplate)
+    setHasUnsaved(true)
   }
 
   const addElement = (type: TemplateElement["type"], content: string = "") => {
@@ -135,7 +140,44 @@ export default function TemplatePage() {
       toast.error("Save error")
     } finally {
       setSaving(false)
+      setHasUnsaved(false)
     }
+  }
+
+  // Unsaved changes warning
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsaved) {
+        e.preventDefault()
+        e.returnValue = "You have unsaved changes. Are you sure you want to leave?"
+      }
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload)
+  }, [hasUnsaved])
+
+  const DUMMY_DATA: Record<string, string> = {
+    fullName: "Aarav Sharma",
+    class: "Grade 5-A",
+    rollNo: "23",
+    dob: "2012-05-15",
+    bloodGroup: "B+",
+    fatherName: "Rajesh Sharma",
+    motherName: "Sunita Sharma",
+    phone: "9876543210",
+    address: "42, MG Road, Mumbai",
+    serialNumber: "STXAVI-0023",
+  }
+
+  const applyCR80Preset = () => {
+    setTemplate(p => ({
+      ...p,
+      cardWidthMm: 85.6,
+      cardHeightMm: 54.0,
+      printDpi: 300,
+    }))
+    setHasUnsaved(true)
+    toast.success("CR80 preset applied (85.6mm × 54.0mm)")
   }
 
   // Keyboard handler
@@ -251,6 +293,16 @@ export default function TemplatePage() {
               <option value="PORTRAIT">Portrait</option>
             </select>
           </div>
+          <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
+            <button onClick={applyCR80Preset} style={{ flex: 1, padding: '8px', background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 6, color: '#22c55e', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>CR80 Preset</button>
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <label style={{ fontSize: 11, color: '#94a3b8' }}>Background Color</label>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input type="color" value={bgColor} onChange={e => setBgColor(e.target.value)} style={{ width: 32, height: 28, borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', padding: 1 }} />
+              <span style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>{bgColor}</span>
+            </div>
+          </div>
         </div>
 
         {/* Add Elements */}
@@ -311,17 +363,21 @@ export default function TemplatePage() {
           </div>
         )}
 
-        {/* Save Button */}
-        <div style={{ padding: '16px', marginTop: 'auto' }}>
+        {/* Save + Preview Buttons */}
+        <div style={{ padding: '16px', marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button onClick={() => setShowPreview(true)} style={{ width: '100%', padding: '10px', background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.3)', borderRadius: 10, color: '#a78bfa', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+            👁 Preview with Dummy Data
+          </button>
           <button onClick={handleSave} disabled={saving} style={{ width: '100%', padding: '12px', background: saving ? '#1e40af' : 'linear-gradient(135deg, #3b82f6, #2563eb)', border: 'none', borderRadius: 10, color: 'white', fontSize: 14, fontWeight: 600, cursor: saving ? 'default' : 'pointer' }}>
             {saving ? "Saving..." : "💾 Save Template"}
           </button>
+          {hasUnsaved && <div style={{ fontSize: 11, color: '#f59e0b', textAlign: 'center' }}>⚠ Unsaved changes</div>}
         </div>
       </div>
 
       {/* Canvas Area */}
       <div style={{ flex: 1, background: '#1a1a2e', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40, overflow: 'auto' }} onClick={() => setSelectedId(null)}>
-        <div style={{ position: 'relative', width: canvasW, height: canvasH, background: 'white', borderRadius: 8, boxShadow: '0 25px 50px rgba(0,0,0,0.5)', border: '1px solid #e2e8f0', overflow: 'hidden' }} onClick={e => { e.stopPropagation(); setSelectedId(null) }}>
+        <div style={{ position: 'relative', width: canvasW, height: canvasH, background: bgColor, borderRadius: 8, boxShadow: '0 25px 50px rgba(0,0,0,0.5)', border: '1px solid #e2e8f0', overflow: 'hidden' }} onClick={e => { e.stopPropagation(); setSelectedId(null) }}>
           {/* Elements */}
           {currentLayout.map(el => (
             <div
@@ -364,6 +420,42 @@ export default function TemplatePage() {
           )}
         </div>
       </div>
+
+      {/* PREVIEW MODAL */}
+      {showPreview && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 24 }} onClick={() => setShowPreview(false)}>
+          <div style={{ background: 'white', borderRadius: 20, maxWidth: 800, width: '100%', maxHeight: '90vh', overflow: 'auto', boxShadow: '0 25px 50px rgba(0,0,0,0.25)', padding: 32 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a' }}>Template Preview (Dummy Data)</h2>
+              <button onClick={() => setShowPreview(false)} style={{ width: 32, height: 32, borderRadius: 8, border: 'none', background: '#f1f5f9', cursor: 'pointer', fontSize: 16 }}>✕</button>
+            </div>
+            <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', justifyContent: 'center' }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#64748b', marginBottom: 8, textAlign: 'center' }}>FRONT</div>
+                <IDCardPreview
+                  layout={template.frontLayout}
+                  widthMm={template.cardWidthMm}
+                  heightMm={template.cardHeightMm}
+                  formData={DUMMY_DATA}
+                  serialNumber="ABCDEF-0023"
+                  scale={3.8}
+                />
+              </div>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#64748b', marginBottom: 8, textAlign: 'center' }}>BACK</div>
+                <IDCardPreview
+                  layout={template.backLayout}
+                  widthMm={template.cardWidthMm}
+                  heightMm={template.cardHeightMm}
+                  formData={DUMMY_DATA}
+                  serialNumber="ABCDEF-0023"
+                  scale={3.8}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

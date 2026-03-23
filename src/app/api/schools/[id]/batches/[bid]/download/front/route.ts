@@ -17,6 +17,12 @@ export async function GET(
     const batch = await prisma.printBatch.findFirst({
       where: { id: params.bid, schoolId: params.id },
     })
+
+    const school = await prisma.school.findUnique({
+      where: { id: params.id },
+      select: { name: true },
+    })
+
     if (!batch || !batch.frontPdfPath) {
       return NextResponse.json({ error: "Front PDF not found" }, { status: 404 })
     }
@@ -30,12 +36,22 @@ export async function GET(
       return NextResponse.json({ error: "Failed to download front PDF" }, { status: 500 })
     }
 
+    // Mark as DOWNLOADED
+    if (batch.status === "READY") {
+      await prisma.printBatch.update({
+        where: { id: params.bid },
+        data: { status: "DOWNLOADED" },
+      })
+    }
+
     const buffer = Buffer.from(await data.arrayBuffer())
+    const dateStr = new Date().toISOString().slice(0, 10)
+    const schoolName = (school?.name || "school").replace(/[^a-zA-Z0-9]/g, "-")
 
     return new NextResponse(buffer, {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="batch-${params.bid.slice(-8)}-front.pdf"`,
+        "Content-Disposition": `attachment; filename="front-batch-${schoolName}-${dateStr}.pdf"`,
       },
     })
   } catch (error) {

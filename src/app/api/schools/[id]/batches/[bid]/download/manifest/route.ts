@@ -17,6 +17,12 @@ export async function GET(
     const batch = await prisma.printBatch.findFirst({
       where: { id: params.bid, schoolId: params.id },
     })
+
+    const school = await prisma.school.findUnique({
+      where: { id: params.id },
+      select: { name: true },
+    })
+
     if (!batch || !batch.manifestPath) {
       return NextResponse.json({ error: "Manifest not found" }, { status: 404 })
     }
@@ -31,11 +37,13 @@ export async function GET(
     }
 
     const buffer = Buffer.from(await data.arrayBuffer())
+    const dateStr = new Date().toISOString().slice(0, 10)
+    const schoolName = (school?.name || "school").replace(/[^a-zA-Z0-9]/g, "-")
 
     return new NextResponse(buffer, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="batch-${params.bid.slice(-8)}-manifest.csv"`,
+        "Content-Disposition": `attachment; filename="manifest-${schoolName}-${dateStr}.csv"`,
       },
     })
   } catch (error) {

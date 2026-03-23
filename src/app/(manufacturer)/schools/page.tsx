@@ -23,6 +23,7 @@ export default function SchoolsPage() {
   const [newName, setNewName] = useState("")
   const [newEmail, setNewEmail] = useState("")
   const [newAddress, setNewAddress] = useState("")
+  const [newLogo, setNewLogo] = useState<File | null>(null)
   const [creating, setCreating] = useState(false)
 
   const fetchSchools = async () => {
@@ -43,6 +44,25 @@ export default function SchoolsPage() {
     e.preventDefault()
     setCreating(true)
     try {
+      let logoUrl = ""
+      // Upload logo if provided
+      if (newLogo) {
+        const { createClient } = await import("@supabase/supabase-js")
+        const supabase = createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+        )
+        const ext = newLogo.name.split('.').pop() || 'png'
+        const fileName = `logos/${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`
+        const { error: uploadErr } = await supabase.storage
+          .from("student-photos")
+          .upload(fileName, newLogo, { contentType: newLogo.type, upsert: true })
+        if (!uploadErr) {
+          const { data: urlData } = supabase.storage.from("student-photos").getPublicUrl(fileName)
+          logoUrl = urlData.publicUrl
+        }
+      }
+
       const res = await fetch("/api/schools", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -50,6 +70,7 @@ export default function SchoolsPage() {
           name: newName,
           contactEmail: newEmail,
           address: newAddress,
+          logoUrl: logoUrl || undefined,
         }),
       })
       const data = await res.json()
@@ -59,6 +80,7 @@ export default function SchoolsPage() {
         setNewName("")
         setNewEmail("")
         setNewAddress("")
+        setNewLogo(null)
         fetchSchools()
       } else {
         toast.error(data.error?.message || "Failed to create school")
@@ -201,6 +223,23 @@ export default function SchoolsPage() {
               <div className="form-group">
                 <label>Address</label>
                 <input placeholder="e.g. 123 School Street, City" value={newAddress} onChange={e => setNewAddress(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label>School Logo (optional)</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  {newLogo ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <img src={URL.createObjectURL(newLogo)} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover', border: '1px solid #e2e8f0' }} />
+                      <span style={{ fontSize: 12, color: '#64748b' }}>{newLogo.name}</span>
+                      <button type="button" onClick={() => setNewLogo(null)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 14 }}>✕</button>
+                    </div>
+                  ) : (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', border: '1.5px dashed #e2e8f0', borderRadius: 10, cursor: 'pointer', fontSize: 13, color: '#64748b' }}>
+                      🏫 Upload Logo
+                      <input type="file" accept="image/jpeg,image/png,image/webp" onChange={e => setNewLogo(e.target.files?.[0] || null)} style={{ display: 'none' }} />
+                    </label>
+                  )}
+                </div>
               </div>
               <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
                 <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={() => setShowAdd(false)}>Cancel</button>

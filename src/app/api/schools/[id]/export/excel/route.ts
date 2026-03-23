@@ -7,7 +7,15 @@ import * as XLSX from "xlsx"
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
     const session = await getServerSession(authOptions)
-    if (!session || session.user?.role !== "MANUFACTURER") {
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+    // Manufacturer can export any school; Teacher can only export their own
+    if (session.user?.role === "TEACHER") {
+      if (session.user.schoolId !== params.id) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
+    } else if (session.user?.role !== "MANUFACTURER") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
@@ -36,7 +44,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       [school?.name || "School Export"],
       [`Export Date: ${new Date().toLocaleDateString()}`],
       [],
-      ["Serial Number", "Full Name", "Class", "Roll No.", "Date of Birth", "Blood Group", "Father Name", "Mother Name", "Phone", "Address", "Status"],
+      ["Serial Number", "Full Name", "Class", "Roll No.", "Date of Birth", "Blood Group", "Father Name", "Mother Name", "Phone", "Address", "Status", "Submitted At"],
     ]
 
     students.forEach((s) => {
@@ -53,6 +61,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         fd.phone || "",
         fd.address || "",
         s.status,
+        s.submittedAt ? new Date(s.submittedAt).toLocaleDateString() : "",
       ])
     })
 

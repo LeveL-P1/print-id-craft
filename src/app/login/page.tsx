@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { signIn } from "next-auth/react"
 import { useRouter } from "next/navigation"
+import { toast } from "sonner"
 
 type RoleOption = "MANUFACTURER" | "TEACHER"
 
@@ -44,11 +45,12 @@ export default function LoginPage() {
       })
 
       if (res?.error) {
-        setError("Invalid email or password")
+        toast.error("Invalid email or password")
         setLoading(false)
         return
       }
 
+      toast.success("Login successful! Redirecting...")
       if (selectedRole === "MANUFACTURER") {
         router.push("/dashboard")
       } else {
@@ -57,7 +59,7 @@ export default function LoginPage() {
       router.refresh()
     } catch (err) {
       console.error(err)
-      setError("An unexpected error occurred")
+      toast.error("An unexpected error occurred")
       setLoading(false)
     }
   }
@@ -151,7 +153,7 @@ export default function LoginPage() {
 
           {/* Login Form */}
           <form onSubmit={handleLogin} className="login-form">
-            {error && <div className="login-error">{error}</div>}
+            {error && <div className="login-error" role="alert">{error}</div>}
 
             <div className="form-group">
               <label htmlFor="email">Email</label>

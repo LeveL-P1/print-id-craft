@@ -3,6 +3,7 @@ import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
+import IDCardPreview from "@/components/IDCardPreview"
 
 type ClassData = {
   id: string
@@ -70,6 +71,10 @@ export default function SchoolDetailPage() {
   // Batch generation
   const [generatingBatch, setGeneratingBatch] = useState(false)
 
+  // Student detail modal
+  const [selectedStudent, setSelectedStudent] = useState<StudentData | null>(null)
+  const [templateData, setTemplateData] = useState<any>(null)
+
   // Bulk import
   const [importOpen, setImportOpen] = useState(false)
   const [importStep, setImportStep] = useState<"upload" | "preview" | "result">("upload")
@@ -120,14 +125,37 @@ export default function SchoolDetailPage() {
     } catch (err) { console.error(err) }
   }
 
+  const fetchTemplate = async () => {
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/template`)
+      const data = await res.json()
+      if (data.success) setTemplateData(data.data)
+    } catch (err) { console.error(err) }
+  }
+
   useEffect(() => {
-    Promise.all([fetchSchool(), fetchClasses()]).finally(() => setLoading(false))
+    Promise.all([fetchSchool(), fetchClasses(), fetchTemplate()]).finally(() => setLoading(false))
   }, [schoolId])
 
   useEffect(() => {
     if (tab === "students") fetchStudents()
     if (tab === "batches") fetchBatches()
   }, [tab, statusFilter, classFilter, searchQuery])
+
+  const getExpiryBadge = (expiresAt: string | null) => {
+    if (!expiresAt) return null
+    const exp = new Date(expiresAt)
+    const now = new Date()
+    const diffMs = exp.getTime() - now.getTime()
+    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
+    if (diffMs < 0) {
+      return <span className="status-badge status-flagged" style={{ fontSize: 10 }}>Expired</span>
+    } else if (diffDays <= 3) {
+      return <span className="status-badge status-review" style={{ fontSize: 10 }}>Expires in {diffDays}d</span>
+    } else {
+      return <span style={{ fontSize: 11, color: '#94a3b8' }}>Expires in {diffDays}d</span>
+    }
+  }
 
   const handleAddClass = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -336,6 +364,15 @@ export default function SchoolDetailPage() {
 
   return (
     <>
+      {/* Breadcrumbs */}
+      <nav style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#94a3b8', marginBottom: 12, flexWrap: 'wrap' }}>
+        <Link href="/dashboard" style={{ color: '#64748b', textDecoration: 'none' }}>Dashboard</Link>
+        <span>›</span>
+        <Link href="/schools" style={{ color: '#64748b', textDecoration: 'none' }}>Schools</Link>
+        <span>›</span>
+        <span style={{ color: '#0f172a', fontWeight: 600 }}>{school.name}</span>
+      </nav>
+
       <div className="page-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
           <button className="btn-ghost" onClick={() => router.push('/schools')} style={{ padding: 4 }}>
@@ -350,6 +387,10 @@ export default function SchoolDetailPage() {
               <p>{school.address || school.contactEmail}</p>
             </div>
           </div>
+          <Link href={`/schools/${schoolId}/verify`} className="btn btn-outline" style={{ fontSize: 12, padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="2" y="2" width="8" height="8" rx="1" /><rect x="14" y="2" width="8" height="8" rx="1" /><rect x="2" y="14" width="8" height="8" rx="1" /><rect x="14" y="14" width="4" height="4" rx="0.5" /></svg>
+            QR Verify
+          </Link>
         </div>
 
         <div style={{ display: 'flex', gap: 4, marginTop: 16, background: '#f1f5f9', borderRadius: 10, padding: 4, overflowX: 'auto' }}>
@@ -432,8 +473,8 @@ export default function SchoolDetailPage() {
                           {cls.isActive ? "Active" : "Inactive"}
                         </span>
                         {cls.expiresAt && (
-                          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
-                            Expires: {new Date(cls.expiresAt).toLocaleDateString()}
+                          <div style={{ marginTop: 4 }}>
+                            {getExpiryBadge(cls.expiresAt)}
                           </div>
                         )}
                       </td>
@@ -541,6 +582,7 @@ export default function SchoolDetailPage() {
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                            <button className="btn btn-outline" style={{ fontSize: 11, padding: '4px 8px', borderColor: '#6366f1', color: '#4f46e5' }} onClick={() => setSelectedStudent(s)}>👁 View</button>
                             <button className="btn btn-outline" style={{ fontSize: 11, padding: '4px 8px', borderColor: '#22c55e', color: '#16a34a' }} onClick={() => handleStatusUpdate(s.id, "APPROVED")}>✓</button>
                             {s.status === "FLAGGED" ? (
                               <button className="btn btn-outline" style={{ fontSize: 11, padding: '4px 8px', borderColor: '#3b82f6', color: '#2563eb' }} onClick={() => handleUnflag(s.id)}>Unflag</button>
@@ -918,6 +960,107 @@ export default function SchoolDetailPage() {
           </div>
         )}
       </div>
+
+      {/* STUDENT DETAIL MODAL */}
+      {selectedStudent && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 24 }} onClick={() => setSelectedStudent(null)}>
+          <div style={{ background: 'white', borderRadius: 20, maxWidth: 900, width: '100%', maxHeight: '90vh', overflow: 'auto', boxShadow: '0 25px 50px rgba(0,0,0,0.25)' }} onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a' }}>Student Detail</h2>
+                <p style={{ fontSize: 13, color: '#64748b' }}>{selectedStudent.serialNumber} · {selectedStudent.class?.name}</p>
+              </div>
+              <button onClick={() => setSelectedStudent(null)} style={{ width: 32, height: 32, borderRadius: 8, border: 'none', background: '#f1f5f9', cursor: 'pointer', fontSize: 16 }}>✕</button>
+            </div>
+
+            <div style={{ padding: 24 }}>
+              {/* Student Info */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '20px', marginBottom: 28 }}>
+                {/* Photo */}
+                <div style={{ width: 100, height: 130, borderRadius: 12, overflow: 'hidden', border: '2px solid #e2e8f0', background: '#f8fafc' }}>
+                  {selectedStudent.photoUrl ? (
+                    <img src={selectedStudent.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    </div>
+                  )}
+                </div>
+
+                {/* Details */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 24px' }}>
+                  {Object.entries(selectedStudent.formData as Record<string, string>).map(([key, value]) => (
+                    <div key={key}>
+                      <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'capitalize' }}>{key.replace(/([A-Z])/g, ' $1')}</div>
+                      <div style={{ fontSize: 14, fontWeight: 500, color: '#0f172a' }}>{String(value) || '—'}</div>
+                    </div>
+                  ))}
+                  <div>
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>Status</div>
+                    <span className={`status-badge ${selectedStudent.status === 'APPROVED' ? 'status-approved' : selectedStudent.status === 'FLAGGED' ? 'status-flagged' : selectedStudent.status === 'PRINTED' ? 'status-review' : 'status-submitted'}`}>{selectedStudent.status}</span>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>Submitted At</div>
+                    <div style={{ fontSize: 14, fontWeight: 500, color: '#0f172a' }}>{new Date(selectedStudent.submittedAt).toLocaleString()}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Flag note */}
+              {selectedStudent.flagNote && (
+                <div style={{ padding: '12px 16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, color: '#ef4444', fontSize: 13, marginBottom: 20 }}>
+                  📌 <strong>Flag Note:</strong> {selectedStudent.flagNote}
+                </div>
+              )}
+
+              {/* ID Card Preview */}
+              {templateData && (
+                <div>
+                  <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 16 }}>ID Card Preview</h3>
+                  <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', justifyContent: 'center' }}>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 8, textAlign: 'center' }}>FRONT</div>
+                      <IDCardPreview
+                        layout={templateData.frontLayout || []}
+                        widthMm={templateData.cardWidthMm || 85.6}
+                        heightMm={templateData.cardHeightMm || 54.0}
+                        formData={selectedStudent.formData as Record<string, string>}
+                        studentPhoto={selectedStudent.photoUrl}
+                        schoolLogo={school?.logoUrl || undefined}
+                        serialNumber={selectedStudent.serialNumber}
+                        scale={3.5}
+                      />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 8, textAlign: 'center' }}>BACK</div>
+                      <IDCardPreview
+                        layout={templateData.backLayout || []}
+                        widthMm={templateData.cardWidthMm || 85.6}
+                        heightMm={templateData.cardHeightMm || 54.0}
+                        formData={selectedStudent.formData as Record<string, string>}
+                        serialNumber={selectedStudent.serialNumber}
+                        scale={3.5}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 24, borderTop: '1px solid #e2e8f0', paddingTop: 20 }}>
+                <button className="btn btn-outline" style={{ fontSize: 13, borderColor: '#22c55e', color: '#16a34a' }} onClick={() => { handleStatusUpdate(selectedStudent.id, "APPROVED"); setSelectedStudent(null) }}>✓ Approve</button>
+                {selectedStudent.status === "FLAGGED" ? (
+                  <button className="btn btn-outline" style={{ fontSize: 13, borderColor: '#3b82f6', color: '#2563eb' }} onClick={() => { handleUnflag(selectedStudent.id); setSelectedStudent(null) }}>Unflag</button>
+                ) : (
+                  <button className="btn btn-outline" style={{ fontSize: 13, borderColor: '#ef4444', color: '#dc2626' }} onClick={() => { handleFlag(selectedStudent.id); setSelectedStudent(null) }}>🚩 Flag</button>
+                )}
+                <button className="btn btn-primary" onClick={() => setSelectedStudent(null)} style={{ fontSize: 13 }}>Close</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

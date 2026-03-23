@@ -1,21 +1,24 @@
 // Simple in-memory rate limiter
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
 
-// Clean up expired entries every 5 minutes
-setInterval(() => {
+// Lazy cleanup: remove expired entries (called during each rate limit check)
+function cleanupExpired() {
   const now = Date.now()
-  for (const [key, value] of rateLimitMap.entries()) {
+  rateLimitMap.forEach((value, key) => {
     if (now > value.resetAt) {
       rateLimitMap.delete(key)
     }
-  }
-}, 5 * 60 * 1000)
+  })
+}
 
 export function rateLimit(
   identifier: string,
   maxRequests: number = 10,
   windowMs: number = 60 * 1000
 ): { success: boolean; remaining: number } {
+  // Lazy cleanup on each call instead of setInterval (not supported in Edge/serverless)
+  cleanupExpired()
+
   const now = Date.now()
   const entry = rateLimitMap.get(identifier)
 

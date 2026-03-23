@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { useParams } from "next/navigation"
 import ReactCrop, { type Crop } from "react-image-crop"
 import "react-image-crop/dist/ReactCrop.css"
+import SharedIDCardPreview from "@/components/IDCardPreview"
 
 type FieldConfig = { key: string; label: string; type: string; required: boolean }
 type TemplateElement = { 
@@ -103,6 +104,8 @@ export default function SubmitPage() {
   const [cardSide, setCardSide] = useState<"front" | "back">("front")
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<{ serialNumber: string; studentId: string } | null>(null)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [alertMsg, setAlertMsg] = useState("")
 
   const imgRef = useRef<HTMLImageElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -126,11 +129,19 @@ export default function SubmitPage() {
     setFormData(prev => ({ ...prev, [key]: value }))
   }
 
+  const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"]
+
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      setAlertMsg("Invalid file type. Please upload JPEG, PNG, or WebP only.")
+      setTimeout(() => setAlertMsg(""), 4000)
+      return
+    }
     if (file.size > 5 * 1024 * 1024) {
-      alert("Photo must be less than 5MB")
+      setAlertMsg("Photo must be less than 5MB")
+      setTimeout(() => setAlertMsg(""), 4000)
       return
     }
     setPhotoFile(file)
@@ -184,20 +195,25 @@ export default function SubmitPage() {
   const handleSubmit = async () => {
     if (!config) return
     setSubmitting(true)
+    setUploadProgress(0)
     try {
       let photoUrl = ""
       if (croppedPhoto) {
         try {
+          setUploadProgress(10)
           const blob = await fetch(croppedPhoto).then(r => r.blob())
+          setUploadProgress(25)
           const { createClient } = await import("@supabase/supabase-js")
           const supabase = createClient(
             process.env.NEXT_PUBLIC_SUPABASE_URL || "",
             process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
           )
+          setUploadProgress(30)
           const fileName = `students/${config.schoolId}/${Date.now()}-${Math.random().toString(36).slice(2, 6)}.jpg`
           const { data: uploadData, error: uploadErr } = await supabase.storage
             .from("student-photos")
             .upload(fileName, blob, { contentType: "image/jpeg", upsert: true })
+          setUploadProgress(70)
           if (uploadErr) {
             console.error("Photo upload error:", uploadErr)
           }
@@ -205,27 +221,35 @@ export default function SubmitPage() {
             const { data: urlData } = supabase.storage.from("student-photos").getPublicUrl(fileName)
             photoUrl = urlData.publicUrl
           }
+          setUploadProgress(80)
         } catch (photoErr) {
           console.error("Photo upload failed:", photoErr)
         }
+      } else {
+        setUploadProgress(80)
       }
 
+      setUploadProgress(85)
       const res = await fetch(`/api/submit/${token}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ formData, photoUrl }),
       })
+      setUploadProgress(95)
       const data = await res.json()
       if (data.success) {
+        setUploadProgress(100)
         setResult(data.data)
         setStep("success")
       } else {
-        alert(data.error || "Submission failed")
+        setAlertMsg(data.error || "Submission failed")
+        setTimeout(() => setAlertMsg(""), 5000)
         setSubmitting(false)
       }
     } catch (err) {
       console.error(err)
-      alert("Submission failed. Please try again.")
+      setAlertMsg("Submission failed. Please try again.")
+      setTimeout(() => setAlertMsg(""), 5000)
       setSubmitting(false)
     }
   }
@@ -259,7 +283,7 @@ export default function SubmitPage() {
 
   if (step === "success") return (
     <div className="submit-page">
-      <div className="submit-container" style={{ maxWidth: 480 }}>
+      <div className="submit-container" style={{ maxWidth: 520 }}>
         <div style={{ textAlign: 'center', padding: '40px 24px' }}>
           <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', fontSize: 28 }}>✓</div>
           <h2 style={{ fontSize: 22, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>Submitted Successfully!</h2>
@@ -268,6 +292,27 @@ export default function SubmitPage() {
             <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>Serial Number</p>
             <p style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', fontFamily: 'monospace' }}>{result?.serialNumber}</p>
           </div>
+
+          {/* ID Card Preview */}
+          {config && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16, background: '#f1f5f9', padding: 4, borderRadius: 8 }}>
+                <button onClick={() => setCardSide("front")} style={{ flex: 1, padding: '8px', fontSize: 12, fontWeight: 600, borderRadius: 6, border: 'none', cursor: 'pointer', background: cardSide === "front" ? 'white' : 'transparent', color: cardSide === "front" ? '#3b82f6' : '#64748b', boxShadow: cardSide === "front" ? '0 1px 3px rgba(0,0,0,0.1)' : 'none' }}>Front</button>
+                <button onClick={() => setCardSide("back")} style={{ flex: 1, padding: '8px', fontSize: 12, fontWeight: 600, borderRadius: 6, border: 'none', cursor: 'pointer', background: cardSide === "back" ? 'white' : 'transparent', color: cardSide === "back" ? '#3b82f6' : '#64748b', boxShadow: cardSide === "back" ? '0 1px 3px rgba(0,0,0,0.1)' : 'none' }}>Back</button>
+              </div>
+              <SharedIDCardPreview
+                layout={cardSide === 'front' ? config.frontLayout || [] : config.backLayout || []}
+                widthMm={config.cardWidthMm || 85.6}
+                heightMm={config.cardHeightMm || 54}
+                formData={{ ...formData, class: config.className }}
+                studentPhoto={croppedPhoto}
+                schoolLogo={config.schoolLogo || undefined}
+                serialNumber={result?.serialNumber}
+                scale={3.5}
+              />
+            </div>
+          )}
+
           <p style={{ fontSize: 13, color: '#94a3b8' }}>Please save this serial number for your records.</p>
         </div>
       </div>
@@ -311,6 +356,26 @@ export default function SubmitPage() {
             </div>
           </div>
 
+          {/* Progress bar during submission */}
+          {submitting && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#64748b', marginBottom: 6 }}>
+                <span>{uploadProgress < 80 ? 'Uploading photo...' : uploadProgress < 95 ? 'Submitting...' : 'Finalizing...'}</span>
+                <span>{uploadProgress}%</span>
+              </div>
+              <div style={{ height: 6, borderRadius: 3, background: '#f1f5f9', overflow: 'hidden' }}>
+                <div style={{ height: '100%', borderRadius: 3, background: 'linear-gradient(90deg, #3b82f6, #2563eb)', width: `${uploadProgress}%`, transition: 'width 0.3s' }} />
+              </div>
+            </div>
+          )}
+
+          {/* Alert message */}
+          {alertMsg && (
+            <div style={{ padding: '12px 16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, color: '#ef4444', fontSize: 13, marginBottom: 16, animation: 'fadeIn 0.2s' }}>
+              ⚠️ {alertMsg}
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: 12 }}>
             <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setStep("photo")}>← Back</button>
             <button className="btn btn-primary" style={{ flex: 1 }} disabled={submitting} onClick={handleSubmit}>
@@ -337,8 +402,9 @@ export default function SubmitPage() {
         {/* Step Indicators */}
         <div style={{ display: 'flex', justifyContent: 'center', gap: 8, padding: '16px 20px', background: '#f8fafc' }}>
           {["Details", "Photo", "Review"].map((s, i) => {
-            const isActive = (step === "form" && i === 0) || (step === "photo" && i === 1) || (step === "review" && i === 2)
-            const isDone = (step === "photo" && i === 0) || (step === "review" && i <= 1)
+            const currentStep = step as string
+            const isActive = (currentStep === "form" && i === 0) || (currentStep === "photo" && i === 1) || (currentStep === "review" && i === 2)
+            const isDone = (currentStep === "photo" && i === 0) || (currentStep === "review" && i <= 1)
             return (
               <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <div style={{
@@ -417,7 +483,7 @@ export default function SubmitPage() {
                   <div style={{ fontSize: 40, marginBottom: 12 }}>📷</div>
                   <p style={{ fontWeight: 600, color: '#0f172a', marginBottom: 4 }}>Click to upload photo</p>
                   <p style={{ fontSize: 12, color: '#94a3b8' }}>JPG, PNG up to 5MB</p>
-                  <input ref={fileRef} type="file" accept="image/*" onChange={handlePhotoSelect} style={{ display: 'none' }} />
+                  <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handlePhotoSelect} style={{ display: 'none' }} />
                 </div>
               ) : (
                 <div style={{ maxWidth: 400, margin: '0 auto' }}>

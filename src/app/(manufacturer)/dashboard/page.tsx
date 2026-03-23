@@ -72,7 +72,7 @@ export default function ManufacturerDashboard() {
           <p>Welcome back! Here&apos;s your overview.</p>
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
-          <Link href="/schools/new" className="btn btn-primary">
+          <Link href="/schools" className="btn btn-primary">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
             Add School
           </Link>
@@ -167,7 +167,7 @@ export default function ManufacturerDashboard() {
               <svg className="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/></svg>
               <h3>No schools yet</h3>
               <p>Add your first school to get started.</p>
-              <Link href="/schools/new" className="btn btn-primary" style={{ marginTop: 20 }}>Add First School</Link>
+              <Link href="/schools" className="btn btn-primary" style={{ marginTop: 20 }}>Add First School</Link>
             </div>
           )}
         </div>
