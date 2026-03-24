@@ -148,10 +148,10 @@ export default function LandingPage() {
               PRINT ID CRAFT
             </span>
           </div>
-          <div className="landing-nav-links hidden md:flex items-center gap-8" style={{ display: 'flex' }}>
+          <div className="landing-nav-links hidden md:flex items-center gap-8">
             <Link 
               href="/login" 
-              className="px-6 py-2.5 gradient-primary text-white rounded-xl font-semibold text-sm hover:scale-[0.97] active:scale-[0.93] transition-all duration-200"
+              className="px-6 py-2.5 gradient-primary text-white rounded-xl font-semibold text-sm hover:scale-[0.97] active:scale-[0.93] transition-all duration-200 shadow-lg shadow-blue-200"
               style={{ fontSize: '13px', letterSpacing: '0.02em' }}
             >
               Sign In →
@@ -244,20 +244,20 @@ export default function LandingPage() {
               className="flex flex-wrap gap-4 mt-10 justify-center relative"
               variants={fadeUp}
             >
-              <Link 
-                href="/login"
-                className="gradient-primary text-white rounded-xl font-semibold hover:scale-[0.97] active:scale-[0.93] transition-all duration-200"
-                style={{ padding: '14px 32px', fontSize: '14px', boxShadow: '0 8px 24px rgba(59,130,246,0.25)' }}
-              >
-                Get Started Free
-              </Link>
               <a 
                 href="#how-it-works"
-                className="rounded-xl font-semibold transition-all duration-200 hover:bg-gray-50"
-                style={{ padding: '14px 32px', fontSize: '14px', border: '1.5px solid #E0E8F0', color: '#3c4949' }}
+                className="rounded-xl font-semibold transition-all duration-200 hover:bg-gray-50 bg-white"
+                style={{ padding: '14px 40px', fontSize: '14px', border: '1.5px solid #E0E8F0', color: '#181837', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}
               >
-                See How It Works
+                Explore Solution
               </a>
+              <Link 
+                href="/login"
+                className="rounded-xl font-semibold transition-all duration-200 hover:bg-gray-50 bg-gray-50"
+                style={{ padding: '14px 40px', fontSize: '14px', border: '1.5px solid transparent', color: '#3c4949' }}
+              >
+                Member Login
+              </Link>
             </motion.div>
           </motion.div>
 
@@ -611,36 +611,39 @@ export default function LandingPage() {
             <Link 
               href="/login"
               className="gradient-primary text-white rounded-xl font-bold hover:scale-105 active:scale-95 transition-all duration-300 flex items-center gap-2 group"
-              style={{ padding: '18px 36px', fontSize: '16px', boxShadow: '0 15px 30px rgba(59,130,246,0.3)' }}
+              style={{ padding: '18px 48px', fontSize: '16px', boxShadow: '0 15px 40px rgba(59,130,246,0.4)' }}
             >
-              Schedule a Demo <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              Request Access →
             </Link>
           </motion.div>
 
           {/* Footer bottom */}
-          <div className="landing-footer-bottom w-full pt-16 flex flex-col md:flex-row justify-between items-center gap-8" style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-            <div className="font-black text-white uppercase tracking-tight" style={{ fontSize: '20px' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ width: 28, height: 28, borderRadius: 7, background: 'linear-gradient(135deg, #3b82f6, #2563eb)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 12, fontWeight: 800 }}>P</span>
-                PRINT ID CRAFT
-              </span>
+          <div className="landing-footer-bottom w-full pt-16 flex flex-col md:flex-row justify-between items-center gap-8" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+            <div className="flex flex-col gap-2">
+              <div className="font-black text-white uppercase tracking-tight" style={{ fontSize: '18px' }}>
+                <span className="flex items-center gap-2.5">
+                  <span style={{ width: 28, height: 28, borderRadius: 7, background: 'linear-gradient(135deg, #3b82f6, #2563eb)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 13, fontWeight: 900 }}>P</span>
+                  PRINT ID CRAFT
+                </span>
+              </div>
+              <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: '12px', fontWeight: 500 }}>The Future of Institutional Identity.</p>
             </div>
-            <div className="flex flex-wrap justify-center gap-8">
-              {['Privacy Policy', 'Terms of Service'].map((item) => (
+            <div className="flex flex-wrap justify-center gap-10">
+              {['Privacy Policy', 'Terms of Service', 'Support'].map((item) => (
                 <a 
                   key={item} 
                   href="#" 
-                  className="font-medium transition-colors duration-200"
-                  style={{ color: 'rgba(255,255,255,0.55)', fontSize: '13px' }}
+                  className="font-semibold transition-all duration-200"
+                  style={{ color: 'rgba(255,255,255,0.45)', fontSize: '13px', letterSpacing: '0.01em' }}
                   onMouseEnter={(e) => (e.target as HTMLElement).style.color = 'rgba(255,255,255,1)'}
-                  onMouseLeave={(e) => (e.target as HTMLElement).style.color = 'rgba(255,255,255,0.55)'}
+                  onMouseLeave={(e) => (e.target as HTMLElement).style.color = 'rgba(255,255,255,0.45)'}
                 >
                   {item}
                 </a>
               ))}
             </div>
-            <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: '13px' }}>
-              © {new Date().getFullYear()} Print ID Craft. All rights reserved.
+            <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: '12px', fontWeight: 500, fontFamily: 'Inter, sans-serif' }}>
+              © {new Date().getFullYear()} Print ID Craft.
             </div>
           </div>
         </div>
