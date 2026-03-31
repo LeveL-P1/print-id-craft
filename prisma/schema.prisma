@@ -102,7 +102,7 @@ model Student {
   @@index([schoolId, status])
   @@index([schoolId, classId])
   @@index([schoolId, classId, status])
-  @@index([schoolId, submittedAt(sort: Desc)])
+  @@index([schoolId, submittedAt])
   @@index([schoolId, serialNumber])
   @@index([classId])
   @@index([status])
