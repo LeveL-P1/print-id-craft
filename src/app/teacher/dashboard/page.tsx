@@ -2,6 +2,10 @@
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { useSession, signOut } from "next-auth/react"
 import IDCardPreview from "@/components/IDCardPreview"
+import dynamic from "next/dynamic"
+import { toast } from "sonner"
+
+const JpgTemplateMapper = dynamic(() => import("@/components/JpgTemplateMapper"), { ssr: false })
 
 type StudentData = {
   id: string
@@ -51,13 +55,17 @@ export default function TeacherDashboard() {
   const [templateData, setTemplateData] = useState<any>(null)
 
   // Sub-teacher management
-  const [activeTab, setActiveTab] = useState<"overview" | "students" | "sub-teachers">("overview")
+  const [activeTab, setActiveTab] = useState<"overview" | "students" | "sub-teachers" | "template">("overview")
   const [subTeachers, setSubTeachers] = useState<SubTeacher[]>([])
   const [showAddTeacher, setShowAddTeacher] = useState(false)
   const [newTeacherName, setNewTeacherName] = useState("")
   const [newTeacherEmail, setNewTeacherEmail] = useState("")
   const [newTeacherPassword, setNewTeacherPassword] = useState("")
   const [newTeacherClassId, setNewTeacherClassId] = useState("")
+
+  // Hydration safety
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
   const [addingTeacher, setAddingTeacher] = useState(false)
 
   // Teacher comment for student
@@ -69,6 +77,10 @@ export default function TeacherDashboard() {
   const [editingStudent, setEditingStudent] = useState<StudentData | null>(null)
   const [editFormData, setEditFormData] = useState<Record<string, string>>({})
   const [savingEdit, setSavingEdit] = useState(false)
+
+  // Add class state
+  const [newClassName, setNewClassName] = useState("")
+  const [addingClass, setAddingClass] = useState(false)
 
   const fetchData = useCallback(async () => {
     try {
@@ -222,6 +234,30 @@ export default function TeacherDashboard() {
     setSavingEdit(false)
   }
 
+  const handleAddClass = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newClassName.trim()) return
+    setAddingClass(true)
+    try {
+      const res = await fetch(`/api/schools/${getSchoolId()}/classes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newClassName.trim() }),
+      })
+      if (res.ok) {
+        setNewClassName("")
+        toast.success("Class added successfully")
+        fetchData()
+      } else {
+        toast.error("Failed to add class")
+      }
+    } catch (err) {
+      toast.error("An error occurred")
+    } finally {
+      setAddingClass(false)
+    }
+  }
+
   const getSchoolId = () => session?.user?.schoolId || ""
 
   const filtered = useMemo(() => {
@@ -264,7 +300,7 @@ export default function TeacherDashboard() {
 
         {/* Tabs */}
         <div style={{ display: 'flex', borderBottom: '1px solid #e2e8f0', marginBottom: 24, gap: 0 }}>
-          {(["overview", "students", ...(isMain ? ["sub-teachers"] : [])] as const).map(t => (
+          {(["overview", "students", ...(isMain ? ["sub-teachers", "template"] : [])] as const).map(t => (
             <button
               key={t}
               onClick={() => setActiveTab(t as any)}
@@ -280,7 +316,7 @@ export default function TeacherDashboard() {
                 textTransform: 'capitalize',
               }}
             >
-              {t === 'sub-teachers' ? '👩‍🏫 Sub-Teachers' : t === 'overview' ? '📊 Overview' : '🎓 Students'}
+              {t === 'sub-teachers' ? '👩‍🏫 Sub-Teachers' : t === 'template' ? '🎨 ID Template' : t === 'overview' ? '📊 Overview' : '🎓 Students'}
             </button>
           ))}
         </div>
@@ -322,14 +358,36 @@ export default function TeacherDashboard() {
             )}
 
             {/* Class Form Links */}
-            {data?.classes && data.classes.length > 0 && (
-              <div style={{ background: 'white', borderRadius: 12, padding: 16, marginBottom: 24, border: '1px solid #e2e8f0' }}>
-                <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 12 }}>📋 Class Form Links — Share with Students</h3>
+            <div style={{ background: 'white', borderRadius: 12, padding: 16, marginBottom: 24, border: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>📋 Class Form Links — Share with Students</h3>
+                {isMain && (
+                  <form onSubmit={handleAddClass} style={{ display: 'flex', gap: 8 }}>
+                    <input 
+                      type="text" 
+                      value={newClassName} 
+                      onChange={e => setNewClassName(e.target.value)} 
+                      placeholder="New Class Name" 
+                      style={{ padding: '6px 12px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 13 }}
+                      required
+                    />
+                    <button type="submit" disabled={addingClass} className="btn btn-primary" style={{ padding: '6px 12px', fontSize: 13 }}>
+                      {addingClass ? "..." : "+ Add Class"}
+                    </button>
+                  </form>
+                )}
+              </div>
+              
+              {(!data?.classes || data.classes.length === 0) ? (
+                <div style={{ padding: 20, textAlign: 'center', color: '#94a3b8', fontSize: 14 }}>
+                  No classes added yet. {isMain && "Add a class to get started!"}
+                </div>
+              ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {data.classes.map((c: any) => {
                     const linkToken = c.linkToken
                     if (!linkToken) return null
-                    const url = `${typeof window !== 'undefined' ? window.location.origin : ''}/submit/${linkToken}`
+                    const url = mounted ? `${window.location.origin}/submit/${linkToken}` : `/submit/${linkToken}`
                     const assignedTeacher = c.teachers?.find((t: any) => !t.isMainTeacher)
                     return (
                       <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#f8fafc', borderRadius: 10, flexWrap: 'wrap', border: '1px solid #f1f5f9' }}>
@@ -351,8 +409,8 @@ export default function TeacherDashboard() {
                     )
                   })}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
             {/* Class Breakdown */}
             {data?.classes && data.classes.length > 0 && (
@@ -769,6 +827,59 @@ export default function TeacherDashboard() {
             </div>
           </div>
         )}
+        {/* ========== TEMPLATE TAB ========== */}
+        {activeTab === "template" && isMain && (
+          <div className="fade-in">
+            <div style={{ background: 'white', borderRadius: 16, border: '1px solid #e2e8f0', padding: 24 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+                <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>🖼️</div>
+                <div>
+                  <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>ID Card Template Setup</h3>
+                  <p style={{ fontSize: 13, color: '#94a3b8' }}>Upload your school's ID card design and place form fields correctly</p>
+                </div>
+              </div>
+
+              <JpgTemplateMapper
+                schoolId={getSchoolId()}
+                templateImageUrl={templateData?.templateImageUrl || null}
+                fieldMappings={templateData?.fieldMappings || []}
+                fieldConfig={templateData?.fieldConfig || []}
+                onSave={async (templateImageUrl, fieldMappings) => {
+                  try {
+                    const res = await fetch(`/api/schools/${getSchoolId()}/template`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ templateImageUrl, fieldMappings }),
+                    })
+                    const d = await res.json()
+                    if (d.success) {
+                      toast.success('Template saved successfully!')
+                      fetch(`/api/schools/${getSchoolId()}/template`)
+                         .then(r => r.json())
+                         .then(d => { if (d.success) setTemplateData(d.data) })
+                    } else {
+                      toast.error('Failed to save template')
+                    }
+                  } catch (err) {
+                    toast.error('Error saving template')
+                  }
+                }}
+                onUploadImage={async (file) => {
+                  const fd = new FormData()
+                  fd.append('file', file)
+                  fd.append('folder', `templates`)
+                  const res = await fetch('/api/upload', { method: 'POST', body: fd })
+                  const data = await res.json()
+                  if (!res.ok || !data.success) {
+                    throw new Error(data.error || data.detail || 'Upload failed')
+                  }
+                  return data.url
+                }}
+              />
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   )

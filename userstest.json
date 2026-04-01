@@ -1,0 +1,18 @@
+[
+  {
+    "email": "admin@printidcraft.com",
+    "role": "MANUFACTURER"
+  },
+  {
+    "email": "teacher1@xaviers.edu.in",
+    "role": "TEACHER"
+  },
+  {
+    "email": "teacher@dps.edu.in",
+    "role": "TEACHER"
+  },
+  {
+    "email": "teacher@holycross.edu.in",
+    "role": "TEACHER"
+  }
+]

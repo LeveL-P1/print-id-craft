@@ -134,7 +134,7 @@ async function main() {
 
   const teacherPw = await bcrypt.hash("Teacher@123", 12)
   await prisma.user.create({
-    data: { email: "xavier.teacher@school.com", password: teacherPw, name: "Priya Sharma", role: "TEACHER", schoolId: school1.id },
+    data: { email: "xavier.teacher@school.com", password: teacherPw, name: "Priya Sharma", role: "TEACHER", schoolId: school1.id, isMainTeacher: true },
   })
 
   // 3 classes: Grade 9-A (25), Grade 9-B (22), Grade 10-A (28) = 75 students
@@ -196,7 +196,7 @@ async function main() {
   })
 
   await prisma.user.create({
-    data: { email: "dps.teacher@school.com", password: teacherPw, name: "Amit Kumar", role: "TEACHER", schoolId: school2.id },
+    data: { email: "dps.teacher@school.com", password: teacherPw, name: "Amit Kumar", role: "TEACHER", schoolId: school2.id, isMainTeacher: true },
   })
 
   // 2 classes: Grade 6-A (30), Grade 7-A (30) — mixed statuses
@@ -248,7 +248,7 @@ async function main() {
   })
 
   await prisma.user.create({
-    data: { email: "sunrise.teacher@school.com", password: teacherPw, name: "Mary Thomas", role: "TEACHER", schoolId: school3.id },
+    data: { email: "sunrise.teacher@school.com", password: teacherPw, name: "Mary Thomas", role: "TEACHER", schoolId: school3.id, isMainTeacher: true },
   })
 
   // 1 class: Grade 5-A (20 students — 8 SUBMITTED, 12 PENDING)

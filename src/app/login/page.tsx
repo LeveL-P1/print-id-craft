@@ -24,11 +24,12 @@ function LoginForm() {
       const res = await signIn("credentials", {
         email,
         password,
+        expectedRole: role,
         redirect: false,
       })
 
       if (res?.error) {
-        toast.error("Invalid email or password")
+        toast.error(res.error || "Login failed")
         setLoading(false)
         return
       }

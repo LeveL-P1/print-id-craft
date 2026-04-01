@@ -125,6 +125,24 @@ export async function POST(req: Request) {
         })
       }
 
+      // Automatically create a Main Teacher login for the new school
+      const bcrypt = require("bcryptjs")
+      const defaultPassword = await bcrypt.hash("Teacher@123", 12)
+      
+      const existingUser = await tx.user.findUnique({ where: { email: validated.contactEmail } })
+      const teacherEmail = existingUser ? `teacher_${school.id.substring(0, 8)}@printidcraft.com` : validated.contactEmail
+      
+      await tx.user.create({
+        data: {
+          email: teacherEmail,
+          password: defaultPassword,
+          name: "Main Teacher",
+          role: "TEACHER",
+          schoolId: school.id,
+          isMainTeacher: true,
+        }
+      })
+
       return school
     })
 

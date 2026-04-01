@@ -25,6 +25,10 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           select: { classes: true, students: true, batches: true },
         },
         template: { select: { id: true, fieldConfig: true } },
+        teachers: {
+          select: { id: true, email: true, name: true, role: true, isMainTeacher: true },
+          where: { role: 'TEACHER' }
+        },
       },
     })
 

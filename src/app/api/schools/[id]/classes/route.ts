@@ -13,7 +13,10 @@ const classSchema = z.object({
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
     const session = await getServerSession(authOptions)
-    if (!session || session.user?.role !== "MANUFACTURER") {
+    const isManufacturer = session?.user?.role === "MANUFACTURER"
+    const isMainTeacher = session?.user?.role === "TEACHER" && session?.user?.isMainTeacher && session?.user?.schoolId === params.id
+
+    if (!session || (!isManufacturer && !isMainTeacher)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
@@ -39,7 +42,11 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   try {
     const session = await getServerSession(authOptions)
-    if (!session || session.user?.role !== "MANUFACTURER") {
+    
+    const isManufacturer = session?.user?.role === "MANUFACTURER"
+    const isMainTeacher = session?.user?.role === "TEACHER" && session?.user?.isMainTeacher && session?.user?.schoolId === params.id
+
+    if (!session || (!isManufacturer && !isMainTeacher)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 

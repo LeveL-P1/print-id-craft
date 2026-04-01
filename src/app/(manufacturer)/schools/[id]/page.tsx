@@ -42,6 +42,7 @@ type SchoolDetail = {
   logoUrl: string | null
   _count: { classes: number; students: number; batches: number }
   template: { id: string; fieldConfig: any } | null
+  teachers?: any[]
 }
 
 type BatchData = {
@@ -60,6 +61,8 @@ export default function SchoolDetailPage() {
   const schoolId = params.id as string
 
   const [tab, setTab] = useState<"overview"|"classes"|"students"|"template"|"generate"|"batches"|"export">("overview")
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
   const [school, setSchool] = useState<SchoolDetail | null>(null)
   const [classes, setClasses] = useState<ClassData[]>([])
   const [students, setStudents] = useState<StudentData[]>([])
@@ -694,6 +697,61 @@ export default function SchoolDetailPage() {
                 <div className="stat-card-value" style={{ color: school.template ? 'var(--green-600)' : 'var(--gray-300)' }}>
                   {school.template ? "Active" : "None"}
                 </div>
+              </div>
+            </div>
+
+            {/* Main Teacher Login Credentials */}
+            <div style={{ marginTop: 24, background: 'linear-gradient(135deg, #f8fafc, #eff6ff)', borderRadius: 16, border: '1px solid #bfdbfe', padding: 24 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: '#1e3a8a', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>🔑</span> Main Teacher Login
+              </h3>
+              <p style={{ fontSize: 13, color: '#3b82f6', marginBottom: 16 }}>
+                These are the credentials for the school administrator. Hand these over to the school so they can log in, add classes, map templates, and assign sub-teachers. Note: default password is <b>Teacher@123</b>.
+              </p>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+                {school.teachers?.filter((t: any) => t.isMainTeacher).map((t: any) => (
+                  <div key={t.id} style={{ background: 'white', borderRadius: 12, padding: 16, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                    <div style={{ marginBottom: 12 }}>
+                      <span style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>Login URL</span>
+                      <div style={{ fontSize: 14, color: '#0f172a', fontWeight: 500, display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
+                        <span>{mounted ? `${window.location.origin}/login` : '/login'}</span>
+                        <button className="btn btn-outline" style={{ padding: '4px 8px', fontSize: 11, minHeight: 0 }} onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/login`); toast.success('Copied URL') }}>Copy</button>
+                      </div>
+                    </div>
+                    
+                    <div style={{ marginBottom: 0 }}>
+                      <span style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>Email Address (Username)</span>
+                      <div style={{ fontSize: 14, color: '#0f172a', fontWeight: 500, display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
+                        <span style={{ wordBreak: 'break-all' }}>{t.email}</span>
+                        <button className="btn btn-outline" style={{ padding: '4px 8px', fontSize: 11, minHeight: 0 }} onClick={() => { navigator.clipboard.writeText(t.email); toast.success('Copied Email') }}>Copy</button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                
+                {(!school.teachers || !school.teachers.some((t: any) => t.isMainTeacher)) && (
+                  <div style={{ padding: 16, textAlign: 'center', background: 'white', borderRadius: 12, border: '1px dashed #cbd5e1' }}>
+                    <p style={{ color: '#64748b', fontSize: 13, marginBottom: 12 }}>No Main Teacher account found for this school.</p>
+                    <button 
+                      className="btn btn-primary" 
+                      onClick={async () => {
+                        if (!confirm("Generate a Main Teacher login for this school?")) return
+                        try {
+                          const res = await fetch(`/api/schools/${schoolId}/main-teacher`, { method: "POST" })
+                          if (res.ok) {
+                            toast.success("Main Teacher created!")
+                            fetchSchool()
+                          } else {
+                            toast.error("Failed to create teacher.")
+                          }
+                        } catch (err) { console.error(err) }
+                      }}
+                    >
+                      🚀 Generate Admin Credentials
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 

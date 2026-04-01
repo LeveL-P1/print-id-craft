@@ -10,6 +10,7 @@ export const authOptions: NextAuthOptions = {
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
+        expectedRole: { label: "Role", type: "text" }
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
@@ -28,6 +29,10 @@ export const authOptions: NextAuthOptions = {
 
         if (!isMatch) {
           throw new Error("Incorrect password")
+        }
+
+        if (credentials.expectedRole && user.role !== credentials.expectedRole) {
+          throw new Error("Invalid login portal for this account type")
         }
 
         return {
