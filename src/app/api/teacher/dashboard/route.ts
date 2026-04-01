@@ -17,11 +17,20 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "No school assigned" }, { status: 400 })
     }
 
+    const isMainTeacher = session.user.isMainTeacher
+    const assignedClassId = session.user.classId
+
     // Parse pagination params
     const url = new URL(req.url)
     const page = Math.max(1, parseInt(url.searchParams.get("page") || "1"))
     const limit = Math.min(200, Math.max(10, parseInt(url.searchParams.get("limit") || "100")))
     const skip = (page - 1) * limit
+
+    // Build student filter — class teacher sees only their class
+    const studentWhere: any = { schoolId }
+    if (!isMainTeacher && assignedClassId) {
+      studentWhere.classId = assignedClassId
+    }
 
     // Run all queries in parallel — use DB-level aggregation for stats
     const [school, classes, students, totalCount, statusCounts] = await Promise.all([
@@ -29,14 +38,25 @@ export async function GET(req: NextRequest) {
         where: { id: schoolId },
         select: { name: true, logoUrl: true },
       }),
+      // Main teacher sees all classes; class teacher sees only their class
       prisma.class.findMany({
-        where: { schoolId },
-        include: { _count: { select: { students: true } } },
-        orderBy: { createdAt: "desc" },
+        where: isMainTeacher
+          ? { schoolId }
+          : assignedClassId
+            ? { id: assignedClassId }
+            : { schoolId },
+        include: {
+          _count: { select: { students: true } },
+          teachers: {
+            where: { role: "TEACHER" },
+            select: { id: true, name: true, email: true, isMainTeacher: true },
+          },
+        },
+        orderBy: { name: "asc" },
       }),
       // Paginated student list — only select needed fields
       prisma.student.findMany({
-        where: { schoolId },
+        where: studentWhere,
         select: {
           id: true,
           serialNumber: true,
@@ -44,6 +64,7 @@ export async function GET(req: NextRequest) {
           formData: true,
           status: true,
           flagNote: true,
+          teacherComment: true,
           submittedAt: true,
           class: { select: { name: true, linkToken: true } },
         },
@@ -52,11 +73,11 @@ export async function GET(req: NextRequest) {
         skip,
       }),
       // Total count for pagination
-      prisma.student.count({ where: { schoolId } }),
-      // DB-level aggregation for stats — no need to load all records
+      prisma.student.count({ where: studentWhere }),
+      // DB-level aggregation for stats
       prisma.student.groupBy({
         by: ["status"],
-        where: { schoolId },
+        where: studentWhere,
         _count: { status: true },
       }),
     ])
@@ -77,13 +98,18 @@ export async function GET(req: NextRequest) {
 
     const response = NextResponse.json({
       success: true,
-      data: { school, classes, students, stats },
+      data: {
+        school,
+        classes,
+        students,
+        stats,
+        isMainTeacher,
+        assignedClassId,
+      },
       pagination: { page, limit, total: totalCount, pages: Math.ceil(totalCount / limit) },
     })
 
-    // Allow CDN/browser caching for 10s, serve stale for 30s while revalidating
     response.headers.set("Cache-Control", "private, s-maxage=10, stale-while-revalidate=30")
-
     return response
   } catch (error) {
     console.error("Teacher dashboard error:", error)

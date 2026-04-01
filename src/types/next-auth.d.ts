@@ -7,6 +7,8 @@ declare module "next-auth" {
       id: string
       role: string
       schoolId: string | null
+      classId: string | null
+      isMainTeacher: boolean
       name: string
     } & DefaultSession["user"]
   }
@@ -15,6 +17,8 @@ declare module "next-auth" {
     id: string
     role: string
     schoolId: string | null
+    classId: string | null
+    isMainTeacher: boolean
     name: string
   }
 }
@@ -24,6 +28,8 @@ declare module "next-auth/jwt" {
     id: string
     role: string
     schoolId: string | null
+    classId: string | null
+    isMainTeacher: boolean
     name: string
   }
 }

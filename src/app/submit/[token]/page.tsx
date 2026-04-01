@@ -5,6 +5,7 @@ import ReactCrop, { type Crop } from "react-image-crop"
 import "react-image-crop/dist/ReactCrop.css"
 import SharedIDCardPreview from "@/components/IDCardPreview"
 import dynamic from "next/dynamic"
+import PhotoVerifier from "@/components/PhotoVerifier"
 
 const JpgCardPreview = dynamic(() => import("@/components/JpgCardPreview"), { ssr: false })
 
@@ -112,6 +113,7 @@ export default function SubmitPage() {
   const [result, setResult] = useState<{ serialNumber: string; studentId: string } | null>(null)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [alertMsg, setAlertMsg] = useState("")
+  const [photoVerified, setPhotoVerified] = useState(false)
 
   const imgRef = useRef<HTMLImageElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -604,21 +606,23 @@ export default function SubmitPage() {
               </div>
 
               {!photoPreview ? (
-                <div
-                  onClick={() => fileRef.current?.click()}
-                  style={{ border: '2px dashed #e2e8f0', borderRadius: 16, padding: 40, textAlign: 'center', cursor: 'pointer', transition: 'border-color 0.15s' }}
-                >
-                  <div style={{ fontSize: 40, marginBottom: 12 }}>📷</div>
-                  <p style={{ fontWeight: 600, color: '#0f172a', marginBottom: 4 }}>Click to upload photo</p>
-                  <p style={{ fontSize: 12, color: '#94a3b8' }}>JPG, PNG up to 5MB</p>
-                  <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handlePhotoSelect} style={{ display: 'none' }} />
-                </div>
+                <PhotoVerifier
+                  onPhotoAccepted={(file, previewUrl) => {
+                    setPhotoFile(file)
+                    setPhotoPreview(previewUrl)
+                    setPhotoVerified(true)
+                    setCrop({ unit: "%", width: 75, height: 100, x: 12.5, y: 0 })
+                  }}
+                />
               ) : (
                 <div style={{ maxWidth: 400, margin: '0 auto' }}>
+                  <div style={{ padding: '8px 12px', background: '#dcfce7', borderRadius: 8, fontSize: 12, color: '#16a34a', fontWeight: 600, marginBottom: 12, textAlign: 'center' }}>
+                    ✅ Photo verified — Crop to passport size below
+                  </div>
                   <ReactCrop crop={crop} onChange={(_, pc) => setCrop(pc)} aspect={3 / 4}>
                     <img ref={imgRef} src={photoPreview} alt="Preview" style={{ maxWidth: '100%' }} />
                   </ReactCrop>
-                  <button onClick={() => { setPhotoPreview(""); setPhotoFile(null); setCroppedPhoto("") }} className="btn btn-outline" style={{ width: '100%', marginTop: 12 }}>
+                  <button onClick={() => { setPhotoPreview(""); setPhotoFile(null); setCroppedPhoto(""); setPhotoVerified(false) }} className="btn btn-outline" style={{ width: '100%', marginTop: 12 }}>
                     Choose Different Photo
                   </button>
                 </div>

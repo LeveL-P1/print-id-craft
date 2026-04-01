@@ -36,6 +36,8 @@ export const authOptions: NextAuthOptions = {
           name: user.name,
           role: user.role,
           schoolId: user.schoolId,
+          classId: user.classId,
+          isMainTeacher: user.isMainTeacher,
         }
       },
     }),
@@ -46,6 +48,8 @@ export const authOptions: NextAuthOptions = {
         token.id = user.id
         token.role = user.role
         token.schoolId = user.schoolId
+        token.classId = (user as any).classId
+        token.isMainTeacher = (user as any).isMainTeacher
         token.name = user.name
       }
       return token
@@ -55,6 +59,8 @@ export const authOptions: NextAuthOptions = {
         session.user.id = token.id as string
         session.user.role = token.role as string
         session.user.schoolId = (token.schoolId as string) || null
+        session.user.classId = (token.classId as string) || null
+        session.user.isMainTeacher = (token.isMainTeacher as boolean) || false
         session.user.name = token.name as string
       }
       return session

@@ -71,63 +71,7 @@ export default function LandingPage() {
 
   return (
     <>
-      {/* Fonts loaded via preload + stylesheet (non-render-blocking) */}
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      <link
-        rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600&display=swap"
-        // @ts-ignore
-        media="print"
-        onLoad={(e: any) => { e.currentTarget.media = 'all'; }}
-      />
-      <style>{`
-        .hero-card-border { border: 1px solid #E0E8F0; }
-        .gradient-primary { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); }
-        ::selection { background: rgba(59, 130, 246, 0.3); color: #1e40af; }
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: #fbf9f8; }
-        ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 999px; }
-        ::-webkit-scrollbar-thumb:hover { background: #3b82f6; }
-        /* CSS animations for SVG elements — runs on compositor thread */
-        @keyframes bubbleFloat { 0%,100% { transform: translateY(-15px); opacity: 0.2; } 50% { transform: translateY(15px); opacity: 0.5; } }
-        @keyframes subFloat { 0%,100% { transform: translateY(-6px); } 50% { transform: translateY(6px); } }
-        @keyframes propSpin { to { transform: rotate(360deg); } }
-        @keyframes fishSwim1 { 0%,100% { transform: translateX(-20px); } 50% { transform: translateX(20px); } }
-        @keyframes fishSwim2 { 0%,100% { transform: translateX(15px); } 50% { transform: translateX(-15px); } }
-        .svg-bubble { animation: bubbleFloat 3.5s ease-in-out infinite; }
-        .svg-submarine { animation: subFloat 4.5s ease-in-out infinite; }
-        .svg-propeller { animation: propSpin 2.5s linear infinite; transform-origin: 112px 240px; }
-        .svg-fish1 { animation: fishSwim1 6s ease-in-out infinite; }
-        .svg-fish2 { animation: fishSwim2 5s ease-in-out infinite 1s; }
-        @media (max-width: 768px) {
-          .landing-nav-links { display: none !important; }
-          .landing-mobile-toggle { display: flex !important; }
-          .landing-hero-grid { grid-template-columns: 1fr !important; }
-          .landing-hero-main { padding: 2rem 1.5rem !important; min-height: 360px !important; }
-          .landing-hero-main h1 { font-size: 2rem !important; line-height: 1.2 !important; }
-          .landing-hero-main p { font-size: 1rem !important; }
-          .landing-hero-cards { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 12px !important; }
-          .landing-hero-card-full { grid-column: span 2 !important; }
-          .landing-partnership-grid { grid-template-columns: 1fr !important; gap: 2rem !important; }
-          .landing-footer-inner h2 { font-size: 1.75rem !important; }
-          .landing-footer-bottom { flex-direction: column !important; gap: 1rem !important; text-align: center !important; }
-          .landing-section { padding: 0 1rem !important; }
-          .landing-nav-inner { padding: 0 1rem !important; }
-          .landing-footer-inner { padding: 3rem 1.5rem !important; }
-          .landing-stats-row { flex-direction: column !important; gap: 1.5rem !important; padding: 1.5rem 0 !important; }
-          .landing-stat-item { border-right: none !important; border-bottom: 1px solid rgba(224,232,240,0.5) !important; padding-bottom: 1.5rem !important; }
-          .landing-stat-item:last-child { border-bottom: none !important; padding-bottom: 0 !important; }
-        }
-        @media (max-width: 480px) {
-          .landing-hero-main h1 { font-size: 1.625rem !important; }
-          .landing-hero-cards { grid-template-columns: 1fr !important; }
-          .landing-hero-card-full { grid-column: span 1 !important; }
-          .landing-footer-inner h2 { font-size: 1.5rem !important; }
-        }
-      `}</style>
-
-      <div className="relative min-h-screen" style={{ fontFamily: "'Poppins', sans-serif", backgroundColor: '#ffffff', color: '#1b1c1c' }}>
+      <div className="landing-page relative min-h-screen" style={{ fontFamily: "var(--font-poppins), 'Poppins', sans-serif", backgroundColor: '#ffffff', color: '#1b1c1c' }}>
 
         {/* ═══ SCROLL PROGRESS BAR ═══ */}
         <motion.div

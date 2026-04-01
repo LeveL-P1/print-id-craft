@@ -15,11 +15,15 @@ model User {
   role          Role      @default(TEACHER)
   schoolId      String?
   school        School?   @relation(fields: [schoolId], references: [id])
+  classId       String?
+  class         Class?    @relation(fields: [classId], references: [id])
+  isMainTeacher Boolean   @default(false)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   @@index([schoolId])
   @@index([role])
+  @@index([classId])
 }
 
 enum Role {
@@ -54,6 +58,7 @@ model Class {
   isActive      Boolean   @default(true)
   expiresAt     DateTime?
   students      Student[]
+  teachers      User[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -62,20 +67,23 @@ model Class {
 }
 
 model Template {
-  id              String      @id @default(cuid())
-  schoolId        String      @unique
-  school          School      @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  frontLayout     Json        @default("[]")
-  backLayout      Json        @default("[]")
-  cardWidthMm     Float       @default(85.6)
-  cardHeightMm    Float       @default(54.0)
-  printDpi        Int         @default(300)
-  orientation     Orientation @default(PORTRAIT)
-  fieldConfig     Json        @default("[]")
-  templateImageUrl String?
-  fieldMappings   Json        @default("[]")
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  id                   String      @id @default(cuid())
+  schoolId             String      @unique
+  school               School      @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  frontLayout          Json        @default("[]")
+  backLayout           Json        @default("[]")
+  cardWidthMm          Float       @default(85.6)
+  cardHeightMm         Float       @default(54.0)
+  printDpi             Int         @default(300)
+  orientation          Orientation @default(PORTRAIT)
+  fieldConfig          Json        @default("[]")
+  templateImageUrl     String?
+  backTemplateImageUrl String?
+  fieldMappings        Json        @default("[]")
+  backFieldMappings    Json        @default("[]")
+  hasBackSide          Boolean     @default(false)
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
 }
 
 enum Orientation {
@@ -84,21 +92,21 @@ enum Orientation {
 }
 
 model Student {
-  id            String        @id @default(cuid())
-  schoolId      String
-  school        School        @relation(fields: [schoolId], references: [id])
-  classId       String
-  class         Class         @relation(fields: [classId], references: [id])
-  serialNumber  String        @unique
-  formData      Json
-  photoUrl      String        @default("")
-  qrCodeUrl     String?
-  status        StudentStatus @default(SUBMITTED)
-  flagNote      String?
-  submittedAt   DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  id             String        @id @default(cuid())
+  schoolId       String
+  school         School        @relation(fields: [schoolId], references: [id])
+  classId        String
+  class          Class         @relation(fields: [classId], references: [id])
+  serialNumber   String        @unique
+  formData       Json
+  photoUrl       String        @default("")
+  qrCodeUrl      String?
+  status         StudentStatus @default(SUBMITTED)
+  flagNote       String?
+  teacherComment String?
+  submittedAt    DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
-  // Compound indexes for high-load query patterns
   @@index([schoolId, status])
   @@index([schoolId, classId])
   @@index([schoolId, classId, status])

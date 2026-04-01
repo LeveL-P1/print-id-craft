@@ -19,7 +19,11 @@ export default function ManufacturerDashboard() {
   useEffect(() => {
     async function fetchDashboard() {
       try {
-        const res = await fetch("/api/schools?limit=5")
+        // Bust browser and Next.js client router cache entirely
+        const res = await fetch(`/api/schools?limit=5&_t=${Date.now()}`, {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" }
+        })
         const json = await res.json()
         if (json.success) {
           const schools = json.data

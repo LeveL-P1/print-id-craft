@@ -21,6 +21,10 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       where: { schoolId: params.id },
       include: {
         _count: { select: { students: true } },
+        teachers: {
+          where: { role: "TEACHER" },
+          select: { id: true, name: true, email: true, isMainTeacher: true },
+        },
       },
       orderBy: { createdAt: "desc" },
     })

@@ -1,42 +1,24 @@
 "use client"
 
-import { useState, useRef, Suspense } from "react"
+import { useState, Suspense } from "react"
 import { signIn } from "next-auth/react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
-
-type RoleOption = "MANUFACTURER" | "TEACHER"
 
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const isAdminMode = searchParams.get("mode") === "admin"
-  const [selectedRole, setSelectedRole] = useState<RoleOption>(isAdminMode ? "MANUFACTURER" : "TEACHER")
+
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
-  const [showAdminToggle, setShowAdminToggle] = useState(isAdminMode)
-  const logoClickCount = useRef(0)
-  const logoClickTimer = useRef<NodeJS.Timeout | null>(null)
 
-  // Hidden admin access: triple-click logo to reveal manufacturer login
-  const handleLogoClick = () => {
-    logoClickCount.current++
-    if (logoClickTimer.current) clearTimeout(logoClickTimer.current)
-    logoClickTimer.current = setTimeout(() => { logoClickCount.current = 0 }, 600)
-    if (logoClickCount.current >= 3) {
-      setShowAdminToggle(true)
-      setSelectedRole("MANUFACTURER")
-      logoClickCount.current = 0
-      toast.info("Admin mode enabled")
-    }
-  }
+  const role = isAdminMode ? "MANUFACTURER" : "TEACHER"
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
-    setError("")
 
     try {
       const res = await signIn("credentials", {
@@ -52,8 +34,7 @@ function LoginForm() {
       }
 
       toast.success("Login successful! Redirecting...")
-      // The middleware will redirect based on actual role from session
-      if (selectedRole === "MANUFACTURER") {
+      if (isAdminMode) {
         router.push("/dashboard")
       } else {
         router.push("/teacher/dashboard")
@@ -68,15 +49,14 @@ function LoginForm() {
 
   return (
     <div className="login-container fade-in">
-      {/* Left Panel - Dark Branding */}
+      {/* Left Panel */}
       <div className="login-left" style={{ animationDelay: '0.1s' }}>
         <div className="login-left-content">
-          <div className="login-logo" onClick={handleLogoClick} style={{ cursor: 'pointer' }}>
+          <div className="login-logo">
             <div className="login-logo-icon">P</div>
             <span className="login-logo-text">Print ID Craft</span>
           </div>
 
-          {/* ID Card Illustration */}
           <div className="login-illustration">
             <div className="id-card-mock">
               <div className="id-card-mock-inner">
@@ -98,9 +78,6 @@ function LoginForm() {
                     <rect x="14" y="2" width="8" height="8" rx="1" />
                     <rect x="2" y="14" width="8" height="8" rx="1" />
                     <rect x="14" y="14" width="4" height="4" rx="0.5" />
-                    <rect x="20" y="14" width="2" height="2" rx="0.25" />
-                    <rect x="14" y="20" width="2" height="2" rx="0.25" />
-                    <rect x="18" y="18" width="4" height="4" rx="0.5" />
                   </svg>
                 </div>
               </div>
@@ -111,68 +88,43 @@ function LoginForm() {
           </div>
 
           <p className="login-tagline">
-            School ID Card Management Portal<br />
-            <span>Secure • Simple • Smart</span>
+            {isAdminMode ? (
+              <>Manufacturer Portal<br /><span>Print • Manage • Deliver</span></>
+            ) : (
+              <>School ID Card Management Portal<br /><span>Secure • Simple • Smart</span></>
+            )}
           </p>
         </div>
       </div>
 
-      {/* Right Panel - Login Form */}
+      {/* Right Panel */}
       <div className="login-right">
         <div className="login-form-wrapper">
-          <h1 className="login-heading">Welcome back</h1>
-          <p className="login-subheading">
-            {showAdminToggle ? "Admin login — Manage schools & printing" : "Sign in to manage your school's ID cards"}
-          </p>
-
-          {/* Manufacturer toggle - hidden by default, shown via triple-click or ?mode=admin */}
-          {showAdminToggle && (
-            <div style={{ 
-              display: 'flex', gap: 8, marginBottom: 20, padding: 4, 
-              background: '#f1f5f9', borderRadius: 10 
-            }}>
-              <button
-                type="button"
-                onClick={() => setSelectedRole("TEACHER")}
-                style={{
-                  flex: 1, padding: '10px', borderRadius: 8, border: 'none', cursor: 'pointer',
-                  fontSize: 13, fontWeight: 600,
-                  background: selectedRole === "TEACHER" ? 'white' : 'transparent',
-                  color: selectedRole === "TEACHER" ? '#22c55e' : '#94a3b8',
-                  boxShadow: selectedRole === "TEACHER" ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-                  transition: 'all 0.15s',
-                }}
-              >
-                🏫 Teacher
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedRole("MANUFACTURER")}
-                style={{
-                  flex: 1, padding: '10px', borderRadius: 8, border: 'none', cursor: 'pointer',
-                  fontSize: 13, fontWeight: 600,
-                  background: selectedRole === "MANUFACTURER" ? 'white' : 'transparent',
-                  color: selectedRole === "MANUFACTURER" ? '#3b82f6' : '#94a3b8',
-                  boxShadow: selectedRole === "MANUFACTURER" ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-                  transition: 'all 0.15s',
-                }}
-              >
-                🏭 Manufacturer
-              </button>
-            </div>
+          {isAdminMode ? (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round"><path d="M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/></svg>
+                </div>
+                <h1 className="login-heading" style={{ marginBottom: 0 }}>Manufacturer Login</h1>
+              </div>
+              <p className="login-subheading">Manage schools, templates & printing</p>
+            </>
+          ) : (
+            <>
+              <h1 className="login-heading">Welcome back</h1>
+              <p className="login-subheading">Sign in to manage your school's ID cards</p>
+            </>
           )}
 
-          {/* Login Form */}
           <form onSubmit={handleLogin} className="login-form">
-            {error && <div className="login-error" role="alert">{error}</div>}
-
             <div className="form-group">
               <label htmlFor="email">Email</label>
               <input
                 id="email"
                 type="email"
                 required
-                placeholder={showAdminToggle && selectedRole === "MANUFACTURER" ? "admin@printidcraft.com" : "teacher@school.com"}
+                placeholder={isAdminMode ? "admin@printidcraft.com" : "teacher@school.com"}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={loading}
@@ -204,8 +156,8 @@ function LoginForm() {
             </button>
           </form>
 
-          {/* Photo Guidelines hint for teachers */}
-          {!showAdminToggle && (
+          {/* Photo Guidelines for teachers */}
+          {!isAdminMode && (
             <div style={{ 
               marginTop: 20, padding: '14px 16px', 
               background: '#f0fdf4', borderRadius: 10, 
@@ -216,6 +168,7 @@ function LoginForm() {
                 <li>Minimum 300 pixels width</li>
                 <li>Plain/solid background only</li>
                 <li>Passport-size format (3:4 ratio)</li>
+                <li>Front-facing photo required</li>
               </ul>
             </div>
           )}

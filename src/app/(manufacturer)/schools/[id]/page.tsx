@@ -18,6 +18,7 @@ type ClassData = {
   isActive: boolean
   expiresAt: string | null
   _count: { students: number }
+  teachers: { id: string; name: string; email: string; isMainTeacher: boolean }[]
   createdAt: string
 }
 
@@ -28,6 +29,7 @@ type StudentData = {
   formData: any
   status: string
   flagNote: string | null
+  teacherComment: string | null
   submittedAt: string
   class: { name: string }
 }
@@ -783,6 +785,7 @@ export default function SchoolDetailPage() {
                 <thead>
                   <tr>
                     <th>Class Name</th>
+                    <th>Approval Teacher</th>
                     <th>Students</th>
                     <th>Status</th>
                     <th>Link</th>
@@ -790,9 +793,21 @@ export default function SchoolDetailPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {classes.map(cls => (
+                  {classes.map(cls => {
+                    const classTeacher = cls.teachers?.find(t => !t.isMainTeacher)
+                    return (
                     <tr key={cls.id}>
                       <td style={{ fontWeight: 600 }}>{cls.name}</td>
+                      <td>
+                        {classTeacher ? (
+                          <div style={{ fontSize: 12 }}>
+                            <div style={{ fontWeight: 600, color: '#334155' }}>{classTeacher.name}</div>
+                            <div style={{ color: '#94a3b8', fontSize: 11 }}>{classTeacher.email}</div>
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 12, color: '#94a3b8' }}>—</span>
+                        )}
+                      </td>
                       <td><span className="status-badge status-submitted">{cls._count.students}</span></td>
                       <td>
                         <span className={`status-badge ${cls.isActive ? 'status-approved' : 'status-pending'}`}>
@@ -819,9 +834,10 @@ export default function SchoolDetailPage() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  )})
+                  }
                   {classes.length === 0 && (
-                    <tr><td colSpan={5} style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>No classes created yet. Add one above.</td></tr>
+                    <tr><td colSpan={6} style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>No classes created yet. Add one above.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -888,6 +904,7 @@ export default function SchoolDetailPage() {
                     <th>Mother No.</th>
                     <th>Class</th>
                     <th>Status</th>
+                    <th>Teacher Comment</th>
                     <th style={{ textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
@@ -931,6 +948,15 @@ export default function SchoolDetailPage() {
                           }`}>{s.status}</span>
                           {missingFields.length > 0 && <div style={{ fontSize: 10, color: '#ef4444', marginTop: 3, fontWeight: 600 }}>⚠ {missingFields.join(', ')}</div>}
                           {s.flagNote && <div style={{ fontSize: 11, color: '#ef4444', marginTop: 4 }}>📌 {s.flagNote}</div>}
+                        </td>
+                        <td>
+                          {s.teacherComment ? (
+                            <div style={{ fontSize: 11, color: '#334155', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: '#eff6ff', padding: '4px 8px', borderRadius: 6, border: '1px solid #bfdbfe' }} title={s.teacherComment}>
+                              💬 {s.teacherComment}
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: 11, color: '#cbd5e1' }}>—</span>
+                          )}
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>

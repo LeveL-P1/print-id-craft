@@ -9,7 +9,13 @@ export async function GET(
 ) {
   try {
     const session = await getServerSession(authOptions)
-    if (!session || session.user?.role !== "MANUFACTURER") {
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    // Both manufacturer and teacher can view students
+    const role = session.user?.role
+    if (role !== "MANUFACTURER" && role !== "TEACHER") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
@@ -20,6 +26,13 @@ export async function GET(
 
     if (!student) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 })
+    }
+
+    // Class teacher can only see students in their class
+    if (role === "TEACHER" && !session.user.isMainTeacher && session.user.classId) {
+      if (student.classId !== session.user.classId) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
+      }
     }
 
     return NextResponse.json({ success: true, data: student })
@@ -34,17 +47,35 @@ export async function PATCH(
 ) {
   try {
     const session = await getServerSession(authOptions)
-    if (!session || session.user?.role !== "MANUFACTURER") {
+    if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
+    const role = session.user?.role
+    if (role !== "MANUFACTURER" && role !== "TEACHER") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    // Check teacher access to this student
+    if (role === "TEACHER" && !session.user.isMainTeacher && session.user.classId) {
+      const student = await prisma.student.findFirst({
+        where: { id: params.sid, schoolId: params.id },
+        select: { classId: true },
+      })
+      if (!student || student.classId !== session.user.classId) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
+      }
+    }
+
     const body = await req.json()
-    const { formData, photoUrl } = body
+    const { formData, photoUrl, teacherComment, status } = body
 
     // Build update object
     const updateData: any = {}
     if (formData) updateData.formData = formData
     if (photoUrl !== undefined) updateData.photoUrl = photoUrl
+    if (teacherComment !== undefined) updateData.teacherComment = teacherComment
+    if (status) updateData.status = status
 
     const student = await prisma.student.update({
       where: { id: params.sid },

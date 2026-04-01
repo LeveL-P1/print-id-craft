@@ -46,7 +46,10 @@ export default function SchoolsPage() {
     try {
       const params = new URLSearchParams({ page: String(p), limit: "50" })
       if (search) params.set("search", search)
-      const res = await fetch(`/api/schools?${params}`)
+      const res = await fetch(`/api/schools?${params}&_t=${Date.now()}`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" }
+      })
       const data = await res.json()
       if (data.success) {
         setSchools(data.data)

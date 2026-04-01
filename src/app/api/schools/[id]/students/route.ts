@@ -44,6 +44,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           formData: true,
           status: true,
           flagNote: true,
+          teacherComment: true,
           submittedAt: true,
           class: { select: { name: true } },
         },

@@ -73,7 +73,8 @@ export async function GET(req: Request) {
       },
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
     })
-    response.headers.set("Cache-Control", "private, max-age=5, stale-while-revalidate=15")
+    // Disable aggressive browser caching to prevent "0 schools" on mobile Safari
+    response.headers.set("Cache-Control", "no-store, max-age=0")
     return response
   } catch (error) {
     console.error("GET /api/schools error:", error)
