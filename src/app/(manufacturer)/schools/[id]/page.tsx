@@ -724,32 +724,59 @@ export default function SchoolDetailPage() {
                       <span style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>Email Address (Username)</span>
                       <div style={{ fontSize: 14, color: '#0f172a', fontWeight: 500, display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
                         <span style={{ wordBreak: 'break-all' }}>{t.email}</span>
-                        <button className="btn btn-outline" style={{ padding: '4px 8px', fontSize: 11, minHeight: 0 }} onClick={() => { navigator.clipboard.writeText(t.email); toast.success('Copied Email') }}>Copy</button>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button className="btn btn-outline" style={{ padding: '4px 8px', fontSize: 11, minHeight: 0 }} onClick={() => { navigator.clipboard.writeText(t.email); toast.success('Copied Email') }}>Copy</button>
+                          <button className="btn btn-outline" style={{ padding: '4px 8px', fontSize: 11, minHeight: 0, color: '#dc2626' }} onClick={async () => {
+                            if (confirm("Reset this teacher's password to Teacher@123?")) {
+                              const res = await fetch(`/api/schools/${schoolId}/main-teacher`, { method: "POST", body: JSON.stringify({ reset: true }) })
+                              if (res.ok) toast.success("Password Reset!"); else toast.error("Failed to reset.")
+                            }
+                          }}>Reset Pw</button>
+                        </div>
                       </div>
                     </div>
                   </div>
                 ))}
                 
+                {/* Manual Add Option (Always show as an alternative or if missing) */}
                 {(!school.teachers || !school.teachers.some((t: any) => t.isMainTeacher)) && (
-                  <div style={{ padding: 16, textAlign: 'center', background: 'white', borderRadius: 12, border: '1px dashed #cbd5e1' }}>
-                    <p style={{ color: '#64748b', fontSize: 13, marginBottom: 12 }}>No Main Teacher account found for this school.</p>
-                    <button 
-                      className="btn btn-primary" 
-                      onClick={async () => {
-                        if (!confirm("Generate a Main Teacher login for this school?")) return
-                        try {
+                  <div style={{ padding: 16, background: 'white', borderRadius: 12, border: '1px dashed #cbd5e1', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <p style={{ color: '#64748b', fontSize: 13, marginBottom: 8 }}>Setup school administrator account</p>
+                      <button 
+                        className="btn btn-primary" 
+                        style={{ width: '100%' }}
+                        onClick={async () => {
+                          if (!confirm("Auto-generate a Main Teacher login?")) return
                           const res = await fetch(`/api/schools/${schoolId}/main-teacher`, { method: "POST" })
-                          if (res.ok) {
-                            toast.success("Main Teacher created!")
-                            fetchSchool()
-                          } else {
-                            toast.error("Failed to create teacher.")
-                          }
-                        } catch (err) { console.error(err) }
-                      }}
-                    >
-                      🚀 Generate Admin Credentials
-                    </button>
+                          if (res.ok) { toast.success("Created!"); fetchSchool() } else toast.error("Error")
+                        }}
+                      >
+                        🚀 Quick Auto-Generate
+                      </button>
+                    </div>
+                    
+                    <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 12 }}>
+                      <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', marginBottom: 8 }}>OR ENTER EMAIL MANUALLY</p>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <input 
+                          type="email" 
+                          id="manual-teacher-email" 
+                          placeholder="principal@school.com" 
+                          style={{ flex: 1, padding: '8px 12px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 13 }}
+                        />
+                        <button 
+                          className="btn btn-outline" 
+                          style={{ minHeight: 0, padding: '0 12px' }}
+                          onClick={async () => {
+                            const email = (document.getElementById('manual-teacher-email') as HTMLInputElement).value
+                            if (!email) return toast.error("Enter email")
+                            const res = await fetch(`/api/schools/${schoolId}/main-teacher`, { method: "POST", body: JSON.stringify({ email }) })
+                            if (res.ok) { toast.success("Created!"); fetchSchool() } else { const j = await res.json(); toast.error(j.error || "Error") }
+                          }}
+                        >Add</button>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
