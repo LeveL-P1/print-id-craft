@@ -70,7 +70,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         // ── 2. Min Width (300px) ──
         checks.push({
           passed: img.width >= 300,
-          severity: "critical",
+          severity: "warning",
           label: "Resolution",
           detail: `${img.width} × ${img.height}px`,
           tip: "Upload a higher resolution photo (at least 300px wide)"
@@ -94,7 +94,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         const tooBright = brightness.avg > 210
         checks.push({
           passed: !tooDark && !tooBright,
-          severity: tooDark ? "critical" : "warning",
+          severity: "warning",
           label: "Brightness",
           detail: tooDark ? "Too dark" : tooBright ? "Overexposed" : "Good",
           tip: tooDark ? "Take the photo in better lighting" : "Avoid direct flash or bright light"
@@ -113,7 +113,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         const blurScore = detectBlur(ctx, img.width, img.height)
         checks.push({
           passed: blurScore > 15,
-          severity: blurScore < 8 ? "critical" : "warning",
+          severity: "warning",
           label: "Sharpness",
           detail: blurScore > 25 ? "Sharp" : blurScore > 15 ? "Acceptable" : "Blurry",
           tip: "Hold the camera steady and ensure the subject is in focus"
@@ -133,7 +133,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         const faceResult = await detectFace(img)
         checks.push({
           passed: faceResult.detected,
-          severity: "critical",
+          severity: "warning",
           label: "Face Detected",
           detail: faceResult.detail,
           tip: faceResult.tip
@@ -143,7 +143,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         if (faceResult.detected) {
           checks.push({
             passed: faceResult.count === 1,
-            severity: "critical",
+            severity: "warning",
             label: "Single Face",
             detail: faceResult.count === 1 ? "1 face found" : `${faceResult.count} faces found`,
             tip: "Only the student's face should be in the photo — no group photos"
@@ -473,6 +473,88 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
   })
 
   // ──────────────────────────────────────────────────────
+  // Auto-Adjust / Auto-Crop (3:4)
+  // ──────────────────────────────────────────────────────
+  const performAutoAdjust = async (url: string): Promise<File> => {
+    return new Promise((resolve) => {
+      const img = new Image()
+      img.onload = async () => {
+        const faceResult = await detectFace(img)
+        const canvas = document.createElement("canvas")
+        const ctx = canvas.getContext("2d")
+        
+        if (!ctx) {
+           return fetch(url).then(r => r.blob()).then(b => resolve(new File([b], "photo.jpg", {type: "image/jpeg"})))
+        }
+
+        let sx = 0, sy = 0, sw = img.width, sh = img.height
+        const targetRatio = 3 / 4 // Passport aspect ratio
+
+        if (faceResult.detected && faceResult.bounds) {
+          const { x, y, width: fw, height: fh } = faceResult.bounds
+          const cx = x + fw / 2
+          const cy = y + fh / 2
+
+          // Target width: face should be ~45% of the image width
+          let targetW = fw * 2.22
+          let targetH = targetW / targetRatio
+
+          // Clamp max size to original image dimensions safely
+          if (targetW > img.width || targetH > img.height) {
+            if (img.width / img.height > targetRatio) {
+              targetH = img.height
+              targetW = targetH * targetRatio
+            } else {
+              targetW = img.width
+              targetH = targetW / targetRatio
+            }
+          }
+
+          let cropX = cx - targetW / 2
+          let cropY = cy - targetH * 0.35 // Face positioned slightly above center
+
+          // Boundary safe-checks
+          if (cropX < 0) cropX = 0
+          if (cropY < 0) cropY = 0
+          if (cropX + targetW > img.width) cropX = img.width - targetW
+          if (cropY + targetH > img.height) cropY = img.height - targetH
+
+          sx = cropX; sy = cropY; sw = targetW; sh = targetH
+        } else {
+           // Center crop to 3:4 if no face detected
+           if (img.width / img.height > targetRatio) {
+              sh = img.height
+              sw = sh * targetRatio
+              sx = (img.width - sw) / 2
+           } else {
+              sw = img.width
+              sh = sw / targetRatio
+              sy = (img.height - sh) / 2
+           }
+        }
+
+        // Output size normalized
+        canvas.width = Math.max(600, sw)
+        canvas.height = canvas.width / targetRatio
+
+        // Apply slight enhancement filters (fixes dark photos)
+        ctx.filter = 'contrast(1.05) saturate(1.05) brightness(1.05)'
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height)
+
+        canvas.toBlob((blob) => {
+          if (blob) {
+            resolve(new File([blob], "auto-adjusted.jpg", { type: "image/jpeg" }))
+          } else {
+            fetch(url).then(r => r.blob()).then(b => resolve(new File([b], "photo.jpg", {type: "image/jpeg"})))
+          }
+        }, "image/jpeg", 0.95)
+      }
+      img.onerror = () => fetch(url).then(r => r.blob()).then(b => resolve(new File([b], "photo.jpg", {type: "image/jpeg"})))
+      img.src = url
+    })
+  }
+
+  // ──────────────────────────────────────────────────────
   // File handling
   // ──────────────────────────────────────────────────────
   const handleFile = useCallback(async (file: File) => {
@@ -482,15 +564,20 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
     }
 
     setVerifying(true)
-    const url = URL.createObjectURL(file)
-    setPreview(url)
-
-    const verificationResult = await analyzePhoto(file)
+    const originalUrl = URL.createObjectURL(file)
+    
+    // Auto-adjust (crop to face + fix lighting) BEFORE analysis
+    const adjustedFile = await performAutoAdjust(originalUrl)
+    const newPreviewUrl = URL.createObjectURL(adjustedFile)
+    
+    setPreview(newPreviewUrl)
+    const verificationResult = await analyzePhoto(adjustedFile)
+    
     setResult(verificationResult)
     setVerifying(false)
 
     if (verificationResult.valid) {
-      onPhotoAccepted(file, url)
+      onPhotoAccepted(adjustedFile, newPreviewUrl)
     }
   }, [analyzePhoto, onPhotoAccepted])
 
