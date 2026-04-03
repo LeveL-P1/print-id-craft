@@ -42,27 +42,39 @@ export default function SchoolsPage() {
   const [classNames, setClassNames] = useState<string[]>([])
   const [newClassInput, setNewClassInput] = useState("")
 
-  const fetchSchools = useCallback(async (p = page, search = searchQuery) => {
-    try {
-      const params = new URLSearchParams({ page: String(p), limit: "50" })
-      if (search) params.set("search", search)
-      const res = await fetch(`/api/schools?${params}&_t=${Date.now()}`, {
-        cache: "no-store",
-        headers: { "Cache-Control": "no-cache" }
-      })
-      const data = await res.json()
-      if (data.success) {
-        setSchools(data.data)
-        if (data.stats) setStats(data.stats)
-        if (data.pagination) {
-          setTotalPages(data.pagination.totalPages)
+  const fetchSchools = useCallback(async (p = page, search = searchQuery, retries = 3) => {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const params = new URLSearchParams({ page: String(p), limit: "50" })
+        if (search) params.set("search", search)
+        const res = await fetch(`/api/schools?${params}&_t=${Date.now()}`, {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" }
+        })
+        const data = await res.json()
+        if (data.success) {
+          setSchools(data.data)
+          if (data.stats) setStats(data.stats)
+          if (data.pagination) {
+            setTotalPages(data.pagination.totalPages)
+          }
+          setLoading(false)
+          return
+        }
+        // Not successful — retry
+        if (attempt < retries) {
+          await new Promise(r => setTimeout(r, attempt * 800))
+          continue
+        }
+      } catch (err) {
+        console.error(`Schools fetch attempt ${attempt}/${retries} failed:`, err)
+        if (attempt < retries) {
+          await new Promise(r => setTimeout(r, attempt * 800))
+          continue
         }
       }
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setLoading(false)
     }
+    setLoading(false)
   }, [page, searchQuery])
 
   useEffect(() => { fetchSchools() }, [fetchSchools])

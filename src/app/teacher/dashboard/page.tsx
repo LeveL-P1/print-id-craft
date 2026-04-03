@@ -50,6 +50,7 @@ export default function TeacherDashboard() {
   const { data: session } = useSession()
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [fetchError, setFetchError] = useState(false)
   const [classFilter, setClassFilter] = useState("")
   const [statusFilter, setStatusFilter] = useState("")
   const [selectedStudent, setSelectedStudent] = useState<StudentData | null>(null)
@@ -86,24 +87,42 @@ export default function TeacherDashboard() {
   const [newClassName, setNewClassName] = useState("")
   const [addingClass, setAddingClass] = useState(false)
 
-  const fetchData = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/teacher/dashboard?_t=${Date.now()}`, {
-        cache: "no-store",
-        headers: { "Cache-Control": "no-cache" }
-      })
-      // If unauthorized (expired session), redirect to login
-      if (res.status === 401) {
-        signOut({ callbackUrl: "/login" })
-        return
+  const fetchData = useCallback(async (retries = 3) => {
+    setFetchError(false)
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const res = await fetch(`/api/teacher/dashboard?_t=${Date.now()}`, {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" }
+        })
+        // If unauthorized (expired session), redirect to login
+        if (res.status === 401) {
+          signOut({ callbackUrl: "/login" })
+          return
+        }
+        const json = await res.json()
+        if (json.success && json.data) {
+          setData(json.data)
+          setFetchError(false)
+          setLoading(false)
+          return
+        }
+        // Response wasn't successful — retry
+        if (attempt < retries) {
+          await new Promise(r => setTimeout(r, attempt * 800))
+          continue
+        }
+      } catch (err) {
+        console.error(`Dashboard fetch attempt ${attempt}/${retries} failed:`, err)
+        if (attempt < retries) {
+          await new Promise(r => setTimeout(r, attempt * 800))
+          continue
+        }
       }
-      const json = await res.json()
-      if (json.success) setData(json.data)
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setLoading(false)
     }
+    // All retries exhausted
+    setFetchError(true)
+    setLoading(false)
   }, [])
 
   const fetchSubTeachers = useCallback(async () => {
@@ -306,6 +325,19 @@ export default function TeacherDashboard() {
       <div className="teacher-container">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
           <div className="login-spinner" style={{ width: 32, height: 32, borderColor: 'rgba(59,130,246,0.2)', borderTopColor: '#3b82f6' }} />
+        </div>
+      </div>
+    </div>
+  )
+
+  if (fetchError && !data) return (
+    <div className="teacher-page">
+      <div className="teacher-container">
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', gap: 16, textAlign: 'center' }}>
+          <div style={{ fontSize: 36 }}>⚠️</div>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a' }}>Failed to load dashboard data</h2>
+          <p style={{ fontSize: 14, color: '#64748b', maxWidth: 400 }}>This can happen due to a slow connection or server timeout. Please try again.</p>
+          <button className="btn btn-primary" onClick={() => { setLoading(true); fetchData(3) }}>🔄 Retry</button>
         </div>
       </div>
     </div>

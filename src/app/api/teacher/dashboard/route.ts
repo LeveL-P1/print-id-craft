@@ -41,14 +41,22 @@ export async function GET(req: NextRequest) {
       studentWhere.classId = assignedClassId
     }
 
-    // Run all queries in parallel — use DB-level aggregation for stats
+    // Warm the DB connection to prevent cold-start pool exhaustion
+    await prisma.$connect()
+
+    // Run all queries in parallel — each wrapped individually so one failure
+    // doesn't zero-out the entire dashboard (root cause of "0 values" bug)
+    const safeQuery = async <T>(fn: () => Promise<T>, fallback: T): Promise<T> => {
+      try { return await fn() } catch (e) { console.error("Dashboard query failed:", e); return fallback }
+    }
+
     const [school, classes, students, totalCount, statusCounts, template] = await Promise.all([
-      prisma.school.findUnique({
+      safeQuery(() => prisma.school.findUnique({
         where: { id: schoolId as string },
         select: { name: true, logoUrl: true },
-      }),
+      }), null),
       // Main teacher sees all classes; class teacher sees only their class
-      prisma.class.findMany({
+      safeQuery(() => prisma.class.findMany({
         where: isMainTeacher
           ? { schoolId: schoolId as string }
           : assignedClassId
@@ -62,9 +70,9 @@ export async function GET(req: NextRequest) {
           },
         },
         orderBy: { name: "asc" },
-      }),
+      }), []),
       // Paginated student list — only select needed fields
-      prisma.student.findMany({
+      safeQuery(() => prisma.student.findMany({
         where: studentWhere,
         select: {
           id: true,
@@ -80,19 +88,19 @@ export async function GET(req: NextRequest) {
         orderBy: { submittedAt: "desc" },
         take: limit,
         skip,
-      }),
+      }), []),
       // Total count for pagination
-      prisma.student.count({ where: studentWhere }),
+      safeQuery(() => prisma.student.count({ where: studentWhere }), 0),
       // DB-level aggregation for stats
-      prisma.student.groupBy({
+      safeQuery(() => prisma.student.groupBy({
         by: ["status"],
         where: studentWhere,
         _count: { status: true },
-      }),
+      }), []),
       // Include template meta for card preview in modal
-      prisma.template.findUnique({
+      safeQuery(() => prisma.template.findUnique({
         where: { schoolId: schoolId as string }
-      })
+      }), null)
     ])
 
     // Build stats from groupBy result

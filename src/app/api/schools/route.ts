@@ -35,6 +35,13 @@ export async function GET(req: Request) {
       ]
     }
 
+    // Warm the DB connection to prevent cold-start pool exhaustion
+    await prisma.$connect()
+
+    const safeCount = async (fn: () => Promise<number>): Promise<number> => {
+      try { return await fn() } catch (e) { console.error("Stats query failed:", e); return 0 }
+    }
+
     const [schools, total, globalStats] = await Promise.all([
       prisma.school.findMany({
         where,
@@ -53,12 +60,12 @@ export async function GET(req: Request) {
         take: limit,
       }),
       prisma.school.count({ where }),
-      // DB-level aggregation for global stats (no client-side reduce)
+      // DB-level aggregation for global stats — each wrapped individually
       Promise.all([
-        prisma.school.count(),
-        prisma.student.count(),
-        prisma.class.count(),
-        prisma.printBatch.count(),
+        safeCount(() => prisma.school.count()),
+        safeCount(() => prisma.student.count()),
+        safeCount(() => prisma.class.count()),
+        safeCount(() => prisma.printBatch.count()),
       ]),
     ])
 

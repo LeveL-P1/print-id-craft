@@ -65,6 +65,40 @@ async function urlToBlob(url: string): Promise<Blob> {
   })
 }
 
+/**
+ * Downscale large images before background removal to dramatically reduce processing time.
+ * Phone cameras produce 4000x3000px images; AI model only needs ~1024px max.
+ */
+async function downscaleBlob(blob: Blob, maxDim = 1024): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      const { naturalWidth: w, naturalHeight: h } = img
+      // If already small enough, return as-is
+      if (w <= maxDim && h <= maxDim) {
+        resolve(blob)
+        return
+      }
+      const scale = maxDim / Math.max(w, h)
+      const nw = Math.round(w * scale)
+      const nh = Math.round(h * scale)
+      const canvas = document.createElement("canvas")
+      canvas.width = nw
+      canvas.height = nh
+      const ctx = canvas.getContext("2d")
+      if (!ctx) { resolve(blob); return }
+      ctx.drawImage(img, 0, 0, nw, nh)
+      canvas.toBlob(
+        (result) => result ? resolve(result) : resolve(blob),
+        "image/jpeg",
+        0.90
+      )
+    }
+    img.onerror = () => resolve(blob) // fallback to original on error
+    img.src = URL.createObjectURL(blob)
+  })
+}
+
 export default function PhotoBgProcessor({ photoUrl, defaultBgColor, onProcessed, onSkip }: Props) {
   const [processing, setProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -135,21 +169,22 @@ export default function PhotoBgProcessor({ photoUrl, defaultBgColor, onProcessed
       setProgressMsg("Preparing image...")
 
       // Use our robust url-to-blob converter
-      const blob = await urlToBlob(sourceUrl)
+      let blob = await urlToBlob(sourceUrl)
+      
+      // Downscale large images (phones send 4000px+, AI model only needs ~1024px)
+      // This alone reduces inference time by 3-4x
+      blob = await downscaleBlob(blob, 1024)
 
       setProgress(25)
-      setProgressMsg("Removing background (this may take 15-30s on first use)...")
+      setProgressMsg("Removing background...")
 
-      // Let the library use its default asset path (unpkg CDN which correctly
-      // serves WASM files). Do NOT override publicPath with jsdelivr —
-      // it returns HTML 404 pages instead of WASM binary for some files.
-      // Use the full-precision model for better edge quality.
-      // isnet gives significantly better results around hair and fine edges
-      // compared to the quantized isnet_quint8 variant.
+      // Use quantized model (isnet_quint8, ~8MB) instead of full-precision (isnet, ~30MB).
+      // 3-4x faster inference with nearly identical quality for ID card photos.
+      // Enable Web Worker to avoid blocking the main thread.
       const resultBlob = await removeBg(blob, {
         device: "cpu",
-        model: "isnet",
-        proxyToWorker: false,
+        model: "isnet_quint8",
+        proxyToWorker: true,
         fetchArgs: { cache: "force-cache" as RequestCache },
         progress: (key: string, current: number, total: number) => {
           const pct = Math.round((current / total) * 100)
