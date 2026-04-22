@@ -1,6 +1,10 @@
 "use client"
 import { useState, useCallback } from "react"
 import { toast } from "sonner"
+import dynamic from "next/dynamic"
+import { normalizeKey, resolveFieldValue, FIELD_GROUPS } from "@/lib/field-resolver"
+
+const PdfPrintSheet = dynamic(() => import("@/components/PdfPrintSheet"), { ssr: false })
 
 type FieldMapping = {
   id: string
@@ -33,48 +37,7 @@ type BatchGeneratorProps = {
   classes: { id: string; name: string; _count: { students: number } }[]
 }
 
-/**
- * Normalized key helper
- */
-const normalizeKey = (k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, "")
-
-const FIELD_GROUPS: Record<string, string[]> = {
-  name: ["fullname", "studentname", "name", "student_name", "full_name", "full name", "student name"],
-  father: ["fathername", "father", "fatherphone", "mobfather", "mob_father", "fatherno", "father name", "father mobile"],
-  mother: ["mothername", "mother", "motherphone", "motherno", "mother name", "mother mobile"],
-  mob_father: ["mobfather", "mob_father", "fatherphone", "father", "fathername", "phone", "mobile no", "contact no", "telephone"],
-  phone: ["phone", "mobile", "contact", "fatherphone", "mobfather", "contact no", "mobile no"],
-  class: ["class", "classsection", "class_section", "standard", "grade"],
-  branch: ["branch", "campus", "location"],
-  rollno: ["rollno", "roll", "srno", "no", "admissionno", "roll number"],
-  address: ["address", "addr", "location"],
-  dateofbirth: ["dob", "dateofbirth", "birthdate", "birthday"],
-  bloodgroup: ["bloodgroup", "blood group", "bg"],
-  admissionno: ["admissionno", "admno", "registrationno", "regno"],
-  photoid: ["photoid", "photo_id", "imageid", "imgid"],
-  serialnumber: ["serialnumber", "serial", "sr"],
-}
-
-function resolveFieldValue(fd: Record<string, string>, fieldKey: string): string {
-  if (fd[fieldKey] && String(fd[fieldKey]).trim()) return String(fd[fieldKey])
-  const fdNormalized: Record<string, string> = {}
-  for (const [k, v] of Object.entries(fd)) {
-    if (v) fdNormalized[normalizeKey(k)] = String(v)
-  }
-  const normKey = normalizeKey(fieldKey)
-  if (fdNormalized[normKey]) return fdNormalized[normKey]
-  const patterns = FIELD_GROUPS[normKey]
-  if (patterns) {
-    for (const p of patterns) {
-      if (fdNormalized[p]) return fdNormalized[p]
-      const simpleP = normalizeKey(p)
-      for (const [nk, nv] of Object.entries(fdNormalized)) {
-        if (nk.includes(simpleP) || simpleP.includes(nk)) return nv
-      }
-    }
-  }
-  return ""
-}
+// normalizeKey, FIELD_GROUPS, resolveFieldValue imported from @/lib/field-resolver
 
 const imageCache: Record<string, HTMLImageElement> = {}
 const dataUrlCache: Record<string, string> = {}
@@ -106,7 +69,7 @@ async function imageToDataUrl(url: string): Promise<string> {
   const ctx = canvas.getContext("2d")
   if (!ctx) return url
   ctx.drawImage(img, 0, 0)
-  const dataUrl = canvas.toDataURL("image/jpeg", 0.92)
+  const dataUrl = canvas.toDataURL("image/jpeg", 1.0)
   dataUrlCache[url] = dataUrl
   return dataUrl
 }
@@ -115,7 +78,8 @@ async function renderIdCard(
   templateImageUrl: string,
   fieldMappings: FieldMapping[],
   student: StudentRenderData,
-  outputScale: number = 1
+  outputScale: number = 1,
+  outputFormat: "jpeg" | "png" = "jpeg"
 ): Promise<string> {
   const canvas = document.createElement("canvas")
   const ctx = canvas.getContext("2d")
@@ -190,7 +154,11 @@ async function renderIdCard(
       }
     }
   }
-  return canvas.toDataURL("image/jpeg", 0.95)
+  // PNG = lossless (best for print), JPEG 1.0 = near-lossless (smaller file)
+  if (outputFormat === "png") {
+    return canvas.toDataURL("image/png")
+  }
+  return canvas.toDataURL("image/jpeg", 1.0)
 }
 
 /**
@@ -406,7 +374,7 @@ async function downloadAsCdrZip(
   setTimeout(() => URL.revokeObjectURL(url), 5000)
 }
 
-type OutputFormat = "JPEG" | "CDR"
+type OutputFormat = "JPEG" | "CDR" | "PDF_PRINT"
 
 export default function BatchGenerator({ schoolId, schoolName, classes }: BatchGeneratorProps) {
   const [selectedClassId, setSelectedClassId] = useState("")
@@ -415,6 +383,8 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
   const [generating, setGenerating] = useState(false)
   const [progress, setProgress] = useState({ current: 0, total: 0, status: "" })
   const [previewCards, setPreviewCards] = useState<{ serialNumber: string; frontDataUrl: string; backDataUrl?: string }[]>([])
+  const [pdfPrintCards, setPdfPrintCards] = useState<{ serialNumber: string; frontDataUrl: string; backDataUrl?: string }[]>([])
+  const [showPdfPrint, setShowPdfPrint] = useState(false)
 
   const handleGenerate = useCallback(async () => {
     setGenerating(true)
@@ -451,14 +421,70 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
       }
 
       // ──── CDR (SVG) PATH ────
-      if (outputFormat === "CDR") {
+      // ──── PDF PRINT PATH ────
+      if (outputFormat === "PDF_PRINT") {
+        const allCards: typeof pdfPrintCards = []
+        const CHUNK_SIZE = 4
+
+        for (let i = 0; i < students.length; i += CHUNK_SIZE) {
+          const chunk = students.slice(i, i + CHUNK_SIZE)
+          const promises = chunk.map(async (student: any) => {
+            try {
+              // Calculate dynamic scale to ensure minimum 300 DPI at card size
+              // Card width = 56mm = 2.205 inches → need 661px minimum at 300 DPI
+              const templateImg = await getCachedImage(templateImageUrl)
+              const templatePxW = templateImg?.naturalWidth || 800
+              const cardMm = 56 // target card width in mm
+              const targetDpi = 300
+              const cardInches = cardMm / 25.4
+              const neededPx = Math.ceil(cardInches * targetDpi)
+              const minScale = Math.ceil(neededPx / templatePxW)
+              const printScale = Math.max(2, minScale) // at least 2×, higher if template is small
+
+              // Render at calculated scale with PNG for lossless quality
+              const frontDataUrl = await renderIdCard(templateImageUrl, fieldMappings, student, printScale, "png")
+              let backDataUrl: string | undefined
+              if (hasBackSide && backTemplateImageUrl && backFieldMappings?.length > 0) {
+                backDataUrl = await renderIdCard(backTemplateImageUrl, backFieldMappings, student, printScale, "png")
+              }
+              return { serialNumber: student.serialNumber, frontDataUrl, backDataUrl }
+            } catch (err) {
+              console.error(`Error rendering ${student.serialNumber}`, err)
+              return null
+            }
+          })
+
+          const results = await Promise.all(promises)
+          results.forEach(c => { if (c) allCards.push(c) })
+
+          const currentProgress = Math.min(i + CHUNK_SIZE, totalCount)
+          setProgress({ current: currentProgress, total: totalCount, status: `Rendered ${currentProgress}/${totalCount} cards (high quality)...` })
+          await new Promise(r => setTimeout(r, 0))
+        }
+
+        setPreviewCards(allCards.slice(0, 8))
+        setPdfPrintCards(allCards)
+        setProgress({ current: totalCount, total: totalCount, status: "Done! Opening PDF configurator... ✅" })
+
+        // Mark as printed
+        const studentIds = students.map((s: any) => s.id)
+        await fetch(`/api/schools/${schoolId}/generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ studentIds }),
+        })
+
+        toast.success(`${allCards.length} cards rendered at print quality!`)
+        setShowPdfPrint(true)
+
+      // ──── CDR (SVG) PATH ────
+      } else if (outputFormat === "CDR") {
         // Pre-convert template images to data URLs for SVG embedding
         setProgress({ current: 0, total: totalCount, status: "Preparing templates for SVG..." })
         await imageToDataUrl(templateImageUrl)
         if (hasBackSide && backTemplateImageUrl) {
           await imageToDataUrl(backTemplateImageUrl)
         }
-
         const svgCards: { name: string; svgContent: string }[] = []
         const previewData: typeof previewCards = []
         const studentIds: string[] = []
@@ -686,14 +712,15 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
                 width: "100%",
                 height: 42,
                 padding: "0 12px",
-                border: outputFormat === "CDR" ? "1.5px solid #8b5cf6" : "1.5px solid #e2e8f0",
+                border: outputFormat === "CDR" ? "1.5px solid #8b5cf6" : outputFormat === "PDF_PRINT" ? "1.5px solid #fca5a5" : "1.5px solid #e2e8f0",
                 borderRadius: 10,
                 fontSize: 14,
-                background: outputFormat === "CDR" ? "#f5f3ff" : "white",
+                background: outputFormat === "CDR" ? "#f5f3ff" : outputFormat === "PDF_PRINT" ? "#fef2f2" : "white",
               }}
             >
               <option value="JPEG">📷 JPEG (Print-Ready Images)</option>
               <option value="CDR">📐 CDR (CorelDRAW Vector)</option>
+              <option value="PDF_PRINT">📄 PDF Print (Best for Printing)</option>
             </select>
           </div>
         </div>
@@ -716,6 +743,25 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
           </div>
         )}
 
+        {/* PDF Print format info banner */}
+        {outputFormat === "PDF_PRINT" && (
+          <div style={{
+            background: "linear-gradient(135deg, #fef2f2, #fee2e2)",
+            borderRadius: 10,
+            padding: 14,
+            marginBottom: 16,
+            border: "1px solid #fca5a5",
+            fontSize: 12,
+            color: "#991b1b",
+            lineHeight: 1.5,
+          }}>
+            <strong>📄 PDF Print — Best for Printing:</strong> Generates a high-quality PDF with
+            multiple ID cards per page. You can choose page size (A4, Letter, etc.), customize
+            card dimensions, add cut marks, and configure layout — all with <strong>zero quality loss</strong>.
+            Just like Canva&apos;s &ldquo;PDF Print&rdquo; option.
+          </div>
+        )}
+
         <button
           className="btn btn-primary"
           onClick={handleGenerate}
@@ -728,7 +774,9 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
             gap: 8,
             background: outputFormat === "CDR"
               ? "linear-gradient(135deg, #8b5cf6, #6d28d9)"
-              : undefined,
+              : outputFormat === "PDF_PRINT"
+                ? "linear-gradient(135deg, #dc2626, #b91c1c)"
+                : undefined,
           }}
         >
           {generating ? (
@@ -745,7 +793,11 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
               Generating...
             </>
           ) : (
+<<<<<<< HEAD
             <>{outputFormat === "CDR" ? "📐 Generate CorelDRAW Files (ZIP)" : "🖨️ Generate & Download ID Cards (ZIP)"}</>
+=======
+            <>{outputFormat === "CDR" ? "📐 Generate CorelDRAW Files (ZIP)" : outputFormat === "PDF_PRINT" ? "📄 Generate PDF Print" : "🖨️ Generate & Download ID Cards (ZIP)"}</>
+>>>>>>> 022f084 (Optimize performance & stability: 1. Improved DB query resilience (dashboard/schools API) 2. 3-4x faster AI background removal (quantized model + downscaling) 3. Added vector CDR export option via SVG + VBScript batch converter)
           )}
         </button>
       </div>
@@ -811,9 +863,32 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
             padding: 24,
           }}
         >
-          <h4 style={{ fontSize: 15, fontWeight: 700, color: "#0f172a", marginBottom: 16 }}>
-            Preview ({previewCards.length} of {progress.total})
-          </h4>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
+            <h4 style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>
+              Preview ({previewCards.length} of {progress.total})
+            </h4>
+            {pdfPrintCards.length > 0 && (
+              <button
+                onClick={() => setShowPdfPrint(true)}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: 10,
+                  border: "none",
+                  background: "linear-gradient(135deg, #dc2626, #b91c1c)",
+                  color: "white",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  boxShadow: "0 2px 10px rgba(220,38,38,0.3)",
+                }}
+              >
+                📄 PDF Print
+              </button>
+            )}
+          </div>
           <div
             style={{
               display: "grid",
@@ -865,6 +940,15 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
             ))}
           </div>
         </div>
+      )}
+
+      {/* PDF Print Sheet Modal */}
+      {showPdfPrint && pdfPrintCards.length > 0 && (
+        <PdfPrintSheet
+          cards={pdfPrintCards}
+          schoolName={schoolName}
+          onClose={() => setShowPdfPrint(false)}
+        />
       )}
     </div>
   )

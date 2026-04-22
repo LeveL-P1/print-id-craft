@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
-import { uploadWithRetry, getPublicUrl, ensureStorageBucket } from "@/lib/supabase"
+import { storageUpload, storagePublicUrl, ensureBucket } from "@/lib/storage"
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"]
@@ -43,7 +43,7 @@ export async function POST(req: Request) {
 
     // Ensure storage bucket exists (once per server lifecycle)
     if (!bucketInitialized) {
-      await ensureStorageBucket(BUCKET_NAME)
+      await ensureBucket(BUCKET_NAME)
       bucketInitialized = true
     }
 
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
     const buffer = Buffer.from(arrayBuffer)
 
     // Upload with retry + auto-bucket-creation
-    const { data, error } = await uploadWithRetry(BUCKET_NAME, filePath, buffer, {
+    const { data, error } = await storageUpload(BUCKET_NAME, filePath, buffer, {
       contentType: file.type,
       upsert: true,
     })
@@ -72,7 +72,7 @@ export async function POST(req: Request) {
       )
     }
 
-    const url = getPublicUrl(BUCKET_NAME, filePath)
+    const url = storagePublicUrl(BUCKET_NAME, filePath)
     return NextResponse.json({
       success: true,
       url,

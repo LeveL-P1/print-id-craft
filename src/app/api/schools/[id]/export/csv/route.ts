@@ -42,7 +42,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         let hasMore = true;
 
         while (hasMore) {
-          const students = await prisma.student.findMany({
+          const students: any[] = await prisma.student.findMany({
             where,
             include: { class: { select: { name: true } } },
             orderBy: { id: "asc" },

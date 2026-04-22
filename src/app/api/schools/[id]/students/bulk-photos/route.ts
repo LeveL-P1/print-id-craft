@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { uploadWithRetry, getPublicUrl, ensureStorageBucket } from "@/lib/supabase"
+import { storageUpload, storagePublicUrl, ensureBucket } from "@/lib/storage"
 
 export const maxDuration = 60; // Vercel function timeout config
 
@@ -99,7 +99,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
     // Ensure bucket
     if (!bucketReady) {
-      await ensureStorageBucket(BUCKET)
+      await ensureBucket(BUCKET)
       bucketReady = true
     }
 
@@ -229,7 +229,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
           const ext = filename.split(".").pop()?.toLowerCase() || "jpg"
           const filePath = `students/${schoolId}/${student.id}.${ext}`
 
-          const { error: uploadError } = await uploadWithRetry(BUCKET, filePath, buffer, {
+          const { error: uploadError } = await storageUpload(BUCKET, filePath, buffer, {
             contentType: file.type,
             upsert: true,
           })
@@ -239,7 +239,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
             return
           }
 
-          const publicUrl = getPublicUrl(BUCKET, filePath)
+          const publicUrl = storagePublicUrl(BUCKET, filePath)
 
           // Update student record
           await prisma.student.update({

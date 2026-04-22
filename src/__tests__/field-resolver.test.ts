@@ -1,0 +1,190 @@
+import { describe, it, expect } from "vitest"
+import {
+  normalizeKey,
+  resolveFieldValue,
+  FIELD_GROUPS,
+} from "@/lib/field-resolver"
+
+/* ══════════════════════════════════════════════════════════════
+ * normalizeKey — key normalization
+ * ═════════════════════════════════════════════════════════════ */
+describe("normalizeKey", () => {
+  it("lowercases uppercase characters", () => {
+    expect(normalizeKey("FullName")).toBe("fullname")
+  })
+
+  it("strips spaces", () => {
+    expect(normalizeKey("full name")).toBe("fullname")
+  })
+
+  it("strips underscores", () => {
+    expect(normalizeKey("student_name")).toBe("studentname")
+  })
+
+  it("strips hyphens", () => {
+    expect(normalizeKey("roll-number")).toBe("rollnumber")
+  })
+
+  it("strips special characters", () => {
+    expect(normalizeKey("Father's Phone #")).toBe("fathersphone")
+  })
+
+  it("handles empty string", () => {
+    expect(normalizeKey("")).toBe("")
+  })
+
+  it("preserves digits", () => {
+    expect(normalizeKey("Class10A")).toBe("class10a")
+  })
+})
+
+/* ══════════════════════════════════════════════════════════════
+ * FIELD_GROUPS — constants validation
+ * ═════════════════════════════════════════════════════════════ */
+describe("FIELD_GROUPS", () => {
+  it("has a 'name' group with common name variants", () => {
+    expect(FIELD_GROUPS.name).toEqual(
+      expect.arrayContaining(["fullname", "studentname", "name"])
+    )
+  })
+
+  it("has a 'father' group", () => {
+    expect(FIELD_GROUPS.father).toBeDefined()
+    expect(FIELD_GROUPS.father.length).toBeGreaterThan(0)
+  })
+
+  it("has a 'class' group with common class variants", () => {
+    expect(FIELD_GROUPS.class).toEqual(
+      expect.arrayContaining(["class", "standard", "grade"])
+    )
+  })
+
+  it("has a 'dateofbirth' group with dob alias", () => {
+    expect(FIELD_GROUPS.dateofbirth).toEqual(
+      expect.arrayContaining(["dob", "dateofbirth"])
+    )
+  })
+
+  it("has a 'bloodgroup' group", () => {
+    expect(FIELD_GROUPS.bloodgroup).toEqual(
+      expect.arrayContaining(["bloodgroup", "bg"])
+    )
+  })
+})
+
+/* ══════════════════════════════════════════════════════════════
+ * resolveFieldValue — 3-tier resolution
+ * ═════════════════════════════════════════════════════════════ */
+describe("resolveFieldValue", () => {
+  describe("Tier 1: Direct key match", () => {
+    it("resolves exact key match", () => {
+      const fd = { name: "Rahul", class: "10A" }
+      expect(resolveFieldValue(fd, "name")).toBe("Rahul")
+    })
+
+    it("resolves exact key with case-sensitive match", () => {
+      const fd = { FullName: "Priya", class: "5B" }
+      expect(resolveFieldValue(fd, "FullName")).toBe("Priya")
+    })
+
+    it("skips empty string values", () => {
+      const fd = { name: "", FullName: "Amit" }
+      // "name" key exists but is empty → should fall through
+      expect(resolveFieldValue(fd, "name")).toBe("Amit")
+    })
+
+    it("skips whitespace-only values", () => {
+      const fd = { name: "   ", FullName: "Sita" }
+      expect(resolveFieldValue(fd, "name")).toBe("Sita")
+    })
+  })
+
+  describe("Tier 2: Normalized key match", () => {
+    it("matches 'Father Name' when looking for 'fathername'", () => {
+      const fd = { "Father Name": "Mr. Sharma" }
+      expect(resolveFieldValue(fd, "fathername")).toBe("Mr. Sharma")
+    })
+
+    it("matches 'student_name' when looking for 'studentname'", () => {
+      const fd = { student_name: "Neha" }
+      expect(resolveFieldValue(fd, "studentname")).toBe("Neha")
+    })
+
+    it("matches case-insensitively", () => {
+      const fd = { BLOODGROUP: "O+" }
+      expect(resolveFieldValue(fd, "bloodgroup")).toBe("O+")
+    })
+  })
+
+  describe("Tier 3: Field group alias matching", () => {
+    it("resolves 'name' from 'fullname' alias", () => {
+      const fd = { fullname: "Arjun Kumar" }
+      expect(resolveFieldValue(fd, "name")).toBe("Arjun Kumar")
+    })
+
+    it("resolves 'class' from 'standard' alias", () => {
+      const fd = { standard: "8th" }
+      expect(resolveFieldValue(fd, "class")).toBe("8th")
+    })
+
+    it("resolves 'class' from 'grade' alias", () => {
+      const fd = { grade: "12" }
+      expect(resolveFieldValue(fd, "class")).toBe("12")
+    })
+
+    it("resolves 'dateofbirth' from 'dob' alias", () => {
+      const fd = { dob: "2010-05-15" }
+      expect(resolveFieldValue(fd, "dateofbirth")).toBe("2010-05-15")
+    })
+
+    it("resolves 'bloodgroup' from 'bg' alias", () => {
+      const fd = { bg: "A+" }
+      expect(resolveFieldValue(fd, "bloodgroup")).toBe("A+")
+    })
+
+    it("resolves 'rollno' from 'roll number' alias", () => {
+      const fd = { "roll number": "42" }
+      expect(resolveFieldValue(fd, "rollno")).toBe("42")
+    })
+
+    it("resolves 'admissionno' from 'regno' alias", () => {
+      const fd = { regno: "ADM001" }
+      expect(resolveFieldValue(fd, "admissionno")).toBe("ADM001")
+    })
+  })
+
+  describe("No match", () => {
+    it("returns empty string when no match found", () => {
+      const fd = { unrelated_field: "value" }
+      expect(resolveFieldValue(fd, "bloodgroup")).toBe("")
+    })
+
+    it("returns empty string for empty form data", () => {
+      expect(resolveFieldValue({}, "name")).toBe("")
+    })
+
+    it("returns empty string for unknown field key", () => {
+      const fd = { name: "Test" }
+      expect(resolveFieldValue(fd, "zzz_nonexistent_xyz")).toBe("")
+    })
+  })
+
+  describe("Edge cases", () => {
+    it("prefers direct match over normalized match", () => {
+      const fd = { name: "Direct", fullname: "Normalized" }
+      expect(resolveFieldValue(fd, "name")).toBe("Direct")
+    })
+
+    it("handles numeric values correctly", () => {
+      const fd = { rollno: "123" as string }
+      expect(resolveFieldValue(fd, "rollno")).toBe("123")
+    })
+
+    it("handles data with many fields without error", () => {
+      const fd: Record<string, string> = {}
+      for (let i = 0; i < 100; i++) fd[`field_${i}`] = `value_${i}`
+      fd["name"] = "Found"
+      expect(resolveFieldValue(fd, "name")).toBe("Found")
+    })
+  })
+})

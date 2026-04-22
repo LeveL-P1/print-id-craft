@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma, batchExecute } from "@/lib/prisma"
-import { uploadWithRetry, getPublicUrl } from "@/lib/supabase"
+import { storageUpload, storagePublicUrl } from "@/lib/storage"
 import * as XLSX from "xlsx"
 import QRCode from "qrcode"
 import { randomUUID } from "crypto"
@@ -165,7 +165,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       }
 
       // Auto-create missing classes
-      for (const className of uniqueClasses) {
+      for (const className of Array.from(uniqueClasses)) {
         try {
           const newClass = await prisma.class.create({
             data: {
@@ -287,7 +287,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     if (mode === "validate") {
       // Gather auto-created class info
       const autoClasses = classColumnHeader
-        ? [...new Set(validRows.map(r => r.className))].filter(Boolean)
+        ? Array.from(new Set(validRows.map(r => r.className))).filter(Boolean)
         : []
 
       return NextResponse.json({
@@ -420,7 +420,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         total: validRows.length,
         students: createdStudents.slice(0, 50),
         errors: importErrors.slice(0, 20),
-        classesCreated: classColumnHeader ? [...new Set(validRows.map(r => r.className))].length : 0,
+        classesCreated: classColumnHeader ? Array.from(new Set(validRows.map(r => r.className))).length : 0,
       },
     })
   } catch (error: any) {
@@ -434,11 +434,11 @@ async function generateQR(studentId: string, schoolId: string, serialNumber: str
     const qrContent = JSON.stringify({ serial: serialNumber, school: schoolId, student: studentId })
     const qrBuffer = await QRCode.toBuffer(qrContent, { width: 300, margin: 2 })
     const qrPath = `students/${schoolId}/qr/${studentId}.png`
-    await uploadWithRetry("student-photos", qrPath, qrBuffer, {
+    await storageUpload("student-photos", qrPath, qrBuffer, {
       contentType: "image/png",
       upsert: true,
     })
-    const qrUrl = getPublicUrl("student-photos", qrPath)
+    const qrUrl = storagePublicUrl("student-photos", qrPath)
     await prisma.student.update({
       where: { id: studentId },
       data: { qrCodeUrl: qrUrl },

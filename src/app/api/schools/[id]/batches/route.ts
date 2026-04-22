@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { uploadWithRetry } from "@/lib/supabase"
+import { storageUpload } from "@/lib/storage"
 
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
@@ -121,7 +121,7 @@ async function generateBatchFiles(schoolId: string, batchId: string, students: a
     const csvBuffer = Buffer.from(csvContent, "utf-8")
 
     const manifestPath = `batches/${schoolId}/${batchId}/manifest.csv`
-    await uploadWithRetry("student-photos", manifestPath, csvBuffer, {
+    await storageUpload("student-photos", manifestPath, csvBuffer, {
       contentType: "text/csv",
       upsert: true,
     })
@@ -143,7 +143,7 @@ async function generateBatchFiles(schoolId: string, batchId: string, students: a
     // Generate a minimal valid PDF for front
     const frontPdfBuffer = generateSimplePdf(students, template?.frontLayout as any[] || [], pageW, pageH, bleedPt, "front", school?.name || "")
     const frontPath = `batches/${schoolId}/${batchId}/front.pdf`
-    await uploadWithRetry("student-photos", frontPath, frontPdfBuffer, {
+    await storageUpload("student-photos", frontPath, frontPdfBuffer, {
       contentType: "application/pdf",
       upsert: true,
     })
@@ -151,7 +151,7 @@ async function generateBatchFiles(schoolId: string, batchId: string, students: a
     // 3. Generate back PDF with identical page order (SAME students array)
     const backPdfBuffer = generateSimplePdf(students, template?.backLayout as any[] || [], pageW, pageH, bleedPt, "back", school?.name || "")
     const backPath = `batches/${schoolId}/${batchId}/back.pdf`
-    await uploadWithRetry("student-photos", backPath, backPdfBuffer, {
+    await storageUpload("student-photos", backPath, backPdfBuffer, {
       contentType: "application/pdf",
       upsert: true,
     })

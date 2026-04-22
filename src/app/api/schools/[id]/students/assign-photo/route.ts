@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { uploadWithRetry, getPublicUrl, ensureStorageBucket } from "@/lib/supabase"
+import { storageUpload, storagePublicUrl, ensureBucket } from "@/lib/storage"
 
 const BUCKET = "student-photos"
 
@@ -36,7 +36,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     }
 
     // Ensure bucket exists
-    await ensureStorageBucket(BUCKET)
+    await ensureBucket(BUCKET)
 
     // Upload photo
     const arrayBuffer = await photo.arrayBuffer()
@@ -44,7 +44,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const ext = photo.name.split(".").pop()?.toLowerCase() || "jpg"
     const filePath = `students/${schoolId}/${student.id}.${ext}`
 
-    const { error: uploadError } = await uploadWithRetry(BUCKET, filePath, buffer, {
+    const { error: uploadError } = await storageUpload(BUCKET, filePath, buffer, {
       contentType: photo.type,
       upsert: true,
     })
@@ -53,7 +53,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       return NextResponse.json({ error: `Upload failed: ${uploadError.message}` }, { status: 500 })
     }
 
-    const publicUrl = getPublicUrl(BUCKET, filePath)
+    const publicUrl = storagePublicUrl(BUCKET, filePath)
 
     // Update student record
     await prisma.student.update({

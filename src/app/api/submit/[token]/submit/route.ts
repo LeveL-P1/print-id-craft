@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { z } from "zod"
 import { rateLimit, getClientIp } from "@/lib/rate-limit"
-import { uploadWithRetry, getPublicUrl } from "@/lib/supabase"
+import { storageUpload, storagePublicUrl } from "@/lib/storage"
 import QRCode from "qrcode"
 
 const submitSchema = z.object({
@@ -56,7 +56,7 @@ export async function POST(req: Request, { params }: { params: { token: string }
             { formData: { path: ["rollNo"], equals: rollNo } },
             { formData: { path: ["Roll No."], equals: rollNo } },
             { formData: { path: ["roll"], equals: rollNo } },
-          ]
+          ] as any
         },
       })
       if (existing) {
@@ -118,11 +118,11 @@ export async function POST(req: Request, { params }: { params: { token: string }
             })
             const qrBuffer = await QRCode.toBuffer(qrContent, { width: 300, margin: 2 })
             const qrPath = `students/${cls.school.id}/qr/${newStudent.id}.png`
-            await uploadWithRetry("student-photos", qrPath, qrBuffer, {
+            await storageUpload("student-photos", qrPath, qrBuffer, {
               contentType: "image/png",
               upsert: true,
             })
-            const qrUrl = getPublicUrl("student-photos", qrPath)
+            const qrUrl = storagePublicUrl("student-photos", qrPath)
 
             await tx.student.update({
               where: { id: newStudent.id },
