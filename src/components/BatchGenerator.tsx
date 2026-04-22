@@ -74,21 +74,20 @@ async function imageToDataUrl(url: string): Promise<string> {
   return dataUrl
 }
 
-// ── Fixed output: 300 DPI at 56 × 88 mm ──
-const PRINT_W = 661   // Math.round(56 / 25.4 * 300)
-const PRINT_H = 1039  // Math.round(88 / 25.4 * 300)
+// ── Print resolution limits ──
+const MIN_PRINT_W = 661   // 300 DPI minimum (56mm)
+const MAX_PRINT_W = 1500  // cap to prevent massive PDFs
 
 /**
- * Renders an ID card at a FIXED 661×1039 canvas (300 DPI, 56×88 mm).
+ * Renders an ID card at the 56:88 mm card ratio, using the template's
+ * native resolution (capped between 300-680 DPI) for maximum sharpness.
  *
- * The template is stretched to fill the entire canvas. Because field
- * positions are stored as percentages, they scale perfectly with the
- * stretch — no misalignment, no cropping, and jsPDF never needs to
- * resize the image (it already matches the 56×88 mm slot exactly).
+ * The template is stretched to fill the canvas. Because field positions
+ * are stored as percentages, they scale perfectly — no misalignment,
+ * no cropping, and jsPDF never needs to resize the image.
  *
- * Output is JPEG at 92 % quality — visually indistinguishable from
- * lossless but ~10-15× smaller, keeping the PDF under 20 MB even
- * for 100+ cards.
+ * Output is JPEG at 95% quality — virtually indistinguishable from
+ * lossless PNG but ~8-10× smaller file size.
  */
 async function renderIdCard(
   templateImageUrl: string,
@@ -98,9 +97,13 @@ async function renderIdCard(
   const templateImg = await getCachedImage(templateImageUrl)
   if (!templateImg) throw new Error("Failed to load template")
 
+  // Use template's native width (clamped) and enforce 56:88 ratio for height
+  const printW = Math.max(MIN_PRINT_W, Math.min(MAX_PRINT_W, templateImg.naturalWidth))
+  const printH = Math.round(printW * 88 / 56)
+
   const canvas = document.createElement("canvas")
-  canvas.width = PRINT_W
-  canvas.height = PRINT_H
+  canvas.width = printW
+  canvas.height = printH
   const ctx = canvas.getContext("2d")
   if (!ctx) throw new Error("Canvas context failed")
 
@@ -109,14 +112,14 @@ async function renderIdCard(
 
   // Draw template stretched to fill the card canvas.
   // The template IS the card design — stretching to 56:88 is intentional.
-  ctx.drawImage(templateImg, 0, 0, PRINT_W, PRINT_H)
+  ctx.drawImage(templateImg, 0, 0, printW, printH)
 
   // Draw all mapped fields
   for (const field of fieldMappings) {
-    const fx = (field.x / 100) * PRINT_W
-    const fy = (field.y / 100) * PRINT_H
-    const fw = (field.width / 100) * PRINT_W
-    const fh = (field.height / 100) * PRINT_H
+    const fx = (field.x / 100) * printW
+    const fy = (field.y / 100) * printH
+    const fw = (field.width / 100) * printW
+    const fh = (field.height / 100) * printH
 
     if (field.type === "photo") {
       if (student.photoUrl) {
@@ -173,8 +176,8 @@ async function renderIdCard(
     }
   }
 
-  // JPEG at 92% — excellent print quality, ~10-15× smaller than PNG
-  return canvas.toDataURL("image/jpeg", 0.92)
+  // JPEG at 95% — near-lossless, excellent for PVC print
+  return canvas.toDataURL("image/jpeg", 0.95)
 }
 
 /**
