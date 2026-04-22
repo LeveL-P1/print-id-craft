@@ -20,12 +20,14 @@ export const authOptions: NextAuthOptions = {
 
         console.log(`[AUTH] Attempting login for: ${credentials.email} (Expected Role: ${credentials.expectedRole})`)
 
+        const email = credentials.email.toLowerCase()
+
         const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
+          where: { email },
         })
 
         if (!user) {
-          console.error(`[AUTH] User not found: ${credentials.email}`)
+          console.error(`[AUTH] User not found: ${email}`)
           throw new Error("User not found")
         }
 

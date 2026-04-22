@@ -88,34 +88,19 @@ async function renderIdCard(
   const templateImg = await getCachedImage(templateImageUrl)
   if (!templateImg) throw new Error("Failed to load template")
 
-  // ── Force exact 56×88mm card aspect ratio at 300 DPI ──
-  // At 300 DPI: 56mm = 661px, 88mm = 1039px
-  const CARD_W_PX = Math.ceil((56 / 25.4) * 300) // 661
-  const CARD_H_PX = Math.ceil((88 / 25.4) * 300) // 1039
-  const w = CARD_W_PX * outputScale
-  const h = CARD_H_PX * outputScale
+  // ── Use the template's natural dimensions ──
+  // Field positions (x, y, width, height) are stored as percentages of the
+  // original template image. We MUST render at the same aspect ratio,
+  // otherwise all fields will be misaligned.
+  const w = templateImg.naturalWidth * outputScale
+  const h = templateImg.naturalHeight * outputScale
   canvas.width = w
   canvas.height = h
 
-  // Draw template with cover-fit (fill entire card, crop overflow)
-  const imgW = templateImg.naturalWidth
-  const imgH = templateImg.naturalHeight
-  const imgAspect = imgW / imgH
-  const cardAspect = w / h
-  let sx = 0, sy = 0, sw = imgW, sh = imgH
-  if (imgAspect > cardAspect) {
-    // Image is wider — crop sides
-    sw = imgH * cardAspect
-    sx = (imgW - sw) / 2
-  } else {
-    // Image is taller — crop top/bottom
-    sh = imgW / cardAspect
-    sy = (imgH - sh) / 2
-  }
   // Use imageSmoothingQuality for best interpolation
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = "high"
-  ctx.drawImage(templateImg, sx, sy, sw, sh, 0, 0, w, h)
+  ctx.drawImage(templateImg, 0, 0, w, h)
 
   for (const field of fieldMappings) {
     const fx = (field.x / 100) * w
@@ -452,9 +437,9 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
           const chunk = students.slice(i, i + CHUNK_SIZE)
           const promises = chunk.map(async (student: any) => {
             try {
-              // renderIdCard now enforces 300 DPI at base scale (661×1039px)
-              // Scale=1 = 300 DPI, Scale=2 = 600 DPI (ultra-sharp for print)
-              const printScale = 1 // 300 DPI is print-standard quality
+              // renderIdCard uses the template's native resolution
+              // Scale=1 = template dimensions, Scale=2 = 2x for ultra-sharp print
+              const printScale = 1
 
               // Render as PNG (lossless) — JPEG creates artifacts on text/edges
               // which is unacceptable for printed ID cards. The Blob-based PDF
