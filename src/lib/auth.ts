@@ -14,25 +14,38 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
+          console.error("[AUTH] Missing credentials")
           throw new Error("Invalid credentials")
         }
+
+        console.log(`[AUTH] Attempting login for: ${credentials.email} (Expected Role: ${credentials.expectedRole})`)
 
         const user = await prisma.user.findUnique({
           where: { email: credentials.email },
         })
 
-        if (!user || !user.password) {
+        if (!user) {
+          console.error(`[AUTH] User not found: ${credentials.email}`)
+          throw new Error("User not found")
+        }
+
+        if (!user.password) {
+          console.error(`[AUTH] User has no password set: ${credentials.email}`)
           throw new Error("User not found")
         }
 
         const isMatch = await bcrypt.compare(credentials.password, user.password)
 
         if (!isMatch) {
+          console.error(`[AUTH] Incorrect password for: ${credentials.email}`)
           throw new Error("Incorrect password")
         }
 
+        console.log(`[AUTH] User authenticated: ${credentials.email} (Actual Role: ${user.role})`)
+
         // Strict role validation — block cross-portal login
         if (credentials.expectedRole && user.role !== credentials.expectedRole) {
+          console.error(`[AUTH] Role mismatch. Expected: ${credentials.expectedRole}, Actual: ${user.role}`)
           if (credentials.expectedRole === "TEACHER" && user.role === "MANUFACTURER") {
             throw new Error("This is the Teacher Login portal. Manufacturer accounts cannot login here.")
           }
@@ -41,6 +54,8 @@ export const authOptions: NextAuthOptions = {
           }
           throw new Error("Invalid login portal for this account type")
         }
+
+        console.log(`[AUTH] Login successful for: ${credentials.email}`)
 
         return {
           id: user.id,
