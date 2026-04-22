@@ -54,7 +54,7 @@ export default function PdfPrintSheet({ cards, schoolName, onClose }: PdfPrintSh
   const [addCutMarks, setAddCutMarks] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [printSide, setPrintSide] = useState<"both" | "front" | "back">("both")
-  const [imageFormat, setImageFormat] = useState<"jpeg" | "png">("jpeg") // JPEG for optimal size/quality
+  const [imageFormat, setImageFormat] = useState<"jpeg" | "png">("png") // PNG for lossless print
   const [pvcMode, setPvcMode] = useState(false) // PVC precision print mode
 
   const previewRef = useRef<HTMLCanvasElement>(null)

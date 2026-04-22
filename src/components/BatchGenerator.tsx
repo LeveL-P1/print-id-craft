@@ -176,8 +176,8 @@ async function renderIdCard(
     }
   }
 
-  // JPEG at 95% — near-lossless, excellent for PVC print
-  return canvas.toDataURL("image/jpeg", 0.95)
+  // PNG lossless — maximum quality for PVC card printing
+  return canvas.toDataURL("image/png")
 }
 
 /**
