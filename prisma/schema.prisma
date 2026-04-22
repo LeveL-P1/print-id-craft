@@ -8,20 +8,142 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  password      String
-  name          String    @default("")
-  role          Role      @default(TEACHER)
-  schoolId      String?
-  school        School?   @relation(fields: [schoolId], references: [id])
-  classId       String?
-  class         Class?    @relation(fields: [classId], references: [id])
-  isMainTeacher Boolean   @default(false)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id           String   @id @default(cuid())
+  email        String   @unique
+  password     String
+  name         String   @default("")
+  role         Role     @default(TEACHER)
+  schoolId     String?
+  school       School?  @relation(fields: [schoolId], references: [id])
+  classId      String?
+  class        Class?   @relation(fields: [classId], references: [id])
+  isMainTeacher Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@index([schoolId])
   @@index([role])
   @@index([classId])
+}
+
+enum Role {
+  MANUFACTURER
+  TEACHER
+}
+
+model School {
+  id           String       @id @default(cuid())
+  name         String
+  address      String?
+  contactEmail String       @default("")
+  logoUrl      String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  template     Template?
+  students     Student[]
+  classes      Class[]
+  teachers     User[]
+  batches      PrintBatch[]
+
+  @@index([name])
+  @@index([createdAt])
+}
+
+model Class {
+  id        String   @id @default(cuid())
+  name      String
+  schoolId  String
+  school    School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  linkToken String   @unique @default(cuid())
+  isActive  Boolean  @default(true)
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  students  Student[]
+  teachers  User[]
+
+  @@index([schoolId])
+  @@index([schoolId, name])
+}
+
+model Template {
+  id                   String      @id @default(cuid())
+  schoolId             String      @unique
+  school               School      @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  frontLayout          Json        @default("[]")
+  backLayout           Json        @default("[]")
+  cardWidthMm          Float       @default(85.6)
+  cardHeightMm         Float       @default(54.0)
+  printDpi             Int         @default(300)
+  orientation          Orientation @default(PORTRAIT)
+  fieldConfig          Json        @default("[]")
+  templateImageUrl     String?
+  backTemplateImageUrl String?
+  fieldMappings        Json        @default("[]")
+  backFieldMappings    Json        @default("[]")
+  hasBackSide          Boolean     @default(false)
+  photoBgColor         String      @default("#FFFFFF")
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+}
+
+enum Orientation {
+  PORTRAIT
+  LANDSCAPE
+}
+
+model Student {
+  id            String        @id @default(cuid())
+  schoolId      String
+  school        School        @relation(fields: [schoolId], references: [id])
+  classId       String
+  class         Class         @relation(fields: [classId], references: [id])
+  serialNumber  String        @unique
+  formData      Json
+  photoUrl      String        @default("")
+  qrCodeUrl     String?
+  status        StudentStatus @default(SUBMITTED)
+  flagNote      String?
+  teacherComment String?
+  submittedAt   DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([schoolId, status])
+  @@index([schoolId, classId])
+  @@index([schoolId, classId, status])
+  @@index([schoolId, submittedAt])
+  @@index([schoolId, serialNumber])
+  @@index([classId])
+  @@index([status])
+}
+
+enum StudentStatus {
+  PENDING
+  SUBMITTED
+  FLAGGED
+  APPROVED
+  PRINTED
+}
+
+model PrintBatch {
+  id           String      @id @default(cuid())
+  schoolId     String
+  school       School      @relation(fields: [schoolId], references: [id])
+  studentCount Int         @default(0)
+  frontPdfPath String?
+  backPdfPath  String?
+  manifestPath String?
+  status       BatchStatus @default(PENDING)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, status])
+}
+
+enum BatchStatus {
+  PENDING
+  GENERATING
+  READY
+  DOWNLOADED
 }
