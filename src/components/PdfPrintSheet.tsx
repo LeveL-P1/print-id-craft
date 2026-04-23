@@ -1,5 +1,8 @@
 "use client"
 import { useState, useMemo, useCallback, useEffect, useRef } from "react"
+
+/* Mobile tab for Settings vs Preview */
+type MobileTab = "settings" | "preview"
 import { toast } from "sonner"
 import {
   calculateGridLayout,
@@ -56,6 +59,16 @@ export default function PdfPrintSheet({ cards, schoolName, onClose }: PdfPrintSh
   const [printSide, setPrintSide] = useState<"both" | "front" | "back">("both")
   const [imageFormat, setImageFormat] = useState<"jpeg" | "png">("png") // PNG for lossless print
   const [pvcMode, setPvcMode] = useState(false) // PVC precision print mode
+  const [mobileTab, setMobileTab] = useState<MobileTab>("settings")
+  const [isMobile, setIsMobile] = useState(false)
+
+  /* Detect mobile viewport */
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth <= 768)
+    check()
+    window.addEventListener("resize", check)
+    return () => window.removeEventListener("resize", check)
+  }, [])
 
   const previewRef = useRef<HTMLCanvasElement>(null)
 
@@ -86,7 +99,7 @@ export default function PdfPrintSheet({ cards, schoolName, onClose }: PdfPrintSh
     if (!ctx) return
 
     const scale = 2 // retina
-    const previewMaxW = 360
+    const previewMaxW = isMobile ? Math.min(window.innerWidth - 56, 320) : 360
     const pageAspect = pageH / pageW
     const cWidth = previewMaxW
     const cHeight = Math.round(previewMaxW * pageAspect)
@@ -182,7 +195,7 @@ export default function PdfPrintSheet({ cards, schoolName, onClose }: PdfPrintSh
       cWidth / 2,
       cHeight - 4
     )
-  }, [layout, cards, pageW, pageH, cardW, cardH, marginMm, gapMm, addCutMarks, pvcMode])
+  }, [layout, cards, pageW, pageH, cardW, cardH, marginMm, gapMm, addCutMarks, pvcMode, isMobile])
 
   /* ── PDF Generation ── */
   const generatePdf = useCallback(async () => {
@@ -357,6 +370,7 @@ export default function PdfPrintSheet({ cards, schoolName, onClose }: PdfPrintSh
   /* ─── UI ─── */
   return (
     <div
+      className="pdf-modal-overlay"
       style={{
         position: "fixed",
         inset: 0,
@@ -370,6 +384,7 @@ export default function PdfPrintSheet({ cards, schoolName, onClose }: PdfPrintSh
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div
+        className="pdf-modal-container"
         style={{
           background: "white",
           borderRadius: 20,
@@ -426,10 +441,28 @@ export default function PdfPrintSheet({ cards, schoolName, onClose }: PdfPrintSh
           </button>
         </div>
 
+        {/* Mobile Tab Switcher */}
+        {isMobile && (
+          <div className="pdf-mobile-tabs">
+            <button
+              className={`pdf-mobile-tab ${mobileTab === "settings" ? "pdf-mobile-tab-active" : ""}`}
+              onClick={() => setMobileTab("settings")}
+            >
+              ⚙️ Settings
+            </button>
+            <button
+              className={`pdf-mobile-tab ${mobileTab === "preview" ? "pdf-mobile-tab-active" : ""}`}
+              onClick={() => setMobileTab("preview")}
+            >
+              👁️ Preview
+            </button>
+          </div>
+        )}
+
         {/* Body */}
         <div className="pdf-modal-body" style={{ flex: 1, overflow: "auto", padding: 24, display: "flex", gap: 24, flexWrap: "wrap" }}>
           {/* Left – Settings */}
-          <div style={{ flex: "1 1 340px", minWidth: 280, display: "flex", flexDirection: "column", gap: 16 }}>
+          <div className={`pdf-settings-panel ${isMobile && mobileTab !== "settings" ? "pdf-panel-hidden" : ""}`} style={{ flex: "1 1 340px", minWidth: 280, display: "flex", flexDirection: "column", gap: 16 }}>
 
             {/* Quick Presets */}
             <SettingsSection title="⚡ Quick Presets" subtitle="One-click configurations for common layouts">
@@ -705,7 +738,7 @@ export default function PdfPrintSheet({ cards, schoolName, onClose }: PdfPrintSh
           </div>
 
           {/* Right – Preview & Summary */}
-          <div style={{ flex: "1 1 300px", minWidth: 260, display: "flex", flexDirection: "column", gap: 16 }}>
+          <div className={`pdf-preview-panel ${isMobile && mobileTab !== "preview" ? "pdf-panel-hidden" : ""}`} style={{ flex: "1 1 300px", minWidth: 260, display: "flex", flexDirection: "column", gap: 16 }}>
             {/* Live preview */}
             <div style={{
               background: "#f8fafc",

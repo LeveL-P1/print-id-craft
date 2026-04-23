@@ -1543,34 +1543,139 @@ html {
   }
 }
 
+/* --- PDF Print Modal: Mobile Tab Switcher --- */
+.pdf-mobile-tabs {
+  display: none;
+}
+
+.pdf-panel-hidden {
+  display: none !important;
+}
+
 /* --- PDF Print Modal: Mobile optimized --- */
 @media (max-width: 768px) {
   /* Force PDF modal to be full-screen on mobile */
-  .pdf-modal-container,
-  [style*="min(95vw, 920px)"] {
+  .pdf-modal-container {
     width: 100vw !important;
+    max-width: 100vw !important;
     max-height: 100vh !important;
     border-radius: 0 !important;
     height: 100vh !important;
+  }
+
+  /* PDF modal header: compact on mobile */
+  .pdf-modal-container > div:first-child {
+    padding: 14px 16px !important;
+  }
+  .pdf-modal-container > div:first-child h3 {
+    font-size: 15px !important;
+  }
+  .pdf-modal-container > div:first-child p {
+    font-size: 11px !important;
+  }
+
+  /* Mobile Tab Switcher */
+  .pdf-mobile-tabs {
+    display: flex !important;
+    border-bottom: 1px solid #e2e8f0;
+    background: #f8fafc;
+    padding: 0;
+    gap: 0;
+  }
+  .pdf-mobile-tab {
+    flex: 1;
+    padding: 12px 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    color: #94a3b8 !important;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    min-height: 48px !important;
+  }
+  .pdf-mobile-tab-active {
+    color: #3b82f6 !important;
+    background: white !important;
+  }
+  .pdf-mobile-tab-active::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    left: 10%;
+    width: 80%;
+    height: 3px;
+    background: #3b82f6;
+    border-radius: 3px 3px 0 0;
   }
   
   /* PDF modal body: single column stack */
   .pdf-modal-body {
     flex-direction: column !important;
-    padding: 16px !important;
-    gap: 16px !important;
+    padding: 12px !important;
+    gap: 12px !important;
   }
-  
-  /* PDF modal footer: stack buttons */
-  .pdf-modal-footer {
-    flex-direction: column !important;
-    gap: 8px !important;
-    padding: 12px 16px !important;
-  }
-  .pdf-modal-footer .btn,
-  .pdf-modal-footer button {
+
+  /* Settings & Preview panels: full width */
+  .pdf-settings-panel,
+  .pdf-preview-panel {
+    flex: 1 1 100% !important;
+    min-width: 0 !important;
     width: 100% !important;
+  }
+
+  /* Preview canvas: responsive */
+  .pdf-preview-panel canvas {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
+  /* Larger touch targets for preset buttons */
+  .pdf-settings-panel button {
+    min-height: 44px;
+  }
+
+  /* Orientation toggle: bigger touch target */
+  .pdf-settings-panel div[style*="borderRadius: 8"] button {
+    padding: 10px 16px !important;
+    font-size: 13px !important;
+    min-height: 44px !important;
+  }
+
+  /* Select dropdowns: taller */
+  .pdf-settings-panel select {
+    min-height: 44px !important;
+    font-size: 15px !important;
+  }
+
+  /* Range inputs: taller track */
+  .pdf-settings-panel input[type="range"] {
+    height: 28px !important;
+  }
+
+  /* PDF modal footer: horizontal on mobile with stacked fallback */
+  .pdf-modal-footer {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    padding: 12px !important;
+  }
+  .pdf-modal-footer > div:first-child {
+    width: 100% !important;
+    font-size: 11px !important;
+    text-align: center;
+  }
+  .pdf-modal-footer > div:last-child {
+    width: 100% !important;
+    display: flex !important;
+    gap: 8px !important;
+  }
+  .pdf-modal-footer button {
+    flex: 1 !important;
     justify-content: center !important;
+    min-height: 48px !important;
+    font-size: 13px !important;
   }
 }
 
