@@ -95,9 +95,12 @@ async function renderIdCard(
   const templateImg = await getCachedImage(templateImageUrl)
   if (!templateImg) throw new Error("Failed to load template")
 
-  // Use template's FULL native width (min 300 DPI) and enforce 56:88 ratio
+  // Use template's FULL native resolution (min 300 DPI).
+  // Preserve the template's native aspect ratio — works for both
+  // portrait (56×88) and landscape (88×56) card designs.
   const printW = Math.max(MIN_PRINT_W, templateImg.naturalWidth)
-  const printH = Math.round(printW * 88 / 56)
+  const templateAspect = templateImg.naturalHeight / templateImg.naturalWidth
+  const printH = Math.round(printW * templateAspect)
 
   const canvas = document.createElement("canvas")
   canvas.width = printW

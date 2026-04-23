@@ -19,6 +19,13 @@ export const metadata: Metadata = {
     "Professional ID card printing SaaS for manufacturers. Manage multiple schools, collect student data via smart links, design ID card templates, and generate print-ready PDFs with guaranteed front-back matching.",
 }
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+}
+
 export default function RootLayout({
   children,
 }: Readonly<{

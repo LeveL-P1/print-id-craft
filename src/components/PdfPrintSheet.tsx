@@ -43,13 +43,13 @@ export default function PdfPrintSheet({ cards, schoolName, onClose }: PdfPrintSh
   const [customPageW, setCustomPageW] = useState(210)
   const [customPageH, setCustomPageH] = useState(297)
 
-  const [cardPresetKey, setCardPresetKey] = useState("SCHOOL_ID")
-  const [customCardW, setCustomCardW] = useState(56)
-  const [customCardH, setCustomCardH] = useState(88)
+  const [cardPresetKey, setCardPresetKey] = useState("SCHOOL_ID_LANDSCAPE")
+  const [customCardW, setCustomCardW] = useState(88)
+  const [customCardH, setCustomCardH] = useState(56)
 
-  const [marginMm, setMarginMm] = useState(5) // outer page margin
+  const [marginMm, setMarginMm] = useState(3) // outer page margin
   const [gapMm, setGapMm] = useState(1) // gap between cards
-  const [landscape, setLandscape] = useState(true) // landscape for 10 cards
+  const [landscape, setLandscape] = useState(false) // portrait page for 2×5 layout
   const [includeBacks, setIncludeBacks] = useState(true)
   const [addCutMarks, setAddCutMarks] = useState(true)
   const [generating, setGenerating] = useState(false)
@@ -427,7 +427,7 @@ export default function PdfPrintSheet({ cards, schoolName, onClose }: PdfPrintSh
         </div>
 
         {/* Body */}
-        <div style={{ flex: 1, overflow: "auto", padding: 24, display: "flex", gap: 24, flexWrap: "wrap" }}>
+        <div className="pdf-modal-body" style={{ flex: 1, overflow: "auto", padding: 24, display: "flex", gap: 24, flexWrap: "wrap" }}>
           {/* Left – Settings */}
           <div style={{ flex: "1 1 340px", minWidth: 280, display: "flex", flexDirection: "column", gap: 16 }}>
 
@@ -794,7 +794,7 @@ export default function PdfPrintSheet({ cards, schoolName, onClose }: PdfPrintSh
         </div>
 
         {/* Footer */}
-        <div style={{
+        <div className="pdf-modal-footer" style={{
           padding: "16px 24px",
           borderTop: "1px solid #f1f5f9",
           display: "flex",

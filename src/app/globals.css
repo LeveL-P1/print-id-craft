@@ -1399,3 +1399,290 @@ input, select, textarea { font-family: inherit; }
   .landing-hero-card-full { grid-column: span 1 !important; }
   .landing-footer-inner h2 { font-size: 1.5rem !important; }
 }
+
+/* ===== STATUS BADGE TRANSITIONS (optimistic updates) ===== */
+.status-badge {
+  transition: background 0.25s ease, color 0.25s ease, transform 0.15s ease;
+}
+
+/* ===== COMPREHENSIVE MOBILE FIXES ===== */
+
+/* --- Viewport meta safety --- */
+html {
+  -webkit-text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+}
+
+/* --- Touch-friendly inputs everywhere --- */
+@media (max-width: 768px) {
+  input, select, textarea, button {
+    font-size: 16px !important; /* prevents iOS zoom on focus */
+    min-height: 44px; /* Apple HIG touch target */
+  }
+  
+  /* Sidebar: full width on open */
+  .app-sidebar {
+    width: 280px;
+  }
+  
+  /* Content: no left margin on mobile */
+  .app-content {
+    margin-left: 0 !important;
+    width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+  
+  /* Page padding: tighter on mobile */
+  .page-header {
+    padding: 56px 16px 16px !important;
+  }
+  .page-body {
+    padding: 16px !important;
+  }
+  
+  /* Tab scroll: horizontal on mobile */
+  .school-tabs-scroll {
+    overflow-x: auto !important;
+    white-space: nowrap !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 6px !important;
+    margin-bottom: 16px !important;
+  }
+  .school-tabs-scroll::-webkit-scrollbar { display: none; }
+  .school-tabs-scroll button {
+    margin-right: 18px !important;
+    padding: 10px 0 !important;
+    font-size: 13px !important;
+    flex-shrink: 0;
+  }
+  
+  /* Tab underline: tighter on mobile */
+  .tab-item::after {
+    bottom: -8px !important;
+  }
+  
+  /* Student table → card layout on mobile */
+  .data-table-wrapper {
+    border: none !important;
+    background: transparent !important;
+    border-radius: 0 !important;
+  }
+  
+  /* Wider stat grid gap */
+  .stat-grid {
+    gap: 8px !important;
+  }
+  
+  /* School detail header: stack vertically */
+  .page-header > div:first-child {
+    flex-wrap: wrap !important;
+  }
+  
+  /* Student detail modal: full screen on mobile */
+  [style*="position: fixed"][style*="z-index: 9999"] > div {
+    width: 100vw !important;
+    max-height: 100vh !important;
+    border-radius: 0 !important;
+    height: 100vh;
+  }
+  
+  /* Filter bar: stack on mobile */
+  .student-filters {
+    flex-direction: column !important;
+    gap: 8px !important;
+  }
+  .student-filters > * {
+    width: 100% !important;
+  }
+  
+  /* Action buttons in table: smaller on mobile */
+  .student-actions button {
+    padding: 6px 10px !important;
+    font-size: 11px !important;
+    min-height: 36px !important;
+  }
+  
+  /* Cards grid: single column */
+  .card-grid {
+    grid-template-columns: 1fr !important;
+  }
+  
+  /* Overview sections: full width */
+  .school-logo-section {
+    flex-direction: column !important;
+    align-items: center !important;
+  }
+  
+  /* Breadcrumbs: wrap and smaller */
+  nav[style*="font-size: 13px"] {
+    font-size: 11px !important;
+    padding: 0 16px;
+  }
+  
+  /* QR Verify button: icon only on mobile */
+  .hide-on-small-mobile {
+    display: none !important;
+  }
+
+  /* Main teacher credential cards */
+  div[style*="grid-template-columns: repeat(auto-fit"] {
+    grid-template-columns: 1fr !important;
+  }
+  
+  /* Batch list: responsive */
+  .batch-card {
+    flex-direction: column !important;
+    gap: 12px !important;
+  }
+  
+  /* Empty state: less padding */
+  .empty-state {
+    padding: 40px 16px !important;
+  }
+}
+
+/* --- PDF Print Modal: Mobile optimized --- */
+@media (max-width: 768px) {
+  /* Force PDF modal to be full-screen on mobile */
+  .pdf-modal-container,
+  [style*="min(95vw, 920px)"] {
+    width: 100vw !important;
+    max-height: 100vh !important;
+    border-radius: 0 !important;
+    height: 100vh !important;
+  }
+  
+  /* PDF modal body: single column stack */
+  .pdf-modal-body {
+    flex-direction: column !important;
+    padding: 16px !important;
+    gap: 16px !important;
+  }
+  
+  /* PDF modal footer: stack buttons */
+  .pdf-modal-footer {
+    flex-direction: column !important;
+    gap: 8px !important;
+    padding: 12px 16px !important;
+  }
+  .pdf-modal-footer .btn,
+  .pdf-modal-footer button {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+}
+
+/* --- Small mobile extra fixes --- */
+@media (max-width: 480px) {
+  /* Even tighter padding */
+  .page-header {
+    padding: 52px 12px 12px !important;
+  }
+  .page-body {
+    padding: 12px !important;
+  }
+  
+  /* School name: prevent overflow */
+  .page-header h1 {
+    font-size: 16px !important;
+    max-width: calc(100vw - 100px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  
+  /* Stat values smaller */
+  .stat-card-value {
+    font-size: 20px !important;
+  }
+  .stat-card {
+    padding: 10px !important;
+    border-radius: 10px !important;
+  }
+  
+  /* Buttons: compact */
+  .btn {
+    font-size: 12px !important;
+    padding: 8px 12px !important;
+    border-radius: 8px !important;
+  }
+  
+  /* Student mobile card: tighter */
+  .mobile-school-card {
+    padding: 12px !important;
+  }
+  
+  /* Login mobile: tighter */
+  .login-left {
+    min-height: 240px !important;
+    padding: 20px !important;
+  }
+  .login-right {
+    padding: 20px !important;
+  }
+  .login-heading {
+    font-size: 20px !important;
+  }
+  .role-card {
+    padding: 10px 12px !important;
+  }
+  .role-icon {
+    width: 34px !important;
+    height: 34px !important;
+  }
+  
+  /* Teacher page: tighter */
+  .teacher-page {
+    padding: 16px 10px !important;
+  }
+  .teacher-container {
+    padding: 0 !important;
+  }
+}
+
+/* --- Mobile hamburger: always visible position fix --- */
+@media (max-width: 768px) {
+  .mobile-menu-btn {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 50;
+    width: 40px;
+    height: 40px;
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  }
+  
+  /* Mobile overlay when sidebar is open */
+  .mobile-overlay {
+    cursor: pointer;
+  }
+  .mobile-overlay.active {
+    display: block;
+  }
+}
+
+/* --- Scrollbar hide for horizontal scroll on mobile --- */
+@media (max-width: 768px) {
+  .data-table-wrapper::-webkit-scrollbar { display: none; }
+  .data-table-wrapper { scrollbar-width: none; }
+}
+
+/* --- Safe area insets for notched phones --- */
+@supports (padding: env(safe-area-inset-bottom)) {
+  @media (max-width: 768px) {
+    .app-content {
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    .sidebar-footer {
+      padding-bottom: calc(16px + env(safe-area-inset-bottom));
+    }
+  }
+}

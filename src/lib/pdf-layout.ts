@@ -126,6 +126,16 @@ export function calculatePvcLayout(totalCards: number): GridLayout {
 /* ─── Quick Presets for common print configurations ─── */
 export const QUICK_PRESETS: QuickPreset[] = [
   {
+    label: "📋 Aaryans Print (2×5)",
+    description: "88×56mm landscape cards · A4 Portrait · 2×5 grid",
+    pageSizeKey: "A4",
+    cardPresetKey: "SCHOOL_ID_LANDSCAPE",
+    marginMm: 3,
+    gapMm: 1,
+    landscape: false,
+    expectedGrid: "2×5",
+  },
+  {
     label: "🪪 PVC Print (56×88)",
     description: "Exact 5×2 · 1.7mm margins · Bleed + Crop marks",
     pageSizeKey: "A4",

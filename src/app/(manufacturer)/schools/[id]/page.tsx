@@ -166,19 +166,32 @@ export default function SchoolDetailPage() {
   }
 
   useEffect(() => {
-    Promise.all([fetchSchool(), fetchClasses(), fetchTemplate()]).finally(() => setLoading(false))
+    Promise.all([fetchSchool(), fetchClasses(), fetchTemplate(), fetchStudents(), fetchBatches()]).finally(() => setLoading(false))
   }, [schoolId])
 
+  // Re-fetch students when filters/search change (but not on initial tab switch)
+  const filtersInitialized = useRef(false)
   useEffect(() => {
+    if (!filtersInitialized.current) {
+      filtersInitialized.current = true
+      return
+    }
     if (tab === "students") {
+      fetchStudents()
+    }
+  }, [statusFilter, classFilter, searchQuery])
+
+  // Only fetch when switching to a tab if data is empty
+  useEffect(() => {
+    if (tab === "students" && students.length === 0 && !loading) {
       setTabLoading(true)
       fetchStudents().finally(() => setTabLoading(false))
     }
-    if (tab === "batches") {
+    if (tab === "batches" && batches.length === 0 && !loading) {
       setTabLoading(true)
       fetchBatches().finally(() => setTabLoading(false))
     }
-  }, [tab, statusFilter, classFilter, searchQuery])
+  }, [tab])
 
   // Cleanup debounce timer
   useEffect(() => {
@@ -264,35 +277,61 @@ export default function SchoolDetailPage() {
   }
 
   const handleStatusUpdate = async (sid: string, status: string) => {
-    await fetch(`/api/schools/${schoolId}/students/${sid}/status`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    })
+    // Optimistic: update local state immediately for instant UI
+    setStudents(prev => prev.map(s => s.id === sid ? { ...s, status } : s))
     toast.success(`Student status updated to ${status}`)
-    fetchStudents(studentPage)
+
+    // Fire API in background — revert on failure
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/students/${sid}/status`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      })
+      if (!res.ok) throw new Error("API failed")
+    } catch {
+      toast.error("Failed to update status — reverting")
+      fetchStudents(studentPage)
+    }
   }
 
   const handleFlag = async (sid: string) => {
     const note = prompt("Enter flag reason:")
     if (!note) return
-    await fetch(`/api/schools/${schoolId}/students/${sid}/flag`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ flagNote: note }),
-    })
+
+    // Optimistic: flag locally
+    setStudents(prev => prev.map(s => s.id === sid ? { ...s, status: "FLAGGED", flagNote: note } : s))
     toast.success("Student flagged")
-    fetchStudents(studentPage)
+
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/students/${sid}/flag`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ flagNote: note }),
+      })
+      if (!res.ok) throw new Error("API failed")
+    } catch {
+      toast.error("Failed to flag — reverting")
+      fetchStudents(studentPage)
+    }
   }
 
   const handleUnflag = async (sid: string) => {
-    await fetch(`/api/schools/${schoolId}/students/${sid}/flag`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ unflag: true }),
-    })
+    // Optimistic: unflag locally, revert to SUBMITTED
+    setStudents(prev => prev.map(s => s.id === sid ? { ...s, status: "SUBMITTED", flagNote: null } : s))
     toast.success("Student unflagged")
-    fetchStudents(studentPage)
+
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/students/${sid}/flag`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ unflag: true }),
+      })
+      if (!res.ok) throw new Error("API failed")
+    } catch {
+      toast.error("Failed to unflag — reverting")
+      fetchStudents(studentPage)
+    }
   }
 
   const handleGenerateBatch = async () => {
