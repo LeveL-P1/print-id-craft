@@ -2,12 +2,29 @@
 import { useState, useRef, useEffect, useCallback } from "react"
 
 const BG_COLOR_PRESETS = [
+  // Neutrals
   { id: "white", label: "White", hex: "#FFFFFF", textColor: "#333" },
+  { id: "light-grey", label: "Light Grey", hex: "#F1F5F9", textColor: "#333" },
+  { id: "silver", label: "Silver", hex: "#E2E8F0", textColor: "#333" },
+  { id: "cream", label: "Cream", hex: "#FEF3C7", textColor: "#333" },
+  { id: "ivory", label: "Ivory", hex: "#FFFBEB", textColor: "#333" },
+  // Blues
   { id: "light-blue", label: "Light Blue", hex: "#DBEAFE", textColor: "#333" },
   { id: "sky-blue", label: "Sky Blue", hex: "#BAE6FD", textColor: "#333" },
-  { id: "light-grey", label: "Light Grey", hex: "#F1F5F9", textColor: "#333" },
+  { id: "steel-blue", label: "Steel Blue", hex: "#93C5FD", textColor: "#333" },
+  { id: "navy", label: "Navy", hex: "#1E3A5F", textColor: "#fff" },
+  // Greens
+  { id: "mint", label: "Mint", hex: "#D1FAE5", textColor: "#333" },
+  { id: "sage", label: "Sage", hex: "#A7F3D0", textColor: "#333" },
+  { id: "forest", label: "Forest", hex: "#14532D", textColor: "#fff" },
+  // Warm
+  { id: "peach", label: "Peach", hex: "#FED7AA", textColor: "#333" },
+  { id: "rose", label: "Rose", hex: "#FECDD3", textColor: "#333" },
+  { id: "lavender", label: "Lavender", hex: "#E9D5FF", textColor: "#333" },
+  // Dark
   { id: "maroon", label: "Maroon", hex: "#7F1D1D", textColor: "#fff" },
-  { id: "cream", label: "Cream", hex: "#FEF3C7", textColor: "#333" },
+  { id: "charcoal", label: "Charcoal", hex: "#334155", textColor: "#fff" },
+  { id: "black", label: "Black", hex: "#000000", textColor: "#fff" },
 ]
 
 type FieldMapping = {
@@ -1490,23 +1507,24 @@ export default function JpgTemplateMapper({
                   ) : (
                     <span
                       style={{
-                        fontSize: showPreview ? m.fontSize * 0.65 : 11,
-                        color: showPreview ? m.fontColor : "white",
-                        fontWeight: showPreview ? m.fontWeight : 600,
-                        fontFamily: showPreview ? m.fontFamily : "inherit",
-                        fontStyle: showPreview ? (m.fontStyle || "normal") : "normal",
-                        textDecoration: showPreview ? (m.textDecoration || "none") : "none",
-                        letterSpacing: showPreview ? `${m.letterSpacing || 0}px` : "normal",
-                        lineHeight: showPreview ? (m.lineHeight || 1.2) : 1.2,
-                        textTransform: showPreview ? (m.textTransform || "none") as any : "none",
-                        whiteSpace: (m.textWrap === "wrap" && showPreview) ? "normal" : "nowrap",
-                        wordBreak: (m.textWrap === "wrap" && showPreview) ? "break-word" : "normal",
+                        fontSize: m.fontSize * 0.65,
+                        color: m.fontColor,
+                        fontWeight: m.fontWeight,
+                        fontFamily: m.fontFamily,
+                        fontStyle: m.fontStyle || "normal",
+                        textDecoration: m.textDecoration || "none",
+                        letterSpacing: `${m.letterSpacing || 0}px`,
+                        lineHeight: m.lineHeight || 1.2,
+                        textTransform: (m.textTransform || "none") as any,
+                        whiteSpace: m.textWrap === "wrap" ? "normal" : "nowrap",
+                        wordBreak: m.textWrap === "wrap" ? "break-word" : "normal",
                         overflow: "hidden",
                         textOverflow: m.textWrap === "wrap" ? "clip" : "ellipsis",
-                        textShadow: showPreview ? "none" : "0 1px 2px rgba(0,0,0,0.5)",
+                        textShadow: showPreview ? "none" : `0 0 3px rgba(0,0,0,0.4), 0 0 1px rgba(0,0,0,0.6)`,
+                        WebkitTextStroke: !showPreview ? "0.3px rgba(0,0,0,0.2)" : undefined,
                         width: "100%",
                         height: m.textWrap === "wrap" ? "100%" : "auto",
-                        textAlign: showPreview ? (m.textAlign || "left") : "left",
+                        textAlign: m.textAlign || "left",
                         display: "block",
                       }}
                     >
