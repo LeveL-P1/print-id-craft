@@ -24,11 +24,23 @@ type CardImage = {
   backDataUrl?: string
 }
 
+type PrintSetupConfig = {
+  paper: string
+  paperWidth: number
+  paperHeight: number
+  h1stPosition: number
+  h2ndPosition: number
+  v1stPosition: number
+  v2ndPosition: number
+}
+
 type PdfPrintSheetProps = {
   cards: CardImage[]
   schoolName: string
   /** Called when the modal is closed */
   onClose: () => void
+  /** Optional: seed from Print Setup dialog for exact paper size & card positions */
+  printSetup?: PrintSetupConfig
 }
 
 // PAGE_SIZES, CARD_PRESETS imported from @/lib/pdf-layout
@@ -40,29 +52,43 @@ const MM_TO_PX = 3.7795275591 // 1mm = 3.78px @ 96dpi
  * PdfPrintSheet — an overlay modal that lets users configure and download
  * a multi-up print-ready PDF of ID cards.
  */
-export default function PdfPrintSheet({ cards, schoolName, onClose }: PdfPrintSheetProps) {
-  /* ── State ── */
-  const [pageSizeKey, setPageSizeKey] = useState("A4")
-  const [customPageW, setCustomPageW] = useState(210)
-  const [customPageH, setCustomPageH] = useState(297)
+export default function PdfPrintSheet({ cards, schoolName, onClose, printSetup }: PdfPrintSheetProps) {
+  // Determine initial values from printSetup if provided
+  const hasPrintSetup = !!printSetup && (printSetup.paperWidth > 0 || printSetup.paperHeight > 0)
+  const initLandscape = hasPrintSetup ? printSetup!.paperWidth > printSetup!.paperHeight : false
+  const initPageSizeKey = hasPrintSetup ? "CUSTOM" : "A4"
+  const initPageW = hasPrintSetup ? printSetup!.paperWidth : 210
+  const initPageH = hasPrintSetup ? printSetup!.paperHeight : 297
+  const initUsePos = hasPrintSetup && (printSetup!.h1stPosition > 0 || printSetup!.v1stPosition > 0)
+  const initPosX = hasPrintSetup ? printSetup!.h1stPosition : 0
+  const initPosY = hasPrintSetup ? printSetup!.v1stPosition : 0
+  // If h2ndPosition / v2ndPosition are set, use them as custom card sizes
+  const initCardPreset = hasPrintSetup && printSetup!.h2ndPosition > 0 && printSetup!.v2ndPosition > 0 ? "CUSTOM" : "SCHOOL_ID_LANDSCAPE"
+  const initCardW = hasPrintSetup && printSetup!.h2ndPosition > 0 ? printSetup!.h2ndPosition : 88
+  const initCardH = hasPrintSetup && printSetup!.v2ndPosition > 0 ? printSetup!.v2ndPosition : 56
 
-  const [cardPresetKey, setCardPresetKey] = useState("SCHOOL_ID_LANDSCAPE")
-  const [customCardW, setCustomCardW] = useState(88)
-  const [customCardH, setCustomCardH] = useState(56)
+  /* ── State ── */
+  const [pageSizeKey, setPageSizeKey] = useState(initPageSizeKey)
+  const [customPageW, setCustomPageW] = useState(initPageW)
+  const [customPageH, setCustomPageH] = useState(initPageH)
+
+  const [cardPresetKey, setCardPresetKey] = useState(initCardPreset)
+  const [customCardW, setCustomCardW] = useState(initCardW)
+  const [customCardH, setCustomCardH] = useState(initCardH)
 
   const [marginMm, setMarginMm] = useState(3) // outer page margin
   const [gapMm, setGapMm] = useState(1) // gap between cards
-  const [landscape, setLandscape] = useState(false) // portrait page for 2×5 layout
+  const [landscape, setLandscape] = useState(initLandscape) // portrait page for 2×5 layout
   const [includeBacks, setIncludeBacks] = useState(true)
   const [addCutMarks, setAddCutMarks] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [printSide, setPrintSide] = useState<"both" | "front" | "back">("both")
   const [imageFormat, setImageFormat] = useState<"jpeg" | "png">("png") // PNG for lossless print
   const [pvcMode, setPvcMode] = useState(false) // PVC precision print mode
-  const [activePresetIdx, setActivePresetIdx] = useState(0) // Track active Quick Preset
-  const [useCustomPosition, setUseCustomPosition] = useState(false) // ID-Card Position override
-  const [cardPosX, setCardPosX] = useState(0) // Horizontal 1st card position (mm)
-  const [cardPosY, setCardPosY] = useState(0) // Vertical 1st card position (mm)
+  const [activePresetIdx, setActivePresetIdx] = useState(hasPrintSetup ? -1 : 0) // Track active Quick Preset
+  const [useCustomPosition, setUseCustomPosition] = useState(initUsePos) // ID-Card Position override
+  const [cardPosX, setCardPosX] = useState(initPosX) // Horizontal 1st card position (mm)
+  const [cardPosY, setCardPosY] = useState(initPosY) // Vertical 1st card position (mm)
   const [mobileTab, setMobileTab] = useState<MobileTab>("settings")
   const [isMobile, setIsMobile] = useState(false)
 

@@ -1,5 +1,16 @@
 "use client"
 import { useState, useEffect, useRef, useCallback } from "react"
+import { createPortal } from "react-dom"
+
+// Render children into document.body so position:fixed overlays can never be
+// clipped or repositioned by transformed/filtered ancestors (the modal would
+// otherwise be confined to its parent's bounding box and look "stuck").
+function BodyPortal({ children }: { children: React.ReactNode }) {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
+  if (!mounted || typeof document === "undefined") return null
+  return createPortal(children, document.body)
+}
 
 // ─────────────────────────────────────────────────────────────
 // Shared dialog shell (Windows-style classic look)
@@ -37,6 +48,7 @@ function DialogShell({
   }, [])
 
   return (
+    <BodyPortal>
     <div
       style={{
         position: "fixed",
@@ -119,6 +131,7 @@ function DialogShell({
         <div style={{ padding: "clamp(12px, 2.5vw, 20px)", overflowY: "auto", flex: 1, minHeight: 0 }}>{children}</div>
       </div>
     </div>
+    </BodyPortal>
   )
 }
 
@@ -1204,7 +1217,7 @@ export function FieldContextMenu({
   )
 
   return (
-    <>
+    <BodyPortal>
       <div style={{ position: "fixed", inset: 0, zIndex: 9998 }} onClick={onClose} />
       <div style={menuStyle}>
         {/* Top level: always show */}
@@ -1238,6 +1251,6 @@ export function FieldContextMenu({
           </>
         )}
       </div>
-    </>
+    </BodyPortal>
   )
 }

@@ -1245,6 +1245,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
           cards={pdfPrintCards}
           schoolName={schoolName}
           onClose={() => setShowPdfPrint(false)}
+          printSetup={printConfig}
         />
       )}
 
