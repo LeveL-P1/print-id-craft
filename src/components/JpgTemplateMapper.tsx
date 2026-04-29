@@ -283,7 +283,37 @@ export default function JpgTemplateMapper({
   const [imageDragOver, setImageDragOver] = useState(false)
 
   // ── ID Maker Dialog State ──
-  const [showIdSizeDialog, setShowIdSizeDialog] = useState(!initialImageUrl)
+  // Auto-open only once per browser session per school, and only when the
+  // template doesn't yet have an image (true first-time setup). After the
+  // user dismisses or saves, the flag prevents re-opening on tab switches.
+  const [showIdSizeDialog, setShowIdSizeDialog] = useState(false)
+  const idSizeAutoOpenedRef = useRef(false)
+  useEffect(() => {
+    if (idSizeAutoOpenedRef.current) return
+    if (typeof window === "undefined") return
+    const key = `idsize-shown-${schoolId}`
+    try {
+      if (sessionStorage.getItem(key)) {
+        idSizeAutoOpenedRef.current = true
+        return
+      }
+      if (initialImageUrl) {
+        // Existing template — never auto-open
+        sessionStorage.setItem(key, "1")
+        idSizeAutoOpenedRef.current = true
+        return
+      }
+      // First-time setup → open once and remember
+      idSizeAutoOpenedRef.current = true
+      sessionStorage.setItem(key, "1")
+      setShowIdSizeDialog(true)
+    } catch {
+      // sessionStorage may be unavailable (e.g., privacy mode) — fall back to
+      // simple "no image = open" check, but only on first effect run.
+      idSizeAutoOpenedRef.current = true
+      if (!initialImageUrl) setShowIdSizeDialog(true)
+    }
+  }, [schoolId, initialImageUrl])
   const [showFontDialog, setShowFontDialog] = useState(false)
   const [showPhotoSizeDialog, setShowPhotoSizeDialog] = useState(false)
   const [showPhotoBorderDialog, setShowPhotoBorderDialog] = useState(false)
