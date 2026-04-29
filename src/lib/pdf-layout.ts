@@ -241,3 +241,161 @@ export function getOrientation(widthMm: number, heightMm: number): "portrait" | 
 export function getMirroredCol(col: number, totalCols: number): number {
   return (totalCols - 1) - col
 }
+
+/* ─── Direct PDF generation (bypasses the PdfPrintSheet modal) ─── */
+
+export type DirectPdfOptions = {
+  cards: { serialNumber: string; frontDataUrl: string; backDataUrl?: string }[]
+  schoolName: string
+  /** Paper width in mm */
+  paperWidth: number
+  /** Paper height in mm */
+  paperHeight: number
+  /** Card width in mm */
+  cardWidth: number
+  /** Card height in mm */
+  cardHeight: number
+  /** First card horizontal position (mm), 0 = auto-center */
+  h1stPosition?: number
+  /** First card vertical position (mm), 0 = auto-center */
+  v1stPosition?: number
+  /** Page margin in mm (default 3) */
+  marginMm?: number
+  /** Gap between cards in mm (default 1) */
+  gapMm?: number
+  /** Add crop/cut marks (default true) */
+  addCutMarks?: boolean
+}
+
+/**
+ * Generates and downloads a print-ready PDF directly from Print Setup values.
+ * No modal UI — uses the exact paper size, card size, and positions provided.
+ */
+export async function generateDirectPdf(opts: DirectPdfOptions): Promise<void> {
+  const { default: jsPDF } = await import("jspdf")
+  const { default: toast } = await import("sonner").then(m => ({ default: m.toast }))
+
+  const {
+    cards, schoolName,
+    paperWidth, paperHeight,
+    cardWidth, cardHeight,
+    h1stPosition = 0, v1stPosition = 0,
+    marginMm = 3, gapMm = 1,
+    addCutMarks = true,
+  } = opts
+
+  const pageW = paperWidth
+  const pageH = paperHeight
+  const cardW = cardWidth
+  const cardH = cardHeight
+
+  // Use custom position if nonzero, else pass undefined for auto-center
+  const customX = h1stPosition > 0 ? h1stPosition : undefined
+  const customY = v1stPosition > 0 ? v1stPosition : undefined
+
+  const layout = calculateGridLayout(pageW, pageH, cardW, cardH, marginMm, gapMm, cards.length, customX, customY)
+  const { cols, rows, cardsPerPage, startX, startY } = layout
+
+  const hasBackSide = cards.some(c => !!c.backDataUrl)
+
+  const doc = new jsPDF({
+    orientation: getOrientation(pageW, pageH),
+    unit: "mm",
+    format: [pageW, pageH],
+    compress: true,
+  })
+
+  // Helper: data URL → Uint8Array binary
+  const dataUrlToBytes = (dataUrl: string): Uint8Array => {
+    const base64 = dataUrl.split(",")[1]
+    const bin = atob(base64)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    return bytes
+  }
+
+  const getImageFormat = (dataUrl: string): "PNG" | "JPEG" =>
+    dataUrl.startsWith("data:image/png") ? "PNG" : "JPEG"
+
+  // Cut marks helper
+  const drawCutMarks = (d: typeof doc, x: number, y: number, w: number, h: number) => {
+    const cm = 3, off = 0.5
+    d.setDrawColor(0, 0, 0)
+    d.setLineWidth(0.1)
+    d.line(x - off - cm, y, x - off, y); d.line(x, y - off - cm, x, y - off)
+    d.line(x + w + off, y, x + w + off + cm, y); d.line(x + w, y - off - cm, x + w, y - off)
+    d.line(x - off - cm, y + h, x - off, y + h); d.line(x, y + h + off, x, y + h + off + cm)
+    d.line(x + w + off, y + h, x + w + off + cm, y + h); d.line(x + w, y + h + off, x + w, y + h + off + cm)
+  }
+
+  let aliasCounter = 0
+
+  // Front pages
+  for (let pageIdx = 0; pageIdx < Math.ceil(cards.length / cardsPerPage); pageIdx++) {
+    if (pageIdx > 0) doc.addPage([pageW, pageH])
+
+    doc.setFontSize(6); doc.setTextColor(200, 200, 200)
+    doc.text(`${schoolName} - Front Side - Page ${pageIdx + 1}`, pageW / 2, 4, { align: "center" })
+
+    for (let slot = 0; slot < cardsPerPage; slot++) {
+      const cardIdx = pageIdx * cardsPerPage + slot
+      if (cardIdx >= cards.length) break
+      const row = Math.floor(slot / cols)
+      const col = slot % cols
+      const x = startX + col * (cardW + gapMm)
+      const y = startY + row * (cardH + gapMm)
+
+      try {
+        const bytes = dataUrlToBytes(cards[cardIdx].frontDataUrl)
+        const fmt = getImageFormat(cards[cardIdx].frontDataUrl)
+        doc.addImage(bytes, fmt, x, y, cardW, cardH, `img_${aliasCounter++}`, "FAST")
+        if (addCutMarks) drawCutMarks(doc, x, y, cardW, cardH)
+      } catch (err) {
+        console.error(`Failed front image ${cards[cardIdx].serialNumber}`, err)
+        doc.setDrawColor(200, 200, 200); doc.rect(x, y, cardW, cardH)
+      }
+    }
+  }
+
+  // Back pages (mirrored)
+  if (hasBackSide) {
+    for (let pageIdx = 0; pageIdx < Math.ceil(cards.length / cardsPerPage); pageIdx++) {
+      doc.addPage([pageW, pageH])
+      doc.setFontSize(6); doc.setTextColor(200, 200, 200)
+      doc.text(`${schoolName} - Back Side - Page ${pageIdx + 1}`, pageW / 2, 4, { align: "center" })
+
+      for (let slot = 0; slot < cardsPerPage; slot++) {
+        const cardIdx = pageIdx * cardsPerPage + slot
+        if (cardIdx >= cards.length) break
+        if (!cards[cardIdx].backDataUrl) continue
+        const row = Math.floor(slot / cols)
+        const col = slot % cols
+        const mirroredCol = getMirroredCol(col, cols)
+        const x = startX + mirroredCol * (cardW + gapMm)
+        const y = startY + row * (cardH + gapMm)
+
+        try {
+          const bytes = dataUrlToBytes(cards[cardIdx].backDataUrl!)
+          const fmt = getImageFormat(cards[cardIdx].backDataUrl!)
+          doc.addImage(bytes, fmt, x, y, cardW, cardH, `img_${aliasCounter++}`, "FAST")
+          if (addCutMarks) drawCutMarks(doc, x, y, cardW, cardH)
+        } catch (err) {
+          console.error(`Failed back image ${cards[cardIdx].serialNumber}`, err)
+        }
+      }
+    }
+  }
+
+  // Download
+  const filename = generatePdfFilename(schoolName)
+  const pdfBlob = doc.output("blob")
+  const blobUrl = URL.createObjectURL(pdfBlob)
+  const a = document.createElement("a")
+  a.href = blobUrl
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 5000)
+  toast.success(`PDF saved! ${cards.length} cards on ${layout.totalPages} page(s) · ${pageW}×${pageH}mm · Card ${cardW}×${cardH}mm`)
+}

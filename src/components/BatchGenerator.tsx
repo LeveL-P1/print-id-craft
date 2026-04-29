@@ -1,11 +1,9 @@
 "use client"
 import { useState, useCallback } from "react"
 import { toast } from "sonner"
-import dynamic from "next/dynamic"
 import { normalizeKey, resolveFieldValue, FIELD_GROUPS } from "@/lib/field-resolver"
 import { PrintDialog, type PrintConfig } from "./IDMakerDialogs"
-
-const PdfPrintSheet = dynamic(() => import("@/components/PdfPrintSheet"), { ssr: false })
+import { generateDirectPdf } from "@/lib/pdf-layout"
 
 type FieldMapping = {
   id: string
@@ -614,7 +612,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
   const [progress, setProgress] = useState({ current: 0, total: 0, status: "" })
   const [previewCards, setPreviewCards] = useState<{ serialNumber: string; frontDataUrl: string; backDataUrl?: string }[]>([])
   const [pdfPrintCards, setPdfPrintCards] = useState<{ serialNumber: string; frontDataUrl: string; backDataUrl?: string }[]>([])
-  const [showPdfPrint, setShowPdfPrint] = useState(false)
+  const [lastCardDims, setLastCardDims] = useState({ w: 85.6, h: 54 })
   const [showPrintDialog, setShowPrintDialog] = useState(false)
   const [printConfig, setPrintConfig] = useState<PrintConfig>({
     paper: "A4 Horizontal", paperWidth: 297, paperHeight: 210,
@@ -639,7 +637,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
         return
       }
 
-      const { templateImageUrl, fieldMappings, backTemplateImageUrl, backFieldMappings, hasBackSide, students, totalCount } = data.data
+      const { templateImageUrl, fieldMappings, backTemplateImageUrl, backFieldMappings, hasBackSide, students, totalCount, cardWidthMm, cardHeightMm } = data.data
       
       if (!templateImageUrl) {
         toast.error("No template image configured. Please upload a template first.")
@@ -688,7 +686,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
 
         setPreviewCards(allCards.slice(0, 8))
         setPdfPrintCards(allCards)
-        setProgress({ current: totalCount, total: totalCount, status: "Done! Opening PDF configurator... ✅" })
+        setProgress({ current: totalCount, total: totalCount, status: "Done! Generating PDF..." })
 
         // Mark as printed
         const studentIds = students.map((s: any) => s.id)
@@ -698,8 +696,21 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
           body: JSON.stringify({ studentIds }),
         })
 
-        toast.success(`${allCards.length} cards rendered at print quality!`)
-        setShowPdfPrint(true)
+        // Generate PDF directly using Print Setup values — no modal
+        const cw = cardWidthMm || 85.6
+        const ch = cardHeightMm || 54
+        setLastCardDims({ w: cw, h: ch })
+        await generateDirectPdf({
+          cards: allCards,
+          schoolName,
+          paperWidth: printConfig.paperWidth,
+          paperHeight: printConfig.paperHeight,
+          cardWidth: cw,
+          cardHeight: ch,
+          h1stPosition: printConfig.h1stPosition,
+          v1stPosition: printConfig.v1stPosition,
+        })
+        setProgress({ current: totalCount, total: totalCount, status: "PDF downloaded! ✅" })
 
       // ──── CDR (SVG) PATH ────
       } else if (outputFormat === "CDR") {
@@ -1184,7 +1195,18 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
             </h4>
             {pdfPrintCards.length > 0 && (
               <button
-                onClick={() => setShowPdfPrint(true)}
+                onClick={async () => {
+                  await generateDirectPdf({
+                    cards: pdfPrintCards,
+                    schoolName,
+                    paperWidth: printConfig.paperWidth,
+                    paperHeight: printConfig.paperHeight,
+                    cardWidth: lastCardDims.w,
+                    cardHeight: lastCardDims.h,
+                    h1stPosition: printConfig.h1stPosition,
+                    v1stPosition: printConfig.v1stPosition,
+                  })
+                }}
                 style={{
                   padding: "8px 16px",
                   borderRadius: 10,
@@ -1200,7 +1222,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
                   boxShadow: "0 2px 10px rgba(220,38,38,0.3)",
                 }}
               >
-                📄 PDF Print
+                📄 Re-download PDF
               </button>
             )}
           </div>
@@ -1257,15 +1279,6 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
         </div>
       )}
 
-      {/* PDF Print Sheet Modal */}
-      {showPdfPrint && pdfPrintCards.length > 0 && (
-        <PdfPrintSheet
-          cards={pdfPrintCards}
-          schoolName={schoolName}
-          onClose={() => setShowPdfPrint(false)}
-          printSetup={printConfig}
-        />
-      )}
 
       {/* ── Print Setup Dialog ── */}
       {showPrintDialog && (
