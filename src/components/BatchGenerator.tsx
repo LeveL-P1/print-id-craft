@@ -40,11 +40,44 @@ type BatchGeneratorProps = {
 
 // normalizeKey, FIELD_GROUPS, resolveFieldValue imported from @/lib/field-resolver
 
-const imageCache: Record<string, HTMLImageElement> = {}
-const dataUrlCache: Record<string, string> = {}
+// ─── Bounded LRU caches (scale-safe for 2000+ students) ───
+// Template images (rarely change) — kept across runs.
+// Student photos — bounded LRU to prevent unbounded memory growth.
+const TEMPLATE_HINT = "/template" // URLs containing this are treated as long-lived
+const PHOTO_CACHE_MAX = 80        // recent N student photos kept in memory
+const DATA_URL_CACHE_MAX = 40     // recent N data URLs
+
+const imageCache = new Map<string, HTMLImageElement>()
+const dataUrlCache = new Map<string, string>()
+
+function lruSet<T>(map: Map<string, T>, key: string, value: T, max: number) {
+  if (map.has(key)) map.delete(key)
+  map.set(key, value)
+  // Evict oldest entries when above limit (preserve template entries)
+  while (map.size > max) {
+    const oldestKey = map.keys().next().value as string | undefined
+    if (!oldestKey) break
+    if (oldestKey.includes(TEMPLATE_HINT)) {
+      // Move template to the end so it stays
+      const v = map.get(oldestKey)!
+      map.delete(oldestKey)
+      map.set(oldestKey, v)
+      // If only templates remain, abort
+      if (Array.from(map.keys()).every(k => k.includes(TEMPLATE_HINT))) break
+      continue
+    }
+    map.delete(oldestKey)
+  }
+}
 
 async function getCachedImage(url: string): Promise<HTMLImageElement | null> {
-  if (imageCache[url]) return imageCache[url]
+  const cached = imageCache.get(url)
+  if (cached) {
+    // Move to end (most-recently-used)
+    imageCache.delete(url)
+    imageCache.set(url, cached)
+    return cached
+  }
   try {
     const img = new Image()
     img.crossOrigin = "anonymous"
@@ -53,7 +86,7 @@ async function getCachedImage(url: string): Promise<HTMLImageElement | null> {
       img.onerror = () => reject()
       img.src = url
     })
-    imageCache[url] = img
+    lruSet(imageCache, url, img, PHOTO_CACHE_MAX)
     return img
   } catch { return null }
 }
@@ -61,7 +94,12 @@ async function getCachedImage(url: string): Promise<HTMLImageElement | null> {
 /** Convert an image URL to a base64 data URL (needed for SVG embedding) */
 async function imageToDataUrl(url: string): Promise<string> {
   if (url.startsWith("data:")) return url
-  if (dataUrlCache[url]) return dataUrlCache[url]
+  const cached = dataUrlCache.get(url)
+  if (cached) {
+    dataUrlCache.delete(url)
+    dataUrlCache.set(url, cached)
+    return cached
+  }
   const img = await getCachedImage(url)
   if (!img) return url
   const canvas = document.createElement("canvas")
@@ -71,8 +109,18 @@ async function imageToDataUrl(url: string): Promise<string> {
   if (!ctx) return url
   ctx.drawImage(img, 0, 0)
   const dataUrl = canvas.toDataURL("image/jpeg", 1.0)
-  dataUrlCache[url] = dataUrl
+  lruSet(dataUrlCache, url, dataUrl, DATA_URL_CACHE_MAX)
   return dataUrl
+}
+
+/** Release student-photo cache entries after a batch run to free memory */
+function clearStudentImageCache() {
+  for (const k of Array.from(imageCache.keys())) {
+    if (!k.includes(TEMPLATE_HINT)) imageCache.delete(k)
+  }
+  for (const k of Array.from(dataUrlCache.keys())) {
+    if (!k.includes(TEMPLATE_HINT)) dataUrlCache.delete(k)
+  }
 }
 
 // ── Print resolution limits ──
@@ -814,6 +862,8 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
       toast.error("Generation failed: " + (err?.message || "Unknown error"))
     } finally {
       setGenerating(false)
+      // Release student photo cache to prevent memory build-up across runs
+      clearStudentImageCache()
     }
   }, [schoolId, schoolName, selectedClassId, statusFilter, outputFormat, classes])
 
