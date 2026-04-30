@@ -263,8 +263,8 @@ export default function LandingPage() {
       >
         <div className="max-w-7xl mx-auto px-5 md:px-8 py-2.5 flex items-center justify-between gap-5">
           <Link href="/" className="flex items-center gap-2.5">
-            <div className="relative" style={{ width: 34, height: 34 }}>
-              <Image src="/wisemelon-icon.png" alt="WiseMelon Ventures" fill sizes="34px" style={{ objectFit: 'contain' }} priority />
+            <div className="relative overflow-hidden rounded-full" style={{ width: 42, height: 42, background: NAVY }}>
+              <Image src="/wisemelon-logo-original.png" alt="WiseMelon Ventures" fill sizes="42px" style={{ objectFit: 'cover' }} priority />
             </div>
             <div>
               <div className="font-bold leading-none tracking-tight" style={{ color: NAVY, fontSize: 14 }}>WiseMelon</div>
@@ -529,8 +529,8 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
             <div className="lg:col-span-5">
               <div className="flex items-center gap-4">
-                <div className="relative" style={{ width: 62, height: 62 }}>
-                  <Image src="/wisemelon-icon.png" alt="WiseMelon Ventures" fill sizes="62px" style={{ objectFit: 'contain' }} />
+                <div className="relative overflow-hidden rounded-full" style={{ width: 62, height: 62, background: NAVY }}>
+                  <Image src="/wisemelon-logo-original.png" alt="WiseMelon Ventures" fill sizes="62px" style={{ objectFit: 'cover' }} />
                 </div>
                 <div>
                   <div className="font-extrabold" style={{ fontSize: 23, letterSpacing: '-0.02em' }}>WiseMelon</div>
