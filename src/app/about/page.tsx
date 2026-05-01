@@ -389,7 +389,7 @@ function About() {
       <div className="mx-auto grid max-w-7xl grid-cols-1 items-center gap-12 px-5 md:px-8 lg:grid-cols-12">
         <Reveal className="lg:col-span-6">
           <SectionKicker>About WiseMelon</SectionKicker>
-          <h2 className="mt-5 max-w-2xl font-serif  leading-tight tracking-tight text-[#0B1F3A] md:text-5xl">
+          <h2 className="mt-5 max-w-2xl font-serif text-4xl md:text-5xl font-medium leading-tight tracking-tight text-[#0B1F3A]">
             Procurement-friendly supply with a cleaner branding process.
           </h2>
           <div className="mt-6 space-y-4 text-base leading-8 text-[#0B1F3A]/70">
@@ -448,7 +448,7 @@ function OfferCard({ title, subtitle, items, Icon, href, dark = false }: { title
           <Icon size={26} />
         </div>
         <div className={cn('mt-6 text-xs font-bold uppercase tracking-[0.18em]', dark ? 'text-[#FFD76A]' : 'text-[#B7791F]')}>{subtitle}</div>
-        <h3 className="mt-2 font-serif  tracking-tight">{title}</h3>
+        <h3 className="mt-2 font-serif text-3xl font-medium tracking-tight">{title}</h3>
         <ul className="mt-6 grid gap-3">
           {items.map((item) => (
             <li key={item} className={cn('flex items-start gap-3 text-sm leading-6', dark ? 'text-white/75' : 'text-[#0B1F3A]/70')}>
@@ -471,7 +471,7 @@ function Services() {
       <div className="mx-auto max-w-7xl px-5 md:px-8">
         <Reveal className="mx-auto max-w-3xl text-center">
           <SectionKicker center>What we offer</SectionKicker>
-          <h2 className="mt-5 font-serif  leading-tight tracking-tight text-[#0B1F3A] md:text-5xl">Two core verticals, designed for institutional buyers.</h2>
+          <h2 className="mt-5 font-serif text-4xl md:text-5xl font-medium leading-tight tracking-tight text-[#0B1F3A]">Two core verticals, designed for institutional buyers.</h2>
           <p className="mt-5 text-base leading-8 text-[#0B1F3A]/70">School essentials and corporate merchandise stay organized under one reliable procurement partner.</p>
         </Reveal>
         <div className="mt-12 grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -494,7 +494,7 @@ function ProductRange() {
         <Reveal className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
           <div className="max-w-3xl">
             <SectionKicker>Product range</SectionKicker>
-            <h2 className="mt-5 font-serif  leading-tight tracking-tight text-[#0B1F3A] md:text-5xl">A focused catalogue for schools, companies and teams.</h2>
+            <h2 className="mt-5 font-serif text-4xl md:text-5xl font-medium leading-tight tracking-tight text-[#0B1F3A]">A focused catalogue for schools, companies and teams.</h2>
           </div>
           <SecondaryButton href="/wisemelon-catalogue.pdf" download>
             <Download size={17} /> Download full product list
@@ -513,7 +513,7 @@ function ProductRange() {
                     </div>
                     <span className="rounded-full border border-[#0B1F3A]/10 bg-white px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[#0B1F3A]/50 shadow-sm transition-colors group-hover:border-[#F7C948]/30 group-hover:text-[#B7791F]">Product</span>
                   </div>
-                  <h3 className="mt-8 font-serif  tracking-tight text-[#0B1F3A]">{name}</h3>
+                  <h3 className="mt-8 font-serif text-2xl font-medium tracking-tight text-[#0B1F3A]">{name}</h3>
                   <p className="mt-3 text-sm leading-6 text-[#0B1F3A]/70">{desc}</p>
                 </div>
               </div>
@@ -531,7 +531,7 @@ function UseCases() {
       <div className="mx-auto max-w-7xl px-5 md:px-8">
         <Reveal className="mx-auto max-w-3xl text-center">
           <SectionKicker center>Use cases</SectionKicker>
-          <h2 className="mt-5 font-serif  leading-tight tracking-tight text-[#0B1F3A] md:text-5xl">Built around how institutions actually buy.</h2>
+          <h2 className="mt-5 font-serif text-4xl md:text-5xl font-medium leading-tight tracking-tight text-[#0B1F3A]">Built around how institutions actually buy.</h2>
         </Reveal>
         <div className="mt-12 grid grid-cols-1 gap-5 lg:grid-cols-3">
           {USE_CASES.map(({ label, title, desc, Icon, points }, index) => (
@@ -545,7 +545,7 @@ function UseCases() {
                     </div>
                     <div className="text-xs font-bold uppercase tracking-[0.18em] text-[#B7791F]">{label}</div>
                   </div>
-                  <h3 className="mt-8 font-serif  tracking-tight text-[#0B1F3A]">{title}</h3>
+                  <h3 className="mt-8 font-serif text-2xl font-medium tracking-tight text-[#0B1F3A]">{title}</h3>
                   <p className="mt-4 text-base leading-7 text-[#0B1F3A]/70">{desc}</p>
                   <ul className="mt-6 grid gap-3">
                     {points.map((point) => (
@@ -578,7 +578,7 @@ function WhyChooseUs() {
       <div className="mx-auto max-w-7xl px-5 md:px-8">
         <Reveal className="mx-auto max-w-3xl text-center">
           <SectionKicker center>Why choose us</SectionKicker>
-          <h2 className="mt-5 font-serif  leading-tight tracking-tight text-[#0B1F3A] md:text-5xl">Reliable supply, clean output and support after delivery.</h2>
+          <h2 className="mt-5 font-serif text-4xl md:text-5xl font-medium leading-tight tracking-tight text-[#0B1F3A]">Reliable supply, clean output and support after delivery.</h2>
         </Reveal>
         <div className="mt-12 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {TRUST_POINTS.map(({ title, desc, Icon }, index) => (
@@ -587,7 +587,7 @@ function WhyChooseUs() {
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-[#0B1F3A] shadow-sm ring-1 ring-[#0B1F3A]/10/50 transition-colors duration-500 group-hover:bg-[#F7C948] group-hover:text-[#0B1F3A] group-hover:ring-[#F7C948]">
                   <Icon size={24} />
                 </div>
-                <h3 className="mt-8 font-serif  tracking-tight text-[#0B1F3A]">{title}</h3>
+                <h3 className="mt-8 font-serif text-2xl font-medium tracking-tight text-[#0B1F3A]">{title}</h3>
                 <p className="mt-3 text-sm leading-6 text-[#0B1F3A]/70">{desc}</p>
               </div>
             </Reveal>
@@ -645,7 +645,7 @@ function Footer() {
                 <Image src="/wisemelon-logo-original.png" alt="WiseMelon Ventures Pvt. Ltd." fill sizes="56px" className="object-cover" />
               </div>
               <div>
-                <div className="font-serif  tracking-tight">WiseMelon Ventures Pvt. Ltd.</div>
+                <div className="font-serif text-xl font-medium tracking-tight">WiseMelon Ventures Pvt. Ltd.</div>
                 <div className="mt-1 text-xs font-bold uppercase tracking-[0.18em] text-[#FFD76A]">Pune, India</div>
               </div>
             </div>
