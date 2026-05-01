@@ -2,7 +2,6 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
   ArrowRight,
   BadgeCheck,
@@ -169,18 +168,16 @@ function useRevealOnScroll<T extends HTMLElement>() {
 
 function Reveal({ children, className, delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
   const { ref, visible } = useRevealOnScroll<HTMLDivElement>();
-  const reduceMotion = useReducedMotion();
 
   return (
     <div
       ref={ref}
       className={cn(
-        'transition-all ease-out',
-        reduceMotion ? 'opacity-100 translate-y-0' : 'duration-300',
-        visible || reduceMotion ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5',
+        'transition-all duration-500 ease-out',
+        visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6',
         className
       )}
-      style={{ transitionDelay: reduceMotion ? '0ms' : `${delay}ms` }}
+      style={{ transitionDelay: `${delay}ms` }}
     >
       {children}
     </div>
@@ -205,7 +202,7 @@ function SectionKicker({ children, center = false, light = false }: { children: 
 
 function PrimaryButton({ href, children, className, external = false, download = false }: { href: string; children: React.ReactNode; className?: string; external?: boolean; download?: boolean }) {
   const commonClass = cn(
-    'group inline-flex items-center justify-center gap-2 rounded-full bg-[#F7C948] px-5 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-[#F7C948]/25 transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#FFD76A] hover:shadow-xl hover:shadow-[#F7C948]/30 active:translate-y-0',
+    'relative group inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-b from-[#FFD76A] to-[#F7C948] px-5 py-3 text-sm font-bold text-slate-950 shadow-[0_8px_20px_-6px_rgba(247,201,72,0.5),inset_0_1px_1px_rgba(255,255,255,0.4)] ring-1 ring-[#F7C948] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_12px_24px_-8px_rgba(247,201,72,0.6),inset_0_1px_1px_rgba(255,255,255,0.6)] hover:ring-[#FFD76A] active:translate-y-0 overflow-hidden',
     className
   );
 
@@ -229,7 +226,7 @@ function SecondaryButton({ href, children, download = false }: { href: string; c
     <a
       href={href}
       download={download}
-      className="group inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 bg-white/85 px-5 py-3 text-sm font-bold text-slate-900 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-[#0B1F3A]/35 hover:bg-white hover:shadow-lg active:translate-y-0"
+      className="group relative inline-flex items-center justify-center gap-2 rounded-full border border-slate-200/80 bg-white/60 px-5 py-3 text-sm font-bold text-slate-900 shadow-sm backdrop-blur-md transition-all duration-300 hover:-translate-y-0.5 hover:border-[#0B1F3A]/20 hover:bg-white/90 hover:shadow-[0_8px_20px_-6px_rgba(11,31,58,0.12)] active:translate-y-0 overflow-hidden"
     >
       {children}
     </a>
@@ -308,52 +305,43 @@ function Header() {
         </button>
       </div>
 
-      <AnimatePresence>
-        {mobileOpen && (
-          <motion.nav
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.22 }}
-            className="overflow-hidden border-t border-slate-200 bg-white lg:hidden"
-            aria-label="Mobile navigation"
-          >
-            <div className="mx-auto grid max-w-7xl gap-1 px-5 py-4">
-              {NAV_LINKS.map((link) => (
-                <button
-                  key={link.href}
-                  type="button"
-                  onClick={() => goToSection(link.href)}
-                  className="rounded-2xl px-4 py-3 text-left text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
-                >
-                  {link.label}
-                </button>
-              ))}
-              <Link href="/login" onClick={() => setMobileOpen(false)} className="rounded-2xl px-4 py-3 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50">
-                Login
-              </Link>
+      {mobileOpen && (
+        <nav
+          className="animate-slide-down overflow-hidden border-t border-slate-200 bg-white lg:hidden"
+          aria-label="Mobile navigation"
+        >
+          <div className="mx-auto grid max-w-7xl gap-1 px-5 py-4">
+            {NAV_LINKS.map((link) => (
               <button
+                key={link.href}
                 type="button"
-                onClick={() => goToSection('#contact')}
-                className="mt-2 rounded-2xl bg-[#0B1F3A] px-4 py-3 text-sm font-bold text-white"
+                onClick={() => goToSection(link.href)}
+                className="rounded-2xl px-4 py-3 text-left text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
               >
-                Contact sales
+                {link.label}
               </button>
-            </div>
-          </motion.nav>
-        )}
-      </AnimatePresence>
+            ))}
+            <Link href="/login" onClick={() => setMobileOpen(false)} className="rounded-2xl px-4 py-3 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50">
+              Login
+            </Link>
+            <button
+              type="button"
+              onClick={() => goToSection('#contact')}
+              className="mt-2 rounded-2xl bg-[#0B1F3A] px-4 py-3 text-sm font-bold text-white"
+            >
+              Contact sales
+            </button>
+          </div>
+        </nav>
+      )}
     </header>
   );
 }
 
 function HeroVisual() {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 22, scale: 0.98 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ duration: 0.7, delay: 0.12, ease: [0.16, 1, 0.3, 1] }}
-      className="relative mx-auto min-h-[500px] max-w-[560px] lg:min-h-[610px]"
+    <div
+      className="animate-slide-up-fade opacity-0 relative mx-auto min-h-[500px] max-w-[560px] lg:min-h-[610px]"
     >
       <div className="absolute inset-6 rounded-[2.5rem] bg-gradient-to-br from-[#0B1F3A] via-[#111A46] to-[#050816] shadow-2xl shadow-[#0B1F3A]/25" />
       <div className="absolute inset-x-12 top-8 h-40 rounded-full bg-[#F7C948]/25 blur-3xl" />
@@ -364,10 +352,8 @@ function HeroVisual() {
         </div>
       </div>
 
-      <motion.div
-        animate={{ y: [0, -8, 0] }}
-        transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
-        className="absolute bottom-20 left-1/2 z-20 w-[78%] -translate-x-1/2 rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-2xl shadow-slate-950/20 backdrop-blur"
+      <div
+        className="animate-float absolute bottom-20 left-1/2 z-20 w-[78%] -translate-x-1/2 rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-2xl shadow-slate-950/20 backdrop-blur"
       >
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -386,15 +372,13 @@ function HeroVisual() {
             </div>
           ))}
         </div>
-      </motion.div>
+      </div>
 
       {HERO_PRODUCTS.map(({ title, Icon, className }, index) => (
-        <motion.div
+        <div
           key={title}
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.45, delay: 0.3 + index * 0.08 }}
-          className={cn('absolute z-30 hidden rounded-2xl border border-white/50 bg-white/90 p-3 shadow-xl shadow-slate-950/10 backdrop-blur sm:block', className)}
+          style={{ animationDelay: `${0.3 + index * 0.08}s` }}
+          className={cn('animate-slide-up-fade opacity-0 absolute z-30 hidden rounded-2xl border border-white/50 bg-white/90 p-3 shadow-xl shadow-slate-950/10 backdrop-blur sm:block', className)}
         >
           <div className="flex items-center gap-2">
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#F7C948]/15 text-[#B7791F]">
@@ -402,24 +386,19 @@ function HeroVisual() {
             </span>
             <span className="text-xs font-extrabold text-slate-900">{title}</span>
           </div>
-        </motion.div>
+        </div>
       ))}
-    </motion.div>
+    </div>
   );
 }
 
 function Hero() {
-  const reduceMotion = useReducedMotion();
-
   return (
     <section className="relative overflow-hidden bg-[radial-gradient(circle_at_15%_20%,rgba(11,31,58,0.10),transparent_28%),radial-gradient(circle_at_90%_5%,rgba(247,201,72,0.18),transparent_24%),linear-gradient(180deg,#F8FAFC_0%,#FFFFFF_100%)]">
       <div className="absolute inset-0 bg-[linear-gradient(rgba(15,23,42,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.035)_1px,transparent_1px)] bg-[size:44px_44px]" />
       <div className="relative mx-auto grid max-w-7xl grid-cols-1 items-center gap-12 px-5 py-16 md:px-8 md:py-20 lg:grid-cols-12 lg:py-24">
-        <motion.div
-          initial={reduceMotion ? false : { opacity: 0, y: 24 }}
-          animate={reduceMotion ? {} : { opacity: 1, y: 0 }}
-          transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
-          className="lg:col-span-6"
+        <div
+          className="animate-slide-up-fade opacity-0 lg:col-span-6"
         >
           <div className="inline-flex items-center gap-2 rounded-full border border-[#0B1F3A]/15 bg-white/80 px-3 py-1.5 text-xs font-bold text-[#0B1F3A] shadow-sm">
             <Sparkles size={14} className="text-[#F7C948]" />
@@ -439,24 +418,21 @@ function Hero() {
               <Download size={17} /> Download catalogue
             </SecondaryButton>
           </div>
-          <motion.div
-            initial="hidden"
-            animate="visible"
-            variants={{ visible: { transition: { staggerChildren: 0.1, delayChildren: 0.28 } }, hidden: {} }}
+          <div
             className="mt-10 grid grid-cols-2 gap-3 sm:grid-cols-4"
           >
-            {STATS.map((stat) => (
-              <motion.div
+            {STATS.map((stat, index) => (
+              <div
                 key={stat.label}
-                variants={{ hidden: { opacity: 0, y: 14 }, visible: { opacity: 1, y: 0, transition: { duration: 0.28 } } }}
-                className="rounded-2xl border border-slate-200 bg-white/85 p-4 shadow-sm backdrop-blur"
+                style={{ animationDelay: `${0.28 + index * 0.1}s` }}
+                className="animate-slide-up-fade opacity-0 rounded-2xl border border-slate-200 bg-white/85 p-4 shadow-sm backdrop-blur"
               >
                 <div className="text-2xl font-black tracking-tight text-slate-950">{stat.value}</div>
                 <div className="mt-1 text-[11px] font-bold uppercase tracking-[0.13em] text-slate-500">{stat.label}</div>
-              </motion.div>
+              </div>
             ))}
-          </motion.div>
-        </motion.div>
+          </div>
+        </div>
         <div className="lg:col-span-6">
           <HeroVisual />
         </div>
@@ -520,12 +496,12 @@ function OfferCard({ title, subtitle, items, Icon, href, dark = false }: { title
     <div
       id={href.replace('#', '')}
       className={cn(
-        'group relative overflow-hidden rounded-[2rem] border p-7 transition-all duration-200 hover:-translate-y-1 hover:shadow-2xl md:p-8',
-        dark ? 'border-[#F7C948]/25 bg-[#0B1F3A] text-white hover:shadow-[#0B1F3A]/20' : 'border-slate-200 bg-white text-slate-950 hover:border-[#F7C948]/55 hover:shadow-slate-900/10'
+        'group relative overflow-hidden rounded-[2.5rem] border p-8 md:p-10 transition-all duration-500 hover:-translate-y-1 hover:shadow-2xl backdrop-blur-sm',
+        dark ? 'border-[#F7C948]/20 bg-[#0B1F3A]/95 text-white hover:border-[#F7C948]/40 hover:shadow-[#0B1F3A]/30' : 'border-slate-200/80 bg-white/90 text-slate-950 hover:border-[#F7C948]/40 hover:shadow-[0_20px_40px_-12px_rgba(11,31,58,0.1)]'
       )}
     >
-      <div className={cn('absolute right-[-4rem] top-[-4rem] h-40 w-40 rounded-full blur-2xl', dark ? 'bg-[#F7C948]/20' : 'bg-[#F7C948]/18')} />
-      <div className="relative">
+      <div className={cn('absolute right-[-6rem] top-[-6rem] h-56 w-56 rounded-full blur-3xl opacity-50 transition-opacity duration-500 group-hover:opacity-80', dark ? 'bg-[#F7C948]/20' : 'bg-[#F7C948]/15')} />
+      <div className="relative z-10">
         <div className={cn('flex h-14 w-14 items-center justify-center rounded-2xl', dark ? 'bg-[#F7C948] text-slate-950' : 'bg-[#0B1F3A]/6 text-[#0B1F3A]')}>
           <Icon size={26} />
         </div>
@@ -586,15 +562,18 @@ function ProductRange() {
         <div className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {PRODUCT_CATEGORIES.map(({ name, desc, Icon }, index) => (
             <Reveal key={name} delay={(index % 4) * 55}>
-              <div className="group h-full rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition-all duration-200 hover:-translate-y-1 hover:scale-[1.02] hover:border-[#F7C948] hover:shadow-xl hover:shadow-slate-900/10">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#0B1F3A]/6 text-[#0B1F3A] transition-colors group-hover:bg-[#F7C948]/15 group-hover:text-[#B7791F]">
-                    <Icon size={22} />
+              <div className="group relative overflow-hidden h-full rounded-[2rem] border border-slate-200/80 bg-white/70 p-7 backdrop-blur-sm shadow-sm transition-all duration-500 hover:-translate-y-1.5 hover:border-[#F7C948]/50 hover:bg-white/95 hover:shadow-[0_20px_40px_-12px_rgba(11,31,58,0.08)]">
+                <div className="absolute inset-0 bg-gradient-to-br from-[#F7C948]/5 to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
+                <div className="relative z-10">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#0B1F3A]/5 text-[#0B1F3A] shadow-sm transition-colors duration-500 group-hover:bg-[#F7C948] group-hover:text-slate-950">
+                      <Icon size={24} />
+                    </div>
+                    <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-slate-400 shadow-sm transition-colors group-hover:border-[#F7C948]/30 group-hover:text-[#B7791F]">Product</span>
                   </div>
-                  <span className="rounded-full bg-slate-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Product</span>
+                  <h3 className="mt-8 text-xl font-black tracking-tight text-slate-950">{name}</h3>
+                  <p className="mt-3 text-sm leading-6 text-slate-600">{desc}</p>
                 </div>
-                <h3 className="mt-6 text-lg font-black tracking-[-0.02em] text-slate-950">{name}</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-600">{desc}</p>
               </div>
             </Reveal>
           ))}
@@ -615,26 +594,33 @@ function UseCases() {
         <div className="mt-12 grid grid-cols-1 gap-5 lg:grid-cols-3">
           {USE_CASES.map(({ label, title, desc, Icon, points }, index) => (
             <Reveal key={label} delay={index * 80}>
-              <article id={index === 0 ? 'school-solutions' : index === 1 ? 'corporate-solutions' : undefined} className="group flex h-full flex-col rounded-[2rem] border border-slate-200 bg-white p-7 shadow-sm transition-all duration-200 hover:-translate-y-1 hover:border-[#F7C948]/55 hover:shadow-xl hover:shadow-slate-900/10">
-                <div className="flex items-center gap-4">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#0B1F3A] p-3 text-white">
-                    <Icon size={24} />
+              <article id={index === 0 ? 'school-solutions' : index === 1 ? 'corporate-solutions' : undefined} className="group relative h-full flex-col overflow-hidden rounded-[2.5rem] border border-slate-200/80 bg-white p-8 shadow-sm transition-all duration-500 hover:-translate-y-1 hover:border-[#0B1F3A]/20 hover:shadow-[0_20px_40px_-12px_rgba(11,31,58,0.1)]">
+                <div className="absolute right-0 top-0 h-40 w-40 -translate-y-1/2 translate-x-1/2 rounded-full bg-[#F7C948]/10 blur-3xl transition-opacity duration-500 group-hover:bg-[#F7C948]/20" />
+                <div className="relative z-10 flex h-full flex-col">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#0B1F3A] text-white shadow-md transition-transform duration-500 group-hover:scale-110">
+                      <Icon size={24} />
+                    </div>
+                    <div className="text-xs font-black uppercase tracking-[0.18em] text-[#B7791F]">{label}</div>
                   </div>
-                  <div className="text-xs font-black uppercase tracking-[0.18em] text-[#B7791F]">{label}</div>
+                  <h3 className="mt-8 text-3xl font-black tracking-[-0.035em] text-slate-950">{title}</h3>
+                  <p className="mt-4 text-base leading-7 text-slate-600">{desc}</p>
+                  <ul className="mt-6 grid gap-3">
+                    {points.map((point) => (
+                      <li key={point} className="flex items-start gap-3 text-sm font-semibold text-slate-700">
+                        <div className="mt-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#0B1F3A]/10 text-[#0B1F3A]">
+                          <CheckCircle2 size={12} strokeWidth={3} />
+                        </div>
+                        {point}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-auto pt-8">
+                    <a href="#contact" className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-4 py-2 text-sm font-extrabold text-[#0B1F3A] transition-colors hover:bg-slate-100">
+                      Talk to us about this <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
+                    </a>
+                  </div>
                 </div>
-                <h3 className="mt-6 text-2xl font-black tracking-[-0.035em] text-slate-950">{title}</h3>
-                <p className="mt-3 text-sm leading-7 text-slate-600">{desc}</p>
-                <ul className="mt-5 grid gap-2.5">
-                  {points.map((point) => (
-                    <li key={point} className="flex items-start gap-2.5 text-sm font-semibold text-slate-700">
-                      <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-[#0B1F3A]" />
-                      {point}
-                    </li>
-                  ))}
-                </ul>
-                <a href="#contact" className="mt-7 inline-flex items-center gap-2 text-sm font-extrabold text-[#0B1F3A]">
-                  Talk to us about this <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
-                </a>
               </article>
             </Reveal>
           ))}
@@ -655,12 +641,12 @@ function WhyChooseUs() {
         <div className="mt-12 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {TRUST_POINTS.map(({ title, desc, Icon }, index) => (
             <Reveal key={title} delay={index * 70}>
-              <div className="group h-full rounded-3xl border border-slate-200 bg-slate-50 p-6 transition-all duration-200 hover:-translate-y-1 hover:scale-[1.02] hover:border-[#F7C948] hover:bg-white hover:shadow-xl hover:shadow-slate-900/10">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-[#0B1F3A] shadow-sm transition-colors group-hover:bg-[#F7C948] group-hover:text-slate-950">
-                  <Icon size={22} />
+              <div className="group relative overflow-hidden h-full rounded-3xl border border-slate-200/60 bg-slate-50/50 p-8 transition-all duration-500 hover:-translate-y-1 hover:border-[#F7C948]/40 hover:bg-white hover:shadow-[0_16px_32px_-12px_rgba(11,31,58,0.06)]">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-[#0B1F3A] shadow-sm ring-1 ring-slate-200/50 transition-colors duration-500 group-hover:bg-[#F7C948] group-hover:text-slate-950 group-hover:ring-[#F7C948]">
+                  <Icon size={24} />
                 </div>
-                <h3 className="mt-6 text-lg font-black tracking-[-0.02em] text-slate-950">{title}</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-600">{desc}</p>
+                <h3 className="mt-8 text-xl font-black tracking-tight text-slate-950">{title}</h3>
+                <p className="mt-3 text-sm leading-6 text-slate-600">{desc}</p>
               </div>
             </Reveal>
           ))}
@@ -672,8 +658,12 @@ function WhyChooseUs() {
 
 function CatalogueCTA() {
   return (
-    <section id="catalogue" className="scroll-mt-24 bg-[#0B1F3A] py-20 text-white md:py-28">
-      <div className="mx-auto grid max-w-7xl grid-cols-1 items-center gap-12 px-5 md:px-8 lg:grid-cols-12">
+    <section id="catalogue" className="relative scroll-mt-24 overflow-hidden bg-[#0B1F3A] py-20 text-white md:py-32">
+      <div className="absolute left-0 top-0 h-full w-full opacity-20" style={{ backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px)', backgroundSize: '4rem 4rem' }} />
+      <div className="absolute right-[10%] top-[20%] h-[40rem] w-[40rem] rounded-full bg-[#F7C948]/10 blur-[100px]" />
+      <div className="absolute bottom-[-10%] left-[-10%] h-[30rem] w-[30rem] rounded-full bg-[#4169E1]/20 blur-[100px]" />
+      
+      <div className="relative mx-auto grid max-w-7xl grid-cols-1 items-center gap-16 px-5 md:px-8 lg:grid-cols-12">
         <Reveal className="lg:col-span-7">
           <SectionKicker light>Catalogue & demo</SectionKicker>
           <h2 className="mt-5 text-4xl font-black leading-tight tracking-[-0.045em] md:text-5xl">Explore the full catalogue and discuss your next supply requirement.</h2>
