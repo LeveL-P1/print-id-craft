@@ -708,7 +708,7 @@ function Footer() {
   );
 }
 
-export default function LandingPage() {
+export default function ProductsPage() {
   return (
     <div
       className="landing-page min-h-screen scroll-smooth bg-white text-[#0B1F3A] antialiased"
@@ -716,8 +716,9 @@ export default function LandingPage() {
     >
       <Header />
       <main>
-        <Hero />
         <Services />
+        <ProductRange />
+        <UseCases />
         <CatalogueCTA />
       </main>
       <Footer />
