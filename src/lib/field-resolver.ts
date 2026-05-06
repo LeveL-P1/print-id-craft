@@ -27,8 +27,9 @@ export const FIELD_GROUPS: Record<string, string[]> = {
   dateofbirth: ["dob", "dateofbirth", "birthdate", "birthday"],
   bloodgroup: ["bloodgroup", "blood group", "bg"],
   admissionno: ["admissionno", "admno", "registrationno", "regno"],
-  photoid: ["photoid", "photo_id", "imageid", "imgid"],
+  photoid: ["photoid", "photo_id", "imageid", "imgid", "photono", "photo_no", "photonumber", "img", "imgno", "img_no", "imageno", "image_no"],
   serialnumber: ["serialnumber", "serial", "sr"],
+  flagcolor: ["flagcolor", "flag_color", "flag", "house", "housecolor", "house_color", "colour", "color", "team", "group"],
 }
 
 /**

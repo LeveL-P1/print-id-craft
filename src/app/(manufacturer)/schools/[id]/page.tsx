@@ -117,6 +117,12 @@ export default function SchoolDetailPage() {
   const [manualSearchQuery, setManualSearchQuery] = useState('')
   const [allStudentsList, setAllStudentsList] = useState<any[]>([])
 
+  // Flag management
+  const [flagUploadOpen, setFlagUploadOpen] = useState(false)
+  const [flagColors, setFlagColors] = useState<string[]>([])
+  const [flagImages, setFlagImages] = useState<Record<string, string>>({})
+  const [flagUploading, setFlagUploading] = useState<string>('')
+
   const fetchSchool = async () => {
     try {
       const res = await fetch(`/api/schools/${schoolId}`)
@@ -166,7 +172,7 @@ export default function SchoolDetailPage() {
   }
 
   useEffect(() => {
-    Promise.all([fetchSchool(), fetchClasses(), fetchTemplate(), fetchStudents(), fetchBatches()]).finally(() => setLoading(false))
+    Promise.all([fetchSchool(), fetchClasses(), fetchTemplate(), fetchStudents(), fetchBatches(), fetchFlags()]).finally(() => setLoading(false))
   }, [schoolId])
 
   // Re-fetch students when filters/search change (but not on initial tab switch)
@@ -383,6 +389,13 @@ export default function SchoolDetailPage() {
       if (data.success) {
         setImportPreview(data.data)
         setImportStep("preview")
+        // If flag colors were detected, update the flag state
+        if (data.data.hasFlagColumn && data.data.uniqueFlagColors?.length > 0) {
+          setFlagColors(prev => {
+            const merged = new Set([...prev, ...data.data.uniqueFlagColors])
+            return Array.from(merged)
+          })
+        }
       } else {
         toast.error(data.error || "Validation failed")
       }
@@ -536,6 +549,43 @@ export default function SchoolDetailPage() {
     setManualAssigning('')
     setManualSearchQuery('')
     setAllStudentsList([])
+  }
+
+  // Flag management handlers
+  const fetchFlags = async () => {
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/flags`)
+      const data = await res.json()
+      if (data.success) {
+        setFlagColors(data.data.colors || [])
+        const imgMap: Record<string, string> = {}
+        for (const f of data.data.flags || []) {
+          if (f.imageUrl) imgMap[f.color] = f.imageUrl
+        }
+        setFlagImages(imgMap)
+      }
+    } catch (err) { console.error(err) }
+  }
+
+  const handleFlagUpload = async (color: string, file: File) => {
+    setFlagUploading(color)
+    try {
+      const fd = new FormData()
+      fd.append("file", file)
+      fd.append("color", color)
+      const res = await fetch(`/api/schools/${schoolId}/flags`, { method: "POST", body: fd })
+      const data = await res.json()
+      if (data.success) {
+        toast.success(`Flag image uploaded for "${color}"!`)
+        setFlagImages(prev => ({ ...prev, [color]: data.data.imageUrl }))
+      } else {
+        toast.error(data.error || "Flag upload failed")
+      }
+    } catch (err) {
+      toast.error("Flag upload failed")
+    } finally {
+      setFlagUploading('')
+    }
   }
 
   // Manual photo assignment handler
@@ -983,6 +1033,12 @@ export default function SchoolDetailPage() {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
                 Bulk Upload Photos
               </button>
+              {flagColors.length > 0 && (
+                <button className="btn btn-outline" onClick={() => setFlagUploadOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#f59e0b', color: '#d97706' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>
+                  Manage Flags ({flagColors.length})
+                </button>
+              )}
               <a href={`/api/schools/${schoolId}/students/import-template`} className="btn btn-outline" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', textDecoration: 'none', fontSize: 13 }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
                 Download Template
@@ -1690,6 +1746,104 @@ export default function SchoolDetailPage() {
               </div>
             </div>
           )}
+
+          {/* FLAG UPLOAD MODAL */}
+          {flagUploadOpen && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 24 }} onClick={() => setFlagUploadOpen(false)}>
+              <div style={{ background: 'white', borderRadius: 20, maxWidth: 640, width: '100%', maxHeight: '90vh', overflow: 'auto', boxShadow: '0 25px 50px rgba(0,0,0,0.25)' }} onClick={e => e.stopPropagation()}>
+                <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>🏴 Manage Flag Images</h2>
+                    <p style={{ fontSize: 13, color: '#64748b' }}>Upload flag/house images for each color group. These will appear on student ID cards.</p>
+                  </div>
+                  <button onClick={() => setFlagUploadOpen(false)} style={{ width: 32, height: 32, borderRadius: 8, border: 'none', background: '#f1f5f9', cursor: 'pointer', fontSize: 16 }}>✕</button>
+                </div>
+
+                <div style={{ padding: 24 }}>
+                  {flagColors.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>
+                      <div style={{ fontSize: 48, marginBottom: 12 }}>🏳️</div>
+                      <p style={{ fontSize: 14 }}>No flag colors found. Import students with a "Flag Color" / "House" / "Colour" column in the Excel to detect colors.</p>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'grid', gap: 16 }}>
+                      {flagColors.map(color => {
+                        const hasImage = !!flagImages[color]
+                        return (
+                          <div key={color} style={{
+                            display: 'flex', alignItems: 'center', gap: 16, padding: 16,
+                            background: hasImage ? '#f0fdf4' : '#fffbeb',
+                            border: `1.5px solid ${hasImage ? '#bbf7d0' : '#fde68a'}`,
+                            borderRadius: 14,
+                          }}>
+                            {/* Color label */}
+                            <div style={{
+                              width: 48, height: 48, borderRadius: 12,
+                              background: color.toLowerCase(),
+                              border: '2px solid rgba(0,0,0,0.1)',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              fontSize: 20, flexShrink: 0,
+                            }}>
+                              🏴
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', textTransform: 'capitalize', marginBottom: 4 }}>
+                                {color}
+                              </div>
+                              {hasImage ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <img src={flagImages[color]} alt={`${color} flag`} style={{ width: 40, height: 28, objectFit: 'contain', borderRadius: 4, border: '1px solid #e2e8f0' }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                                  <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 600 }}>Uploaded</span>
+                                </div>
+                              ) : (
+                                <span style={{ fontSize: 12, color: '#d97706' }}>No flag image uploaded yet</span>
+                              )}
+                            </div>
+                            {/* Upload button */}
+                            <div>
+                              <input
+                                id={`flag-input-${color}`}
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp,image/gif,image/bmp"
+                                style={{ display: 'none' }}
+                                onChange={e => {
+                                  const f = e.target.files?.[0]
+                                  if (f) handleFlagUpload(color, f)
+                                  e.target.value = ''
+                                }}
+                              />
+                              <button
+                                className="btn btn-outline"
+                                onClick={() => document.getElementById(`flag-input-${color}`)?.click()}
+                                disabled={flagUploading === color}
+                                style={{
+                                  fontSize: 12, padding: '8px 16px',
+                                  borderColor: hasImage ? '#22c55e' : '#f59e0b',
+                                  color: hasImage ? '#16a34a' : '#d97706',
+                                }}
+                              >
+                                {flagUploading === color ? 'Uploading...' : hasImage ? 'Replace' : 'Upload Flag'}
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: 20, padding: 14, background: '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe' }}>
+                    <div style={{ fontSize: 12, color: '#1e40af', lineHeight: 1.8 }}>
+                      <strong>How it works:</strong> Upload a flag/house image for each color group. When printing ID cards, the correct flag will be placed on each student's card based on their assigned color from the Excel sheet.
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
+                    <button className="btn btn-primary" onClick={() => setFlagUploadOpen(false)} style={{ padding: '10px 28px' }}>Done</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           </>
         )}
 
@@ -2003,6 +2157,7 @@ export default function SchoolDetailPage() {
                         fieldMappings={templateData.fieldMappings as any[]}
                         formData={selectedStudent.formData as Record<string, string>}
                         studentPhoto={selectedStudent.photoUrl}
+                        flagImageUrl={flagImages[(selectedStudent.formData as Record<string, string>)?.flagColor] || undefined}
                         scale={1}
                         watermark="PREVIEW"
                       />
@@ -2015,6 +2170,7 @@ export default function SchoolDetailPage() {
                           fieldMappings={templateData.backFieldMappings as any[] || []}
                           formData={selectedStudent.formData as Record<string, string>}
                           studentPhoto={selectedStudent.photoUrl}
+                          flagImageUrl={flagImages[(selectedStudent.formData as Record<string, string>)?.flagColor] || undefined}
                           scale={1}
                           watermark="PREVIEW"
                         />

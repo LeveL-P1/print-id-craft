@@ -107,6 +107,15 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     labelToKey["photo id"] = "photoId"
     labelToKey["photoid"] = "photoId"
     labelToKey["photo_id"] = "photoId"
+    labelToKey["photo no"] = "photoId"
+    labelToKey["photo no."] = "photoId"
+    labelToKey["photo number"] = "photoId"
+    labelToKey["photo_no"] = "photoId"
+    labelToKey["img"] = "photoId"
+    labelToKey["img no"] = "photoId"
+    labelToKey["img no."] = "photoId"
+    labelToKey["image no"] = "photoId"
+    labelToKey["image no."] = "photoId"
 
     // Class / Section aliases
     labelToKey["class"] = "class"
@@ -124,6 +133,22 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     labelToKey["sr no."] = "srNo"
     labelToKey["sr. no."] = "srNo"
     labelToKey["s.no"] = "srNo"
+
+    // Flag / House color aliases
+    labelToKey["flag"] = "flagColor"
+    labelToKey["flag color"] = "flagColor"
+    labelToKey["flag colour"] = "flagColor"
+    labelToKey["flag_color"] = "flagColor"
+    labelToKey["house"] = "flagColor"
+    labelToKey["house color"] = "flagColor"
+    labelToKey["house colour"] = "flagColor"
+    labelToKey["house_color"] = "flagColor"
+    labelToKey["team"] = "flagColor"
+    labelToKey["team color"] = "flagColor"
+    labelToKey["colour"] = "flagColor"
+    labelToKey["color"] = "flagColor"
+    labelToKey["group color"] = "flagColor"
+    labelToKey["group colour"] = "flagColor"
 
     // Map Excel columns to our field keys
     const excelHeaders = rawRows.length > 0 ? Object.keys(rawRows[0]) : []
@@ -145,6 +170,17 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const photoIdHeader = excelHeaders.find(h => {
       const n = h.toLowerCase().trim()
       return n === "photo id" || n === "photoid" || n === "photo_id" || n === "photo"
+        || n === "photo no" || n === "photo no." || n === "photo_no" || n === "photo number"
+        || n === "img" || n === "img no" || n === "img no." || n === "image no" || n === "image no."
+    })
+
+    // Detect flag/house color column
+    const flagColumnHeader = excelHeaders.find(h => {
+      const n = h.toLowerCase().trim()
+      return n === "flag" || n === "flag color" || n === "flag colour" || n === "flag_color"
+        || n === "house" || n === "house color" || n === "house colour" || n === "house_color"
+        || n === "team" || n === "team color" || n === "colour" || n === "color"
+        || n === "group color" || n === "group colour"
     })
 
     // If we have class column, gather unique class names and auto-create them
@@ -290,6 +326,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         ? Array.from(new Set(validRows.map(r => r.className))).filter(Boolean)
         : []
 
+      // Gather unique flag colors from imported data
+      const uniqueFlagColors = flagColumnHeader
+        ? Array.from(new Set(validRows.map(r => r.formData.flagColor).filter(Boolean)))
+        : []
+
       return NextResponse.json({
         success: true,
         data: {
@@ -300,6 +341,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
           autoClasses,
           hasPhotoIdColumn: !!photoIdHeader,
           hasClassColumn: !!classColumnHeader,
+          hasFlagColumn: !!flagColumnHeader,
+          uniqueFlagColors,
           preview: validRows.slice(0, 10).map(r => ({
             ...r.formData,
             _rowNum: r.rowNum,

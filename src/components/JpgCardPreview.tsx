@@ -5,7 +5,7 @@ type FieldMapping = {
   id: string
   fieldKey: string
   label: string
-  type: "text" | "photo"
+  type: "text" | "photo" | "flag"
   x: number
   y: number
   width: number
@@ -22,6 +22,7 @@ type JpgCardPreviewProps = {
   fieldMappings: FieldMapping[]
   formData: Record<string, string>
   studentPhoto?: string
+  flagImageUrl?: string
   scale?: number
   className?: string
   watermark?: string
@@ -60,8 +61,9 @@ const FIELD_GROUPS: Record<string, string[]> = {
   dateofbirth: ["dob", "dateofbirth", "birthdate"],
   bloodgroup: ["bloodgroup"],
   admissionno: ["admissionno", "admno"],
-  photoid: ["photoid", "photo_id"],
+  photoid: ["photoid", "photo_id", "photono", "photo_no", "photonumber", "img", "imgno", "img_no", "imageno", "image_no"],
   serialnumber: ["serialnumber", "serial"],
+  flagcolor: ["flagcolor", "flag_color", "flag", "house", "housecolor", "house_color", "colour", "color", "team"],
 }
 
 export function resolveFieldValue(fd: Record<string, string>, fieldKey: string): string {
@@ -89,6 +91,7 @@ export default function JpgCardPreview({
   fieldMappings,
   formData,
   studentPhoto,
+  flagImageUrl,
   scale = 1,
   className,
   watermark,
@@ -141,6 +144,15 @@ export default function JpgCardPreview({
               ctx.fillRect(fx, fy, fw, fh)
             }
           }
+        } else if (field.type === "flag") {
+          if (flagImageUrl) {
+            try {
+              const flagImg = await loadImage(flagImageUrl)
+              ctx.drawImage(flagImg, 0, 0, flagImg.naturalWidth, flagImg.naturalHeight, fx, fy, fw, fh)
+            } catch (err) {
+              // Flag image failed to load — skip silently
+            }
+          }
         } else {
           const value = resolveFieldValue(formData, field.fieldKey)
           if (value) {
@@ -191,7 +203,7 @@ export default function JpgCardPreview({
     } catch (err) {
       console.error("Render failed", err)
     }
-  }, [templateImageUrl, fieldMappings, formData, studentPhoto, scale, watermark])
+  }, [templateImageUrl, fieldMappings, formData, studentPhoto, flagImageUrl, scale, watermark])
 
   const renderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -227,7 +239,8 @@ export async function generateJpgCard(
   fieldMappings: FieldMapping[],
   formData: Record<string, string>,
   studentPhoto?: string,
-  outputScale: number = 1
+  outputScale: number = 1,
+  flagImageUrl?: string
 ): Promise<string> {
   const canvas = document.createElement("canvas")
   const ctx = canvas.getContext("2d")
@@ -261,6 +274,11 @@ export async function generateJpgCard(
           sy = (photoImg.naturalHeight - sh) / 2
         }
         ctx.drawImage(photoImg, sx, sy, sw, sh, fx, fy, fw, fh)
+      } catch {}
+    } else if (field.type === "flag" && flagImageUrl) {
+      try {
+        const flagImg = await loadImage(flagImageUrl)
+        ctx.drawImage(flagImg, 0, 0, flagImg.naturalWidth, flagImg.naturalHeight, fx, fy, fw, fh)
       } catch {}
     } else if (field.type === "text") {
       const value = resolveFieldValue(formData, field.fieldKey)

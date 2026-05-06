@@ -51,10 +51,34 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
       const fd = s.formData as Record<string, string>
 
-      // Photo ID match (primary — from Excel "Photo ID" column)
-      const photoId = fd?.photoId || fd?.["Photo ID"] || fd?.["photo_id"] || fd?.["PhotoID"] || ""
+      // Photo ID match (primary — from Excel "Photo ID" / "PHOTO NO." column)
+      // First try explicit known keys
+      let photoId = fd?.photoId || fd?.["Photo ID"] || fd?.["photo_id"] || fd?.["PhotoID"] 
+        || fd?.["PHOTO NO."] || fd?.["Photo No"] || fd?.["Photo No."] || fd?.["photo no"] || fd?.["photo no."]
+        || fd?.["photo_no"] || fd?.["Photo Number"] || fd?.["photo number"]
+        || fd?.["IMG"] || fd?.["Img"] || fd?.["img"] || fd?.["Img No"] || fd?.["img no"] || fd?.["Image No"] || fd?.["image no"]
+        || ""
+      // Fallback: scan all formData keys for anything that looks like a photo/image ID column
+      if (!photoId && fd) {
+        for (const [key, val] of Object.entries(fd)) {
+          const kl = key.toLowerCase().replace(/[^a-z0-9]/g, "")
+          if ((kl.includes("photo") || kl.includes("image") || kl.includes("img")) 
+              && (kl.includes("no") || kl.includes("id") || kl.includes("num"))
+              && val) {
+            photoId = String(val)
+            break
+          }
+        }
+      }
       if (photoId) {
-        byPhotoId[String(photoId).toLowerCase().trim()] = s
+        const pidClean = String(photoId).toLowerCase().trim()
+        byPhotoId[pidClean] = s
+        // Also index without common prefixes for flexible matching
+        // e.g., "IMG_2803" → also index "2803"
+        const numericPart = pidClean.replace(/^[a-z]+[_\-\s]*/i, "")
+        if (numericPart && numericPart !== pidClean) {
+          byPhotoId[numericPart] = s
+        }
       }
 
       // Roll number match
@@ -113,8 +137,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       const batch = files.slice(i, i + BATCH_SIZE)
       await Promise.all(batch.map(async (file) => {
         const filename = file.name
+        // Strip folder prefix (e.g., "Photos/IMG_2767.jpg" → "IMG_2767.jpg")
+        const fileNameOnly = filename.includes("/") ? filename.split("/").pop()! : filename
         // Strip extension to get the identity key
-        const baseName = filename.replace(/\.[^.]+$/, "").trim()
+        const baseName = fileNameOnly.replace(/\.[^.]+$/, "").trim()
         const baseNameLower = baseName.toLowerCase()
         // Also strip underscores/hyphens for fuzzy match
         const baseNameNormalized = baseNameLower.replace(/[\s_-]+/g, "")

@@ -37,7 +37,7 @@ type FieldMapping = {
   id: string
   fieldKey: string
   label: string
-  type: "text" | "photo"
+  type: "text" | "photo" | "flag"
   x: number // percentage from left
   y: number // percentage from top
   width: number // percentage of image width
@@ -598,7 +598,7 @@ export default function JpgTemplateMapper({
       .replace(/^_|_$/g, "") || `field_${Date.now()}`
   }
 
-  const addFieldMapping = (fieldKey: string, label: string, type: "text" | "photo" = "text") => {
+  const addFieldMapping = (fieldKey: string, label: string, type: "text" | "photo" | "flag" = "text") => {
     // Prevent duplicate fieldKeys
     if (mappings.find((m) => m.fieldKey === fieldKey)) {
       alert(`Field "${label}" is already placed on the template.`)
@@ -612,10 +612,10 @@ export default function JpgTemplateMapper({
       fieldKey,
       label,
       type,
-      x: type === "photo" ? 5 : 40,
-      y: type === "photo" ? 25 : 30 + mappings.filter((m) => m.type === "text").length * 6,
-      width: type === "photo" ? 18 : 30,
-      height: type === "photo" ? 32 : 4.5,
+      x: type === "photo" ? 5 : type === "flag" ? 75 : 40,
+      y: type === "photo" ? 25 : type === "flag" ? 5 : 30 + mappings.filter((m) => m.type === "text").length * 6,
+      width: type === "photo" ? 18 : type === "flag" ? 12 : 30,
+      height: type === "photo" ? 32 : type === "flag" ? 18 : 4.5,
       fontSize: 14,
       fontColor: "#000000",
       fontWeight: fieldKey === "name" || fieldKey === "fullName" ? "bold" : "normal",
@@ -1598,7 +1598,7 @@ export default function JpgTemplateMapper({
             {mappings.map((m) => {
               const isSelected = m.id === selectedId
               const sampleValue =
-                m.type === "photo"
+                m.type === "photo" || m.type === "flag"
                   ? ""
                   : SAMPLE_DATA[m.fieldKey] || m.label
 
@@ -1618,18 +1618,20 @@ export default function JpgTemplateMapper({
                     top: `${m.y}%`,
                     width: `${m.width}%`,
                     height: `${m.height}%`,
-                    border: m.type === "photo" && (m.photoBorderWidth || 0) > 0
+                    border: (m.type === "photo" || m.type === "flag") && (m.photoBorderWidth || 0) > 0
                       ? `${m.photoBorderWidth}px solid ${m.photoBorderColor || "#000"}`
                       : showPreview
                       ? "none"
                       : `2px ${isSelected ? "solid" : "dashed"} ${
-                          isSelected ? "#3b82f6" : "rgba(255,255,255,0.6)"
+                          isSelected ? "#3b82f6" : m.type === "flag" ? "#f59e0b" : "rgba(255,255,255,0.6)"
                         }`,
-                    borderRadius: m.type === "photo"
+                    borderRadius: (m.type === "photo" || m.type === "flag")
                       ? `${m.photoBorderRadius || 0}px`
                       : 2,
                     background: m.type === "photo"
                       ? showPreview ? "transparent" : "rgba(59, 130, 246, 0.15)"
+                      : m.type === "flag"
+                      ? showPreview ? "transparent" : "rgba(245, 158, 11, 0.15)"
                       : showPreview
                       ? "transparent"
                       : isSelected
@@ -1638,8 +1640,8 @@ export default function JpgTemplateMapper({
                     cursor: showPreview ? "default" : "move",
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: m.type === "photo" ? "center" : "flex-start",
-                    padding: m.type === "photo" ? 0 : "0 4px",
+                    justifyContent: (m.type === "photo" || m.type === "flag") ? "center" : "flex-start",
+                    padding: (m.type === "photo" || m.type === "flag") ? 0 : "0 4px",
                     overflow: "hidden",
                     boxShadow: isSelected
                       ? "0 0 0 2px rgba(59,130,246,0.3)"
@@ -1700,6 +1702,18 @@ export default function JpgTemplateMapper({
                         </svg>
                       </div>
                     )
+                  ) : m.type === "flag" ? (
+                    <div
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <span style={{ fontSize: showPreview ? 20 : 16, opacity: showPreview ? 0.5 : 0.9 }}>🏴</span>
+                    </div>
                   ) : (
                     (() => {
                       const displayText =
@@ -3226,6 +3240,30 @@ export default function JpgTemplateMapper({
                 }}
               >
                 📷 Add Photo Placeholder
+              </button>
+            )}
+
+            {/* Flag button */}
+            {!mappings.find((m) => m.type === "flag") && (
+              <button
+                onClick={() => addFieldMapping("flag", "House Flag", "flag")}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  border: "1.5px dashed #f59e0b",
+                  borderRadius: 8,
+                  background: "#fffbeb",
+                  color: "#d97706",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  marginBottom: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                🏴 Add Flag Placeholder
               </button>
             )}
 

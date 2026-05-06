@@ -9,7 +9,7 @@ type FieldMapping = {
   id: string
   fieldKey: string
   label: string
-  type: "text" | "photo"
+  type: "text" | "photo" | "flag"
   x: number
   y: number
   width: number
@@ -138,6 +138,7 @@ async function renderIdCard(
   templateImageUrl: string,
   fieldMappings: FieldMapping[],
   student: StudentRenderData,
+  flagImageUrl?: string,
 ): Promise<string> {
   const templateImg = await getCachedImage(templateImageUrl)
   if (!templateImg) throw new Error("Failed to load template")
@@ -194,6 +195,13 @@ async function renderIdCard(
           ctx.drawImage(photoImg, 0, 0, photoImg.naturalWidth, photoImg.naturalHeight, dx, dy, dw, dh)
         }
       }
+    } else if (field.type === "flag") {
+      if (flagImageUrl) {
+        const flagImg = await getCachedImage(flagImageUrl)
+        if (flagImg) {
+          ctx.drawImage(flagImg, 0, 0, flagImg.naturalWidth, flagImg.naturalHeight, fx, fy, fw, fh)
+        }
+      }
     } else {
       const pId = field.fieldKey === "photoId" ? "photoid" : field.fieldKey
       const val = resolveFieldValue(student.formData, pId) || 
@@ -244,6 +252,7 @@ async function renderIdCardSvg(
   templateImageUrl: string,
   fieldMappings: FieldMapping[],
   student: StudentRenderData,
+  flagImageUrl?: string,
 ): Promise<string> {
   const templateImg = await getCachedImage(templateImageUrl)
   if (!templateImg) throw new Error("Failed to load template")
@@ -273,6 +282,11 @@ async function renderIdCardSvg(
         const clipId = `clip-${field.id}`
         lines.push(`  <defs><clipPath id="${clipId}"><rect x="${fx}" y="${fy}" width="${fw}" height="${fh}" /></clipPath></defs>`)
         lines.push(`  <image href="${photoDataUrl}" x="${fx}" y="${fy}" width="${fw}" height="${fh}" preserveAspectRatio="xMidYMid slice" clip-path="url(#${clipId})" />`)
+      }
+    } else if (field.type === "flag") {
+      if (flagImageUrl) {
+        const flagDataUrl = await imageToDataUrl(flagImageUrl)
+        lines.push(`  <image href="${flagDataUrl}" x="${fx}" y="${fy}" width="${fw}" height="${fh}" preserveAspectRatio="xMidYMid meet" />`)
       }
     } else {
       const pId = field.fieldKey === "photoId" ? "photoid" : field.fieldKey
@@ -647,6 +661,30 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
 
       setProgress({ current: 0, total: totalCount, status: "Rendering front side..." })
 
+      // Fetch flag images for this school (if any flag field exists in mappings)
+      let flagImagesMap: Record<string, string> = {}
+      const hasFlagField = fieldMappings.some((f: any) => f.type === "flag") ||
+                           (backFieldMappings || []).some((f: any) => f.type === "flag")
+      if (hasFlagField) {
+        try {
+          const flagRes = await fetch(`/api/schools/${schoolId}/flags`)
+          const flagData = await flagRes.json()
+          if (flagData.success) {
+            for (const f of flagData.data.flags || []) {
+              if (f.color && f.imageUrl) flagImagesMap[f.color] = f.imageUrl
+            }
+          }
+        } catch {}
+      }
+
+      // Helper to resolve flag URL for a student
+      const getFlagUrl = (student: any): string | undefined => {
+        if (!hasFlagField) return undefined
+        const fd = student.formData as Record<string, string>
+        const color = fd?.flagColor || fd?.["Flag Color"] || fd?.["house"] || fd?.["House"] || fd?.["colour"] || fd?.["Colour"] || ""
+        return color ? flagImagesMap[color] : undefined
+      }
+
       // Pre-load template images
       await getCachedImage(templateImageUrl)
       if (hasBackSide && backTemplateImageUrl) {
@@ -664,10 +702,10 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
           const promises = chunk.map(async (student: any) => {
             try {
               // Renders at fixed 661×1039 (300 DPI, 56×88mm) as JPEG
-              const frontDataUrl = await renderIdCard(templateImageUrl, fieldMappings, student)
+              const frontDataUrl = await renderIdCard(templateImageUrl, fieldMappings, student, getFlagUrl(student))
               let backDataUrl: string | undefined
               if (hasBackSide && backTemplateImageUrl && backFieldMappings?.length > 0) {
-                backDataUrl = await renderIdCard(backTemplateImageUrl, backFieldMappings, student)
+                backDataUrl = await renderIdCard(backTemplateImageUrl, backFieldMappings, student, getFlagUrl(student))
               }
               return { serialNumber: student.serialNumber, frontDataUrl, backDataUrl }
             } catch (err) {
@@ -729,21 +767,21 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
           const chunk = students.slice(i, i + CHUNK_SIZE)
           for (const student of chunk) {
             try {
-              const frontSvg = await renderIdCardSvg(templateImageUrl, fieldMappings, student)
+              const frontSvg = await renderIdCardSvg(templateImageUrl, fieldMappings, student, getFlagUrl(student))
               svgCards.push({ name: `${student.serialNumber}_front.svg`, svgContent: frontSvg })
               studentIds.push(student.id)
 
               if (hasBackSide && backTemplateImageUrl && backFieldMappings?.length > 0) {
-                const backSvg = await renderIdCardSvg(backTemplateImageUrl, backFieldMappings, student)
+                const backSvg = await renderIdCardSvg(backTemplateImageUrl, backFieldMappings, student, getFlagUrl(student))
                 svgCards.push({ name: `${student.serialNumber}_back.svg`, svgContent: backSvg })
               }
 
               // Render JPEG preview for the first 8 (for on-screen display)
               if (previewData.length < 8) {
-                const previewFront = await renderIdCard(templateImageUrl, fieldMappings, student)
+                const previewFront = await renderIdCard(templateImageUrl, fieldMappings, student, getFlagUrl(student))
                 let previewBack: string | undefined
                 if (hasBackSide && backTemplateImageUrl && backFieldMappings?.length > 0) {
-                  previewBack = await renderIdCard(backTemplateImageUrl, backFieldMappings, student)
+                  previewBack = await renderIdCard(backTemplateImageUrl, backFieldMappings, student, getFlagUrl(student))
                 }
                 previewData.push({ serialNumber: student.serialNumber, frontDataUrl: previewFront, backDataUrl: previewBack })
               }
@@ -782,10 +820,10 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
           const chunk = students.slice(i, i + CHUNK_SIZE)
           const promises = chunk.map(async (student: any) => {
             try {
-              const frontDataUrl = await renderIdCard(templateImageUrl, fieldMappings, student)
+              const frontDataUrl = await renderIdCard(templateImageUrl, fieldMappings, student, getFlagUrl(student))
               let backDataUrl: string | undefined
               if (hasBackSide && backTemplateImageUrl && backFieldMappings?.length > 0) {
-                backDataUrl = await renderIdCard(backTemplateImageUrl, backFieldMappings, student)
+                backDataUrl = await renderIdCard(backTemplateImageUrl, backFieldMappings, student, getFlagUrl(student))
               }
               return { serialNumber: student.serialNumber, frontDataUrl, backDataUrl, id: student.id }
             } catch (err) {
@@ -830,10 +868,10 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
           const chunk = students.slice(i, i + CHUNK_SIZE)
           const promises = chunk.map(async (student: any) => {
             try {
-              const frontDataUrl = await renderIdCard(templateImageUrl, fieldMappings, student)
+              const frontDataUrl = await renderIdCard(templateImageUrl, fieldMappings, student, getFlagUrl(student))
               let backDataUrl: string | undefined
               if (hasBackSide && backTemplateImageUrl && backFieldMappings?.length > 0) {
-                backDataUrl = await renderIdCard(backTemplateImageUrl, backFieldMappings, student)
+                backDataUrl = await renderIdCard(backTemplateImageUrl, backFieldMappings, student, getFlagUrl(student))
               }
               return {
                 name: `${student.serialNumber}_front.jpg`,
