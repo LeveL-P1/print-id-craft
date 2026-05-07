@@ -593,6 +593,31 @@ export default function SchoolDetailPage() {
     }
   }
 
+  // Bulk flag upload — matches filenames to colors automatically
+  const handleBulkFlagUpload = async (files: FileList) => {
+    if (!files.length) return
+    let matched = 0, unmatched = 0
+    const allColors = flagColors.map(c => c.toLowerCase().trim())
+
+    for (const file of Array.from(files)) {
+      const baseName = file.name.replace(/\.[^.]+$/, "").trim().toLowerCase()
+      // Try exact match first, then partial match
+      let matchedColor = flagColors.find(c => c.toLowerCase().trim() === baseName)
+      if (!matchedColor) {
+        matchedColor = flagColors.find(c => baseName.includes(c.toLowerCase().trim()) || c.toLowerCase().trim().includes(baseName))
+      }
+      if (matchedColor) {
+        await handleFlagUpload(matchedColor, file)
+        matched++
+      } else {
+        unmatched++
+      }
+    }
+
+    if (matched > 0) toast.success(`${matched} flag image(s) matched and uploaded!`)
+    if (unmatched > 0) toast.error(`${unmatched} file(s) could not be matched to any color. Name files by color (e.g., Yellow.png, Blue.jpg)`)
+  }
+
   // Manual photo assignment handler
   const handleManualAssign = async (filename: string, studentId: string) => {
     const file = unmatchedFileMap[filename]
@@ -1038,12 +1063,10 @@ export default function SchoolDetailPage() {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
                 Bulk Upload Photos
               </button>
-              {flagColors.length > 0 && (
-                <button className="btn btn-outline" onClick={() => setFlagUploadOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#f59e0b', color: '#d97706' }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>
-                  Manage Flags ({flagColors.length})
-                </button>
-              )}
+              <button className="btn btn-outline" onClick={() => setFlagUploadOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#f59e0b', color: '#d97706' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>
+                Manage Flags{flagColors.length > 0 ? ` (${flagColors.length})` : ''}
+              </button>
               <a href={`/api/schools/${schoolId}/students/import-template`} className="btn btn-outline" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', textDecoration: 'none', fontSize: 13 }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
                 Download Template
@@ -1813,46 +1836,86 @@ export default function SchoolDetailPage() {
                 </div>
 
                 <div style={{ padding: 24 }}>
+                  {/* Bulk Upload Section */}
+                  {flagColors.length > 0 && (
+                    <div style={{ marginBottom: 20, padding: 16, background: '#fefce8', borderRadius: 14, border: '1.5px solid #fde68a' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                        <span style={{ fontSize: 24 }}>📁</span>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: '#92400e' }}>Bulk Upload Flag Images</div>
+                          <div style={{ fontSize: 12, color: '#a16207' }}>Select multiple flag images at once. Files are matched by filename → color (e.g., <strong>Yellow.png</strong> → Yellow house)</div>
+                        </div>
+                      </div>
+                      <input
+                        id="bulk-flag-input"
+                        type="file"
+                        multiple
+                        accept="image/jpeg,image/png,image/webp,image/gif,image/bmp"
+                        style={{ display: 'none' }}
+                        onChange={e => {
+                          if (e.target.files && e.target.files.length > 0) handleBulkFlagUpload(e.target.files)
+                          e.target.value = ''
+                        }}
+                      />
+                      <button
+                        className="btn btn-outline"
+                        onClick={() => document.getElementById('bulk-flag-input')?.click()}
+                        disabled={!!flagUploading}
+                        style={{ fontSize: 13, padding: '10px 20px', borderColor: '#f59e0b', color: '#d97706', fontWeight: 600, width: '100%' }}
+                      >
+                        📷 Select All Flag Images (bulk match by filename)
+                      </button>
+                      <div style={{ marginTop: 8, fontSize: 11, color: '#78716c', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        <span>Expected filenames:</span>
+                        {flagColors.map(c => <span key={c} style={{ background: '#fff', padding: '2px 8px', borderRadius: 4, border: '1px solid #e5e7eb', fontWeight: 600 }}>{c}.png</span>)}
+                      </div>
+                    </div>
+                  )}
+
                   {flagColors.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>
                       <div style={{ fontSize: 48, marginBottom: 12 }}>🏳️</div>
-                      <p style={{ fontSize: 14 }}>No flag colors found. Import students with a "Flag Color" / "House" / "Colour" column in the Excel to detect colors.</p>
+                      <p style={{ fontSize: 14, marginBottom: 8 }}>No flag/house colors detected yet.</p>
+                      <p style={{ fontSize: 12, color: '#64748b' }}>Import students with a <strong>"House"</strong> or <strong>"Flag Color"</strong> column in the Excel sheet first. The system will auto-detect unique colors and show them here for flag image assignment.</p>
                     </div>
                   ) : (
-                    <div style={{ display: 'grid', gap: 16 }}>
+                    <div style={{ display: 'grid', gap: 12 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                        Individual Flag Assignment ({flagColors.filter(c => flagImages[c]).length}/{flagColors.length} uploaded)
+                      </div>
                       {flagColors.map(color => {
                         const hasImage = !!flagImages[color]
                         return (
                           <div key={color} style={{
-                            display: 'flex', alignItems: 'center', gap: 16, padding: 16,
-                            background: hasImage ? '#f0fdf4' : '#fffbeb',
-                            border: `1.5px solid ${hasImage ? '#bbf7d0' : '#fde68a'}`,
-                            borderRadius: 14,
+                            display: 'flex', alignItems: 'center', gap: 16, padding: 14,
+                            background: hasImage ? '#f0fdf4' : '#fff',
+                            border: `1.5px solid ${hasImage ? '#bbf7d0' : '#e2e8f0'}`,
+                            borderRadius: 12,
                           }}>
-                            {/* Color label */}
+                            {/* Color swatch */}
                             <div style={{
-                              width: 48, height: 48, borderRadius: 12,
+                              width: 44, height: 44, borderRadius: 10,
                               background: color.toLowerCase(),
                               border: '2px solid rgba(0,0,0,0.1)',
                               display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              fontSize: 20, flexShrink: 0,
+                              fontSize: 18, flexShrink: 0,
                             }}>
-                              🏴
+                              {hasImage ? '✓' : '🏴'}
                             </div>
                             <div style={{ flex: 1 }}>
-                              <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', textTransform: 'capitalize', marginBottom: 4 }}>
+                              <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', textTransform: 'capitalize', marginBottom: 2 }}>
                                 {color}
                               </div>
                               {hasImage ? (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                  <img src={flagImages[color]} alt={`${color} flag`} style={{ width: 40, height: 28, objectFit: 'contain', borderRadius: 4, border: '1px solid #e2e8f0' }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-                                  <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 600 }}>Uploaded</span>
+                                  <img src={flagImages[color]} alt={`${color} flag`} style={{ width: 48, height: 32, objectFit: 'contain', borderRadius: 4, border: '1px solid #e2e8f0' }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                                  <span style={{ fontSize: 11, color: '#16a34a', fontWeight: 600 }}>✓ Matched</span>
                                 </div>
                               ) : (
-                                <span style={{ fontSize: 12, color: '#d97706' }}>No flag image uploaded yet</span>
+                                <span style={{ fontSize: 11, color: '#d97706' }}>⚠ No flag image — upload or bulk-match</span>
                               )}
                             </div>
-                            {/* Upload button */}
+                            {/* Individual upload button */}
                             <div>
                               <input
                                 id={`flag-input-${color}`}
@@ -1870,12 +1933,12 @@ export default function SchoolDetailPage() {
                                 onClick={() => document.getElementById(`flag-input-${color}`)?.click()}
                                 disabled={flagUploading === color}
                                 style={{
-                                  fontSize: 12, padding: '8px 16px',
-                                  borderColor: hasImage ? '#22c55e' : '#f59e0b',
-                                  color: hasImage ? '#16a34a' : '#d97706',
+                                  fontSize: 11, padding: '6px 14px',
+                                  borderColor: hasImage ? '#22c55e' : '#e2e8f0',
+                                  color: hasImage ? '#16a34a' : '#64748b',
                                 }}
                               >
-                                {flagUploading === color ? 'Uploading...' : hasImage ? 'Replace' : 'Upload Flag'}
+                                {flagUploading === color ? '...' : hasImage ? 'Replace' : 'Upload'}
                               </button>
                             </div>
                           </div>
@@ -1886,7 +1949,10 @@ export default function SchoolDetailPage() {
 
                   <div style={{ marginTop: 20, padding: 14, background: '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe' }}>
                     <div style={{ fontSize: 12, color: '#1e40af', lineHeight: 1.8 }}>
-                      <strong>How it works:</strong> Upload a flag/house image for each color group. When printing ID cards, the correct flag will be placed on each student's card based on their assigned color from the Excel sheet.
+                      <strong>How it works:</strong><br/>
+                      1. Students imported with a "House" column (e.g., Yellow, Blue, Red, Green) are auto-detected.<br/>
+                      2. Upload flag images named by color (e.g., <strong>Yellow.png</strong>, <strong>Blue.jpg</strong>).<br/>
+                      3. The system matches each flag to the correct house and places it on the ID card at the flag placeholder position.
                     </div>
                   </div>
 
