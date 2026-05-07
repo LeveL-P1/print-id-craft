@@ -1076,23 +1076,49 @@ export default function SchoolDetailPage() {
             <div className="data-table-wrapper" style={{ overflowX: 'auto', position: 'relative', opacity: tabLoading ? 0.5 : 1, transition: 'opacity 0.15s' }}>
               {tabLoading && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5, background: 'rgba(255,255,255,0.6)', borderRadius: 14 }}><div className="login-spinner" style={{ width: 28, height: 28, borderColor: 'rgba(59,130,246,0.2)', borderTopColor: '#3b82f6' }} /></div>}
               {(() => {
-                // Dynamic columns from template fieldConfig (synced from Excel import)
-                const fc = (school?.template?.fieldConfig || []) as Array<{ key: string; label: string; type: string; required: boolean }>
-                // Filter out class field (shown separately) and build display columns
-                const dataColumns = fc.filter(f => f.key !== "class" && f.key !== "classSection")
+                // Derive display columns directly from student formData keys
+                // This ensures columns always match the actual imported Excel data
+                const keyToLabel: Record<string, string> = {
+                  srNo: "NO.", fullName: "Name", grNo: "GR NO", photoId: "PHOTO NO.",
+                  flagColor: "House", phone: "MOBILE", address: "Address", rollNo: "Roll No.",
+                  dob: "DOB", bloodGroup: "Blood Group", fatherName: "Father Name",
+                  motherName: "Mother Name", section: "Section", branch: "Branch",
+                }
+                // Collect all unique formData keys from current students (excluding "class")
+                const allKeys: string[] = []
+                const keySet = new Set<string>()
+                if (students.length > 0) {
+                  // Use first student to determine column order, then add any extra keys
+                  for (const s of students) {
+                    const fd = s.formData as any
+                    if (fd && typeof fd === "object") {
+                      for (const k of Object.keys(fd)) {
+                        if (!keySet.has(k) && k !== "class") {
+                          keySet.add(k)
+                          allKeys.push(k)
+                        }
+                      }
+                    }
+                  }
+                }
+                // Also check template fieldConfig for label overrides
+                const fc = (templateData?.fieldConfig || []) as Array<{ key: string; label: string }>
+                for (const f of fc) {
+                  if (f.key && f.label && f.key !== "class" && f.key !== "classSection") {
+                    keyToLabel[f.key] = f.label
+                  }
+                }
+                const dataColumns = allKeys.filter(k => k !== "class" && k !== "classSection")
                 const hasDynamicColumns = dataColumns.length > 0
-                // Determine if any column is a photo ID column
-                const photoIdCol = dataColumns.find(f => f.key === "photoId" || f.label.toLowerCase().includes("photo"))
-                // Total columns: Photo + dynamic columns (or fallback) + Class + Status + Actions
                 const totalCols = 1 + (hasDynamicColumns ? dataColumns.length : 2) + 3
 
                 return (
-                <table className="data-table">
+                <table className="data-table" style={{ minWidth: hasDynamicColumns ? Math.max(800, dataColumns.length * 120) : 800 }}>
                   <thead>
                     <tr>
-                      <th>Photo</th>
+                      <th style={{ position: 'sticky', left: 0, background: '#f8fafc', zIndex: 2 }}>Photo</th>
                       {hasDynamicColumns ? (
-                        dataColumns.map(col => <th key={col.key}>{col.label}</th>)
+                        dataColumns.map(k => <th key={k}>{keyToLabel[k] || k}</th>)
                       ) : (
                         <>
                           <th>Serial No.</th>
@@ -1107,21 +1133,12 @@ export default function SchoolDetailPage() {
                   <tbody>
                     {students.map(s => {
                       const fd = s.formData as any
-                      const studentName = fd.fullName || fd["Full Name"] || fd["Student Name"] || fd.Student_Name || fd.name || "—"
+                      const studentName = fd?.fullName || fd?.["Full Name"] || fd?.name || "—"
                       const hasPhoto = !!s.photoUrl
-                      const missingFields: string[] = []
-                      if (!hasPhoto) missingFields.push("Photo")
-                      if (studentName === "—") missingFields.push("Name")
-
-                      // Helper: get value for a field from formData
-                      const getFieldValue = (col: { key: string; label: string }) => {
-                        // Try mapped key first, then original Excel label, then label variations
-                        return fd[col.key] || fd[col.label] || fd[col.label.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_]/g, "")] || ""
-                      }
 
                       return (
                         <tr key={s.id}>
-                          <td>
+                          <td style={{ position: 'sticky', left: 0, background: '#fff', zIndex: 1 }}>
                             {s.photoUrl ? (
                               <div style={{ width: 36, height: 36, borderRadius: '50%', overflow: 'hidden', border: '2px solid #e2e8f0' }}>
                                 <img src={s.photoUrl} alt="" loading="lazy" decoding="async" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -1134,17 +1151,17 @@ export default function SchoolDetailPage() {
                             )}
                           </td>
                           {hasDynamicColumns ? (
-                            dataColumns.map(col => {
-                              const val = getFieldValue(col)
-                              // For photoId columns, show the photo name from Excel
-                              const isPhotoIdCol = col.key === "photoId" || col.label.toLowerCase().includes("photo")
+                            dataColumns.map(k => {
+                              const val = fd?.[k] || ""
+                              const isPhotoIdCol = k === "photoId"
+                              const isNumCol = k === "srNo" || k === "rollNo" || k === "grNo"
                               return (
-                                <td key={col.key} style={{
-                                  fontSize: isPhotoIdCol ? 11 : 12,
-                                  fontFamily: isPhotoIdCol || col.key === "srNo" || col.key === "rollNo" || col.key === "GR_NO" ? 'monospace' : 'inherit',
-                                  fontWeight: col.key === "fullName" ? 500 : 'normal',
+                                <td key={k} style={{
+                                  fontSize: 12,
+                                  fontFamily: isPhotoIdCol || isNumCol ? 'monospace' : 'inherit',
+                                  fontWeight: k === "fullName" ? 500 : 'normal',
                                   color: !val ? '#cbd5e1' : isPhotoIdCol ? '#6366f1' : '#334155',
-                                  maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                  maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                                 }}>
                                   {val || "—"}
                                 </td>
@@ -1165,7 +1182,7 @@ export default function SchoolDetailPage() {
                               s.status === 'SUBMITTED' ? 'status-submitted' :
                               'status-pending'
                             }`}>{s.status}</span>
-                            {missingFields.length > 0 && <div style={{ fontSize: 10, color: '#ef4444', marginTop: 3, fontWeight: 600 }}>⚠ {missingFields.join(', ')}</div>}
+                            {!hasPhoto && <div style={{ fontSize: 10, color: '#ef4444', marginTop: 3, fontWeight: 600 }}>⚠ Photo</div>}
                             {s.flagNote && <div style={{ fontSize: 11, color: '#ef4444', marginTop: 4 }}>📌 {s.flagNote}</div>}
                           </td>
                           <td style={{ textAlign: 'right' }}>
