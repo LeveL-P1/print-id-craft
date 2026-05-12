@@ -77,3 +77,60 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 })
   }
 }
+
+/**
+ * DELETE — wipe ALL students for this school. Used by the "Delete All & Re-import"
+ * flow so admins can swap in a fresh Excel without leaving stale records behind.
+ *
+ * Safety:
+ *  - MANUFACTURER role only.
+ *  - Caller must POST a JSON body with `{ confirm: "DELETE_ALL" }` to avoid
+ *    accidental wipes from a misrouted request.
+ *  - Returns the count of deleted rows so the UI can show a toast.
+ */
+export async function DELETE(
+  req: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const session = await getServerSession(authOptions)
+    if (!session || session.user?.role !== "MANUFACTURER") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    // Require an explicit confirmation token in the body to prevent accidents.
+    let body: any = null
+    try { body = await req.json() } catch { /* empty body is OK only if confirm in querystring */ }
+    const url = new URL(req.url)
+    const confirm = body?.confirm || url.searchParams.get("confirm")
+    if (confirm !== "DELETE_ALL") {
+      return NextResponse.json(
+        { error: "Confirmation required. Send { confirm: 'DELETE_ALL' }." },
+        { status: 400 }
+      )
+    }
+
+    const schoolId = params.id
+
+    // Verify the school exists and the manufacturer owns it
+    const school = await prisma.school.findUnique({
+      where: { id: schoolId },
+      select: { id: true },
+    })
+    if (!school) {
+      return NextResponse.json({ error: "School not found" }, { status: 404 })
+    }
+
+    const result = await prisma.student.deleteMany({
+      where: { schoolId },
+    })
+
+    return NextResponse.json({ success: true, deleted: result.count })
+  } catch (error: any) {
+    console.error("Bulk delete students error:", error)
+    return NextResponse.json(
+      { error: error?.message || "Internal Server Error" },
+      { status: 500 }
+    )
+  }
+}

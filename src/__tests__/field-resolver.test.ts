@@ -169,6 +169,30 @@ describe("resolveFieldValue", () => {
     })
   })
 
+  describe("Custom mobile/phone-style keys (regression)", () => {
+    // Bug: students imported from Excel store phone numbers under the
+    // canonical key "phone", but admins often add a custom template field
+    // labelled "Mobile" / "Mobile No." / "Mob No.", which produces
+    // fieldKeys like "mobile_no" or "mobno" that aren't direct
+    // FIELD_GROUPS keys. The resolver must still find the phone value.
+    it("resolves 'mobile' from 'phone' fd key", () => {
+      expect(resolveFieldValue({ phone: "9823203293" }, "mobile")).toBe("9823203293")
+    })
+    it("resolves 'mobile_no' (custom field) from 'phone' fd key", () => {
+      expect(resolveFieldValue({ phone: "9823203293" }, "mobile_no")).toBe("9823203293")
+    })
+    it("resolves 'mobileno' (custom field) from 'phone' fd key", () => {
+      expect(resolveFieldValue({ phone: "9823203293" }, "mobileno")).toBe("9823203293")
+    })
+    it("resolves 'Mobile No.' label-style key from 'phone' fd key", () => {
+      // Label "Mobile No." → fieldKey "mobile_no" → normalized "mobileno"
+      expect(resolveFieldValue({ phone: "9999999999" }, "mobile_no")).toBe("9999999999")
+    })
+    it("resolves 'contact_no' (custom field) from 'phone' fd key", () => {
+      expect(resolveFieldValue({ phone: "8888888888" }, "contact_no")).toBe("8888888888")
+    })
+  })
+
   describe("Edge cases", () => {
     it("prefers direct match over normalized match", () => {
       const fd = { name: "Direct", fullname: "Normalized" }

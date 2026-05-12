@@ -1,5 +1,6 @@
 "use client"
 import { useRef, useEffect, useState, useCallback, memo } from "react"
+import { resolveFieldValue as resolveFieldValueShared } from "@/lib/field-resolver"
 
 type FieldMapping = {
   id: string
@@ -15,6 +16,38 @@ type FieldMapping = {
   fontWeight: "normal" | "bold"
   fontFamily: string
   textAlign?: "left" | "center" | "right"
+  // Photo styling (rounded corners + border) — kept optional so older
+  // saved templates without these props still render correctly.
+  photoBorderRadius?: number
+  photoBorderWidth?: number
+  photoBorderColor?: string
+}
+
+/**
+ * Draws a rounded-rectangle path on the given canvas context.
+ * Used to clip photo regions with rounded corners (incl. full-circle when
+ * radius is >= min(w,h)/2). Falls back to a plain rectangle when radius is 0.
+ */
+function pathRoundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number, w: number, h: number, r: number,
+) {
+  const radius = Math.max(0, Math.min(r, Math.min(w, h) / 2))
+  ctx.beginPath()
+  if (radius <= 0) {
+    ctx.rect(x, y, w, h)
+    return
+  }
+  ctx.moveTo(x + radius, y)
+  ctx.lineTo(x + w - radius, y)
+  ctx.quadraticCurveTo(x + w, y, x + w, y + radius)
+  ctx.lineTo(x + w, y + h - radius)
+  ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h)
+  ctx.lineTo(x + radius, y + h)
+  ctx.quadraticCurveTo(x, y + h, x, y + h - radius)
+  ctx.lineTo(x, y + radius)
+  ctx.quadraticCurveTo(x, y, x + radius, y)
+  ctx.closePath()
 }
 
 type JpgCardPreviewProps = {
@@ -66,24 +99,85 @@ const FIELD_GROUPS: Record<string, string[]> = {
   flagcolor: ["flagcolor", "flag_color", "flag", "house", "housecolor", "house_color", "colour", "color", "team"],
 }
 
+// Delegate to the canonical shared resolver so all field-key aliases
+// (including "mobile" → "phone"/"fatherphone") stay in sync across the app.
 export function resolveFieldValue(fd: Record<string, string>, fieldKey: string): string {
-  if (fd[fieldKey] && String(fd[fieldKey]).trim()) return String(fd[fieldKey])
-  const fdNormalized: Record<string, string> = {}
-  for (const [k, v] of Object.entries(fd)) {
-    if (v && String(v).trim()) fdNormalized[normalizeKey(k)] = String(v)
+  return resolveFieldValueShared(fd, fieldKey)
+}
+
+/**
+ * Word-wrap + auto-shrink text to fit a fixed box.
+ * 1. First tries to fit on a single line by shrinking font down to ~30% of box height.
+ * 2. If still too wide, wraps onto multiple lines (word-break) and shrinks
+ *    further so all lines fit vertically.
+ * Returns { lines, fontSize, lineHeight }.
+ */
+function fitTextToBox(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  boxW: number,
+  boxH: number,
+  fontFamily: string,
+  fontWeight: string,
+  scale: number,
+): { lines: string[]; fontSize: number; lineHeight: number } {
+  const padding = 4 * scale
+  const maxW = Math.max(1, boxW - padding * 2)
+  const maxH = Math.max(1, boxH - padding * 2)
+  const fontPrefix = fontWeight === "bold" ? "bold " : ""
+  const minFont = Math.max(7 * scale, boxH * 0.28)
+  let fontSize = boxH * 0.78
+
+  const setFont = (s: number) => { ctx.font = `${fontPrefix}${s}px ${fontFamily}` }
+
+  // Pass 1 — single line, shrink to fit width
+  setFont(fontSize)
+  while (ctx.measureText(text).width > maxW && fontSize > minFont) {
+    fontSize -= 0.5
+    setFont(fontSize)
   }
-  const normKey = normalizeKey(fieldKey)
-  if (fdNormalized[normKey]) return fdNormalized[normKey]
-  const patterns = FIELD_GROUPS[normKey]
-  if (patterns) {
-    for (const p of patterns) {
-      if (fdNormalized[p]) return fdNormalized[p]
-      for (const [nk, nv] of Object.entries(fdNormalized)) {
-        if (nk.includes(p) || p.includes(nk)) return nv
+  if (ctx.measureText(text).width <= maxW) {
+    return { lines: [text], fontSize, lineHeight: fontSize * 1.15 }
+  }
+
+  // Pass 2 — wrap onto multiple lines, then shrink so all lines fit vertically
+  const wrap = (size: number): string[] => {
+    setFont(size)
+    const words = text.split(/\s+/).filter(Boolean)
+    const lines: string[] = []
+    let current = ""
+    for (const w of words) {
+      const tentative = current ? current + " " + w : w
+      if (ctx.measureText(tentative).width <= maxW) {
+        current = tentative
+      } else {
+        if (current) lines.push(current)
+        // If a single word is wider than the box, hard-break it character-by-character
+        if (ctx.measureText(w).width > maxW) {
+          let chunk = ""
+          for (const ch of w) {
+            const t2 = chunk + ch
+            if (ctx.measureText(t2).width <= maxW) chunk = t2
+            else { if (chunk) lines.push(chunk); chunk = ch }
+          }
+          current = chunk
+        } else {
+          current = w
+        }
       }
     }
+    if (current) lines.push(current)
+    return lines
   }
-  return ""
+
+  let lines = wrap(fontSize)
+  let lineHeight = fontSize * 1.15
+  while (lines.length * lineHeight > maxH && fontSize > minFont) {
+    fontSize -= 0.5
+    lines = wrap(fontSize)
+    lineHeight = fontSize * 1.15
+  }
+  return { lines, fontSize, lineHeight }
 }
 
 export default function JpgCardPreview({
@@ -125,24 +219,63 @@ export default function JpgCardPreview({
         const fh = (field.height / 100) * h
 
         if (field.type === "photo") {
+          // Honour the template's saved rounded-corner + border settings so the
+          // live student preview matches the editor exactly. Radius is stored
+          // in editor px (relative to a ~600 px reference image); we scale it
+          // to the rendered canvas so circles stay circular at any DPI.
+          const radiusEditorPx = field.photoBorderRadius || 0
+          const radiusPx = (radiusEditorPx / MAPPER_REFERENCE_WIDTH) * w
+          const borderPx = ((field.photoBorderWidth || 0) / MAPPER_REFERENCE_WIDTH) * w
           if (studentPhoto) {
             try {
               const photoImg = await loadImage(studentPhoto)
-              const aspectRatio = photoImg.naturalWidth / photoImg.naturalHeight
-              const targetAspect = fw / fh
-              let sx = 0, sy = 0, sw = photoImg.naturalWidth, sh = photoImg.naturalHeight
-              if (aspectRatio > targetAspect) {
-                sw = photoImg.naturalHeight * targetAspect
-                sx = (photoImg.naturalWidth - sw) / 2
+              // Contain-fit: show the ENTIRE photo, no cropping. Prevents heads
+              // from being cut off and stops the photo from bleeding out of
+              // its mapped box into surrounding template content.
+              const photoAspect = photoImg.naturalWidth / photoImg.naturalHeight
+              const boxAspect = fw / fh
+              let dx: number, dy: number, dw: number, dh: number
+              if (photoAspect > boxAspect) {
+                dw = fw
+                dh = fw / photoAspect
+                dx = fx
+                dy = fy + (fh - dh) / 2
               } else {
-                sh = photoImg.naturalWidth / targetAspect
-                sy = (photoImg.naturalHeight - sh) / 2
+                dh = fh
+                dw = fh * photoAspect
+                dx = fx + (fw - dw) / 2
+                dy = fy
               }
-              ctx.drawImage(photoImg, sx, sy, sw, sh, fx, fy, fw, fh)
+              ctx.save()
+              pathRoundedRect(ctx, fx, fy, fw, fh, radiusPx)
+              ctx.clip()
+              ctx.drawImage(photoImg, 0, 0, photoImg.naturalWidth, photoImg.naturalHeight, dx, dy, dw, dh)
+              ctx.restore()
             } catch (err) {
+              ctx.save()
+              pathRoundedRect(ctx, fx, fy, fw, fh, radiusPx)
+              ctx.clip()
               ctx.fillStyle = "#e2e8f0"
               ctx.fillRect(fx, fy, fw, fh)
+              ctx.restore()
             }
+          }
+          // Draw the border on top of the (clipped) photo so rounded corners
+          // are stroked cleanly. Skip when width is 0.
+          if (borderPx > 0) {
+            ctx.save()
+            ctx.lineWidth = borderPx
+            ctx.strokeStyle = field.photoBorderColor || "#000000"
+            // Inset by half the line width so the stroke sits inside the box.
+            const inset = borderPx / 2
+            pathRoundedRect(
+              ctx,
+              fx + inset, fy + inset,
+              fw - borderPx, fh - borderPx,
+              Math.max(0, radiusPx - inset),
+            )
+            ctx.stroke()
+            ctx.restore()
           }
         } else if (field.type === "flag") {
           if (flagImageUrl) {
@@ -157,19 +290,11 @@ export default function JpgCardPreview({
           const value = resolveFieldValue(formData, field.fieldKey)
           if (value) {
             const padding = 4 * scale
-            const maxWidth = fw - padding * 2
-            const fontPrefix = field.fontWeight === "bold" ? "bold " : ""
-            let fontSize = fh * 0.78
-            const minFontSize = Math.max(8 * scale, fh * 0.3)
-
-            ctx.font = `${fontPrefix}${fontSize}px ${field.fontFamily || "Arial"}`
-            let textWidth = ctx.measureText(value).width
-
-            while (textWidth > maxWidth && fontSize > minFontSize) {
-              fontSize -= 0.5
-              ctx.font = `${fontPrefix}${fontSize}px ${field.fontFamily || "Arial"}`
-              textWidth = ctx.measureText(value).width
-            }
+            const fontFamily = field.fontFamily || "Arial"
+            const fontWeight = field.fontWeight || "normal"
+            const { lines, fontSize, lineHeight } = fitTextToBox(
+              ctx, String(value), fw, fh, fontFamily, fontWeight, scale,
+            )
 
             ctx.fillStyle = field.fontColor || "#000"
             const align = field.textAlign || "left"
@@ -180,7 +305,12 @@ export default function JpgCardPreview({
             ctx.rect(fx, fy, fw, fh)
             ctx.clip()
             const textX = align === "center" ? fx + fw / 2 : align === "right" ? fx + fw - padding : fx + padding
-            ctx.fillText(value, textX, fy + fh / 2)
+            // Vertically center the multi-line block inside the box
+            const totalH = lines.length * lineHeight
+            const firstLineY = fy + (fh - totalH) / 2 + lineHeight / 2
+            for (let i = 0; i < lines.length; i++) {
+              ctx.fillText(lines[i], textX, firstLineY + i * lineHeight)
+            }
             ctx.restore()
           }
         }
@@ -260,21 +390,46 @@ export async function generateJpgCard(
     const fw = (field.width / 100) * w
     const fh = (field.height / 100) * h
 
-    if (field.type === "photo" && studentPhoto) {
-      try {
-        const photoImg = await loadImage(studentPhoto)
-        const aspectRatio = photoImg.naturalWidth / photoImg.naturalHeight
-        const targetAspect = fw / fh
-        let sx = 0, sy = 0, sw = photoImg.naturalWidth, sh = photoImg.naturalHeight
-        if (aspectRatio > targetAspect) {
-          sw = photoImg.naturalHeight * targetAspect
-          sx = (photoImg.naturalWidth - sw) / 2
-        } else {
-          sh = photoImg.naturalWidth / targetAspect
-          sy = (photoImg.naturalHeight - sh) / 2
-        }
-        ctx.drawImage(photoImg, sx, sy, sw, sh, fx, fy, fw, fh)
-      } catch {}
+    if (field.type === "photo") {
+      // Scale saved editor-px values (border width + corner radius) to the
+      // generated canvas so PDFs match what's shown in the on-screen preview.
+      const radiusPx = ((field.photoBorderRadius || 0) / MAPPER_REFERENCE_WIDTH) * w
+      const borderPx = ((field.photoBorderWidth || 0) / MAPPER_REFERENCE_WIDTH) * w
+      if (studentPhoto) {
+        try {
+          const photoImg = await loadImage(studentPhoto)
+          // Contain-fit: show entire photo, no cropping
+          const photoAspect = photoImg.naturalWidth / photoImg.naturalHeight
+          const boxAspect = fw / fh
+          let dx: number, dy: number, dw: number, dh: number
+          if (photoAspect > boxAspect) {
+            dw = fw; dh = fw / photoAspect
+            dx = fx; dy = fy + (fh - dh) / 2
+          } else {
+            dh = fh; dw = fh * photoAspect
+            dx = fx + (fw - dw) / 2; dy = fy
+          }
+          ctx.save()
+          pathRoundedRect(ctx, fx, fy, fw, fh, radiusPx)
+          ctx.clip()
+          ctx.drawImage(photoImg, 0, 0, photoImg.naturalWidth, photoImg.naturalHeight, dx, dy, dw, dh)
+          ctx.restore()
+        } catch {}
+      }
+      if (borderPx > 0) {
+        ctx.save()
+        ctx.lineWidth = borderPx
+        ctx.strokeStyle = field.photoBorderColor || "#000000"
+        const inset = borderPx / 2
+        pathRoundedRect(
+          ctx,
+          fx + inset, fy + inset,
+          fw - borderPx, fh - borderPx,
+          Math.max(0, radiusPx - inset),
+        )
+        ctx.stroke()
+        ctx.restore()
+      }
     } else if (field.type === "flag" && flagImageUrl) {
       try {
         const flagImg = await loadImage(flagImageUrl)
@@ -284,28 +439,26 @@ export async function generateJpgCard(
       const value = resolveFieldValue(formData, field.fieldKey)
       if (value) {
         const padding = 4 * outputScale
-        const maxWidth = fw - padding * 2
-        const fontPrefix = field.fontWeight === "bold" ? "bold " : ""
-        let fontSize = fh * 0.78
-        const minFontSize = Math.max(8 * outputScale, fh * 0.3)
-
-        ctx.font = `${fontPrefix}${fontSize}px ${field.fontFamily || "Arial"}`
-        let textWidth = ctx.measureText(value).width
-        while (textWidth > maxWidth && fontSize > minFontSize) {
-          fontSize -= 0.5
-          ctx.font = `${fontPrefix}${fontSize}px ${field.fontFamily || "Arial"}`
-          textWidth = ctx.measureText(value).width
-        }
+        const fontFamily = field.fontFamily || "Arial"
+        const fontWeight = field.fontWeight || "normal"
+        const { lines, fontSize, lineHeight } = fitTextToBox(
+          ctx, String(value), fw, fh, fontFamily, fontWeight, outputScale,
+        )
 
         ctx.fillStyle = field.fontColor || "#000"
-        ctx.textAlign = field.textAlign || "left"
+        const align = field.textAlign || "left"
+        ctx.textAlign = align
         ctx.textBaseline = "middle"
         ctx.save()
         ctx.beginPath()
         ctx.rect(fx, fy, fw, fh)
         ctx.clip()
-        const textX = ctx.textAlign === "center" ? fx + fw / 2 : ctx.textAlign === "right" ? fx + fw - padding : fx + padding
-        ctx.fillText(value, textX, fy + fh / 2)
+        const textX = align === "center" ? fx + fw / 2 : align === "right" ? fx + fw - padding : fx + padding
+        const totalH = lines.length * lineHeight
+        const firstLineY = fy + (fh - totalH) / 2 + lineHeight / 2
+        for (let i = 0; i < lines.length; i++) {
+          ctx.fillText(lines[i], textX, firstLineY + i * lineHeight)
+        }
         ctx.restore()
       }
     }

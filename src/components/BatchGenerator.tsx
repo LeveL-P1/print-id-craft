@@ -125,6 +125,77 @@ function clearStudentImageCache() {
 const MIN_PRINT_W = 661   // 300 DPI minimum (56mm)
 
 /**
+ * Word-wrap + auto-shrink text on canvas to fit a fixed box.
+ * Tries single-line shrink first, then falls back to multi-line word-wrap
+ * (with character-level break for words wider than the box) and shrinks
+ * further until every line fits vertically. Mirrors JpgCardPreview's
+ * fitTextToBox so on-screen preview and printed output stay identical.
+ */
+function fitTextToBoxCanvas(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  boxW: number,
+  boxH: number,
+  fontFamily: string,
+  fontWeight: string,
+): { lines: string[]; fontSize: number; lineHeight: number } {
+  const padding = 4
+  const maxW = Math.max(1, boxW - padding * 2)
+  const maxH = Math.max(1, boxH - padding * 2)
+  const fontPrefix = fontWeight === "bold" ? "bold " : ""
+  const minFont = Math.max(8, boxH * 0.28)
+  let fontSize = boxH * 0.78
+
+  const setFont = (s: number) => { ctx.font = `${fontPrefix}${s}px ${fontFamily}` }
+
+  setFont(fontSize)
+  while (ctx.measureText(text).width > maxW && fontSize > minFont) {
+    fontSize -= 0.5
+    setFont(fontSize)
+  }
+  if (ctx.measureText(text).width <= maxW) {
+    return { lines: [text], fontSize, lineHeight: fontSize * 1.15 }
+  }
+
+  const wrap = (size: number): string[] => {
+    setFont(size)
+    const words = text.split(/\s+/).filter(Boolean)
+    const lines: string[] = []
+    let current = ""
+    for (const w of words) {
+      const tentative = current ? current + " " + w : w
+      if (ctx.measureText(tentative).width <= maxW) {
+        current = tentative
+      } else {
+        if (current) lines.push(current)
+        if (ctx.measureText(w).width > maxW) {
+          let chunk = ""
+          for (const ch of w) {
+            const t2 = chunk + ch
+            if (ctx.measureText(t2).width <= maxW) chunk = t2
+            else { if (chunk) lines.push(chunk); chunk = ch }
+          }
+          current = chunk
+        } else {
+          current = w
+        }
+      }
+    }
+    if (current) lines.push(current)
+    return lines
+  }
+
+  let lines = wrap(fontSize)
+  let lineHeight = fontSize * 1.15
+  while (lines.length * lineHeight > maxH && fontSize > minFont) {
+    fontSize -= 0.5
+    lines = wrap(fontSize)
+    lineHeight = fontSize * 1.15
+  }
+  return { lines, fontSize, lineHeight }
+}
+
+/**
  * Renders an ID card at the 56:88 mm card ratio, using the template's
  * full native resolution for maximum sharpness (minimum 300 DPI).
  *
@@ -211,18 +282,11 @@ async function renderIdCard(
       const value = String(val || "").trim()
       if (value) {
         const padding = 4
-        const maxWidth = fw - padding * 2
-        const fontPrefix = field.fontWeight === "bold" ? "bold " : ""
-        let fontSize = fh * 0.78
-        const minFontSize = Math.max(8, fh * 0.3)
-        
-        ctx.font = `${fontPrefix}${fontSize}px ${field.fontFamily || "Inter, Arial"}`
-        let textWidth = ctx.measureText(value).width
-        while (textWidth > maxWidth && fontSize > minFontSize) {
-          fontSize -= 0.5
-          ctx.font = `${fontPrefix}${fontSize}px ${field.fontFamily || "Inter, Arial"}`
-          textWidth = ctx.measureText(value).width
-        }
+        const fontFamily = field.fontFamily || "Inter, Arial"
+        const fontWeight = field.fontWeight || "normal"
+        const { lines, lineHeight } = fitTextToBoxCanvas(
+          ctx, value, fw, fh, fontFamily, fontWeight,
+        )
 
         ctx.fillStyle = field.fontColor || "#0f172a"
         const align = field.textAlign || "left"
@@ -233,7 +297,11 @@ async function renderIdCard(
         ctx.rect(fx, fy, fw, fh)
         ctx.clip()
         const textX = align === "center" ? fx + fw / 2 : align === "right" ? fx + fw - padding : fx + padding
-        ctx.fillText(value, textX, fy + fh / 2)
+        const totalH = lines.length * lineHeight
+        const firstLineY = fy + (fh - totalH) / 2 + lineHeight / 2
+        for (let i = 0; i < lines.length; i++) {
+          ctx.fillText(lines[i], textX, firstLineY + i * lineHeight)
+        }
         ctx.restore()
       }
     }

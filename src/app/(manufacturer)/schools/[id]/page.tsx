@@ -11,6 +11,51 @@ const JpgTemplateMapper = dynamic(() => import("@/components/JpgTemplateMapper")
 const JpgCardPreview = dynamic(() => import("@/components/JpgCardPreview"), { ssr: false })
 const BatchGenerator = dynamic(() => import("@/components/BatchGenerator"), { ssr: false })
 
+/**
+ * Resolve a student's flag-image URL by trying every column the import
+ * route maps to "flagColor" — older student records may still store the
+ * value under "House", "house", "Colour", etc., so we check those first
+ * before falling back to a case-insensitive scan of every formData key.
+ *
+ * Without this fallback, a school whose Excel header was "HOUSE" (instead
+ * of "Flag Color") would render with a missing flag in the preview even
+ * though the upload + storage path worked correctly.
+ */
+function resolveFlagImageUrl(
+  formData: Record<string, string> | undefined | null,
+  flagImages: Record<string, string>,
+): string | undefined {
+  if (!formData) return undefined
+  const candidates = [
+    formData.flagColor,
+    formData["Flag Color"],
+    formData["flag_color"],
+    formData["House"],
+    formData["house"],
+    formData["HOUSE"],
+    formData["Colour"],
+    formData["colour"],
+    formData["Color"],
+    formData["color"],
+    formData["Team"],
+    formData["team"],
+  ].filter(Boolean) as string[]
+
+  // Direct hits first
+  for (const c of candidates) {
+    if (flagImages[c]) return flagImages[c]
+  }
+  // Case-insensitive fallback against the whole flagImages map.
+  // This matches a value of "blue" against an uploaded "Blue" flag, etc.
+  const flagKeysLower: Record<string, string> = {}
+  for (const k of Object.keys(flagImages)) flagKeysLower[k.toLowerCase()] = flagImages[k]
+  for (const c of candidates) {
+    const hit = flagKeysLower[c.toLowerCase()]
+    if (hit) return hit
+  }
+  return undefined
+}
+
 type ClassData = {
   id: string
   name: string
@@ -438,6 +483,50 @@ export default function SchoolDetailPage() {
       toast.error("Import failed")
     } finally {
       setImportUploading(false)
+    }
+  }
+
+  // Delete-all-students workflow — lets admins wipe a school's roster so a
+  // corrected Excel can be re-uploaded without serial-number collisions or
+  // stale rows from a previous import.
+  const [deletingAll, setDeletingAll] = useState(false)
+  const handleDeleteAllStudents = async () => {
+    if (studentTotal === 0) {
+      toast.info("No students to delete.")
+      return
+    }
+    const confirm1 = window.prompt(
+      `⚠️ This will PERMANENTLY delete ALL ${studentTotal} students for this school ` +
+      `(including their photos and QR codes from the database).\n\n` +
+      `Type DELETE to confirm:`
+    )
+    if (confirm1 !== "DELETE") {
+      if (confirm1 !== null) toast.info("Delete cancelled — confirmation text did not match.")
+      return
+    }
+    setDeletingAll(true)
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/students`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: "DELETE_ALL" }),
+      })
+      const data = await res.json()
+      if (res.ok && data.success) {
+        toast.success(`Deleted ${data.deleted} students. You can now re-upload your Excel.`)
+        // Refresh local state
+        setStudents([])
+        setStudentTotal(0)
+        setSelectedStudent(null)
+        // Refetch in case anything else changed (e.g. classes from import-side-effects)
+        fetchStudents()
+      } else {
+        toast.error(data.error || "Delete failed.")
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Delete failed.")
+    } finally {
+      setDeletingAll(false)
     }
   }
 
@@ -1091,6 +1180,18 @@ export default function SchoolDetailPage() {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
                 Download Template
               </a>
+              {studentTotal > 0 && (
+                <button
+                  className="btn btn-outline"
+                  onClick={handleDeleteAllStudents}
+                  disabled={deletingAll}
+                  title="Permanently delete every student in this school so you can re-upload a fresh Excel."
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#ef4444', color: '#dc2626', marginLeft: 'auto', fontSize: 13 }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                  {deletingAll ? 'Deleting…' : `Delete All (${studentTotal})`}
+                </button>
+              )}
             </div>
 
             <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
@@ -2304,7 +2405,7 @@ export default function SchoolDetailPage() {
                         fieldMappings={templateData.fieldMappings as any[]}
                         formData={selectedStudent.formData as Record<string, string>}
                         studentPhoto={selectedStudent.photoUrl}
-                        flagImageUrl={flagImages[(selectedStudent.formData as Record<string, string>)?.flagColor] || undefined}
+                        flagImageUrl={resolveFlagImageUrl(selectedStudent.formData as Record<string, string>, flagImages)}
                         scale={1}
                         watermark="PREVIEW"
                       />
@@ -2317,7 +2418,7 @@ export default function SchoolDetailPage() {
                           fieldMappings={templateData.backFieldMappings as any[] || []}
                           formData={selectedStudent.formData as Record<string, string>}
                           studentPhoto={selectedStudent.photoUrl}
-                          flagImageUrl={flagImages[(selectedStudent.formData as Record<string, string>)?.flagColor] || undefined}
+                          flagImageUrl={resolveFlagImageUrl(selectedStudent.formData as Record<string, string>, flagImages)}
                           scale={1}
                           watermark="PREVIEW"
                         />
