@@ -165,7 +165,10 @@ export default function SchoolDetailPage() {
 
   const fetchTemplate = async () => {
     try {
-      const res = await fetch(`/api/schools/${schoolId}/template`)
+      // cache: 'no-store' ensures the live JpgCardPreview reflects the latest
+      // mappings/photo styling immediately after onSave, instead of a stale
+      // cached template (e.g. previous photoBorderRadius value).
+      const res = await fetch(`/api/schools/${schoolId}/template`, { cache: 'no-store' })
       const data = await res.json()
       if (data.success) setTemplateData(data.data)
     } catch (err) { console.error(err) }
@@ -2006,6 +2009,10 @@ export default function SchoolDetailPage() {
                 fieldMappings={(templateData?.fieldMappings as any) || []}
                 fieldConfig={(templateData?.fieldConfig as any[]) || []}
                 initialPhotoBgColor={(templateData as any)?.photoBgColor || "#FFFFFF"}
+                previewStudent={students[0] ? {
+                  formData: students[0].formData as Record<string, string>,
+                  photoUrl: students[0].photoUrl || null,
+                } : null}
                 onSave={async (templateImageUrl, fieldMappings, photoBgColor, cardSettings) => {
                   try {
                     const res = await fetch(`/api/schools/${schoolId}/template`, {

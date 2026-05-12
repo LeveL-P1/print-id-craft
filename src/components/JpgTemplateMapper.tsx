@@ -6,6 +6,7 @@ import {
   type IdSizeConfig, type FontConfig, type PhotoSizeConfig,
   type PhotoBorderConfig, type WrapTextConfig,
 } from "./IDMakerDialogs"
+import { resolveFieldValue } from "@/lib/field-resolver"
 
 const BG_COLOR_PRESETS = [
   // Neutrals
@@ -85,6 +86,16 @@ type JpgTemplateMapperProps = {
   onUploadImage: (file: File) => Promise<string>
   initialPhotoBgColor?: string
   initialCardSettings?: CardSettings
+  /**
+   * Optional sample student from the current school used to populate the
+   * editor preview with REAL data. When omitted, the editor falls back
+   * to the generic SAMPLE_DATA placeholders so admins can still place
+   * fields before any students are imported.
+   */
+  previewStudent?: {
+    formData: Record<string, string>
+    photoUrl?: string | null
+  } | null
 }
 
 const DATE_FORMATS = [
@@ -253,6 +264,7 @@ export default function JpgTemplateMapper({
   onUploadImage,
   initialPhotoBgColor,
   initialCardSettings,
+  previewStudent,
 }: JpgTemplateMapperProps) {
   const [imageUrl, setImageUrl] = useState(initialImageUrl || "")
   const [mappings, setMappings] = useState<FieldMapping[]>(
@@ -1597,10 +1609,19 @@ export default function JpgTemplateMapper({
             {/* Field overlays */}
             {mappings.map((m) => {
               const isSelected = m.id === selectedId
-              const sampleValue =
-                m.type === "photo" || m.type === "flag"
-                  ? ""
-                  : SAMPLE_DATA[m.fieldKey] || m.label
+              // Resolve preview value with this priority:
+              //   1. Real student data from the current school (passed via
+              //      previewStudent — uses the shared field-resolver so
+              //      "mobile" → "phone", etc.).
+              //   2. Generic SAMPLE_DATA placeholders.
+              //   3. Field label as a last-resort placeholder.
+              let sampleValue = ""
+              if (m.type !== "photo" && m.type !== "flag") {
+                const realValue = previewStudent?.formData
+                  ? resolveFieldValue(previewStudent.formData, m.fieldKey)
+                  : ""
+                sampleValue = realValue || SAMPLE_DATA[m.fieldKey] || m.label
+              }
 
               return (
                 <div
@@ -1652,6 +1673,22 @@ export default function JpgTemplateMapper({
                 >
                   {m.type === "photo" ? (
                     showPreview ? (
+                      previewStudent?.photoUrl ? (
+                        // Show the real student's photo (contain-fit so the full
+                        // image is visible, matching JpgCardPreview behavior).
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={previewStudent.photoUrl}
+                          alt="Student"
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "contain",
+                            background: photoBgColor,
+                            borderRadius: `${m.photoBorderRadius || 0}px`,
+                          }}
+                        />
+                      ) : (
                       <div
                         style={{
                           width: "100%",
@@ -1677,6 +1714,7 @@ export default function JpgTemplateMapper({
                           <polyline points="21 15 16 10 5 21" />
                         </svg>
                       </div>
+                      )
                     ) : (
                       <div
                         style={{
