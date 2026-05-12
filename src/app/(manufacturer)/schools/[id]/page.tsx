@@ -550,38 +550,82 @@ export default function SchoolDetailPage() {
     setPhotoUploadStatus('Preparing upload...')
     
     try {
-      // Upload in batches of 20 to avoid timeouts on large folders
-      const BATCH_SIZE = 20
+      // Upload in SIZE-AWARE batches. Vercel's serverless body limit is ~4.5 MB
+      // per request, so we cap each POST at BATCH_MAX_BYTES and also at
+      // BATCH_MAX_FILES to keep per-request memory/time bounded. We build the
+      // batches up-front so the progress UI can show accurate batch counts.
+      const BATCH_MAX_BYTES = 3.5 * 1024 * 1024 // ~3.5 MB — safely below the 4.5 MB platform limit
+      const BATCH_MAX_FILES = 8                 // cap on file count per request
       const totalFiles = photoFiles.length
+
+      const batches: File[][] = []
+      {
+        let current: File[] = []
+        let currentSize = 0
+        for (const f of photoFiles) {
+          const size = f.size
+          // If a single file is already over the limit, still send it alone —
+          // the server will reject it with a clear 413 we can surface.
+          if (current.length > 0 && (currentSize + size > BATCH_MAX_BYTES || current.length >= BATCH_MAX_FILES)) {
+            batches.push(current)
+            current = []
+            currentSize = 0
+          }
+          current.push(f)
+          currentSize += size
+        }
+        if (current.length > 0) batches.push(current)
+      }
+
       let allMatched: any[] = []
       let allUnmatched: string[] = []
       let allErrors: any[] = []
+      let processed = 0
 
-      for (let i = 0; i < totalFiles; i += BATCH_SIZE) {
-        const batch = photoFiles.slice(i, i + BATCH_SIZE)
-        const batchNum = Math.floor(i / BATCH_SIZE) + 1
-        const totalBatches = Math.ceil(totalFiles / BATCH_SIZE)
-        
-        setPhotoUploadStatus(`Uploading batch ${batchNum} of ${totalBatches} (${Math.min(i + BATCH_SIZE, totalFiles)}/${totalFiles} photos)...`)
-        setPhotoUploadProgress(Math.round((i / totalFiles) * 90))
+      for (let b = 0; b < batches.length; b++) {
+        const batch = batches[b]
+        const batchNum = b + 1
+        const totalBatches = batches.length
+
+        setPhotoUploadStatus(`Uploading batch ${batchNum} of ${totalBatches} (${processed + batch.length}/${totalFiles} photos)...`)
+        setPhotoUploadProgress(Math.round((processed / totalFiles) * 90))
 
         const fd = new FormData()
         for (const file of batch) {
           fd.append("photos", file)
         }
 
-        const res = await fetch(`/api/schools/${schoolId}/students/bulk-photos`, { method: "POST", body: fd })
-        const data = await res.json()
-        
-        if (data.success) {
+        let data: any = null
+        try {
+          const res = await fetch(`/api/schools/${schoolId}/students/bulk-photos`, { method: "POST", body: fd })
+          // Guard against HTML error pages (413/502/etc.) — Vercel returns HTML, not JSON
+          const ct = res.headers.get("content-type") || ""
+          if (ct.includes("application/json")) {
+            data = await res.json()
+          } else {
+            const text = await res.text().catch(() => "")
+            data = {
+              success: false,
+              error:
+                res.status === 413
+                  ? "Batch too large for server (try smaller photos)"
+                  : `Server error ${res.status}${text ? `: ${text.slice(0, 120)}` : ""}`,
+            }
+          }
+        } catch (netErr: any) {
+          data = { success: false, error: netErr?.message || "Network error" }
+        }
+
+        if (data?.success) {
           if (data.data.matchedFiles) allMatched = [...allMatched, ...data.data.matchedFiles]
           if (data.data.unmatchedFiles) allUnmatched = [...allUnmatched, ...data.data.unmatchedFiles]
           if (data.data.errorFiles) allErrors = [...allErrors, ...data.data.errorFiles]
         } else {
           for (const file of batch) {
-            allErrors.push({ filename: file.name, error: data.error || 'Batch upload failed' })
+            allErrors.push({ filename: file.name, error: data?.error || 'Batch upload failed' })
           }
         }
+        processed += batch.length
       }
 
       setPhotoUploadProgress(100)
