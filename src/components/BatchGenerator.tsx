@@ -19,7 +19,15 @@ type FieldMapping = {
   fontWeight: "normal" | "bold"
   fontFamily: string
   textAlign?: "left" | "center" | "right"
+  // How long text is handled inside the box.
+  //   "nowrap"    → single line at the user's chosen size, truncated with "…".
+  //   "wrap"      → legacy auto-fit (shrink to one line, then wrap+shrink).
+  //   "multiline" → wrap onto multiple lines AT THE USER'S CHOSEN size (no shrink).
+  textWrap?: "nowrap" | "wrap" | "multiline"
 }
+
+// Editor reference image width (px). Field.fontSize is stored relative to this.
+const BATCH_EDITOR_REFERENCE_WIDTH = 600
 
 type StudentRenderData = {
   id: string
@@ -138,25 +146,17 @@ function fitTextToBoxCanvas(
   boxH: number,
   fontFamily: string,
   fontWeight: string,
+  canvasW: number = 0,
+  userFontSizeEditorPx?: number,
+  wrapMode: "nowrap" | "wrap" | "multiline" = "wrap",
 ): { lines: string[]; fontSize: number; lineHeight: number } {
   const padding = 4
   const maxW = Math.max(1, boxW - padding * 2)
   const maxH = Math.max(1, boxH - padding * 2)
   const fontPrefix = fontWeight === "bold" ? "bold " : ""
-  const minFont = Math.max(8, boxH * 0.28)
-  let fontSize = boxH * 0.78
-
   const setFont = (s: number) => { ctx.font = `${fontPrefix}${s}px ${fontFamily}` }
 
-  setFont(fontSize)
-  while (ctx.measureText(text).width > maxW && fontSize > minFont) {
-    fontSize -= 0.5
-    setFont(fontSize)
-  }
-  if (ctx.measureText(text).width <= maxW) {
-    return { lines: [text], fontSize, lineHeight: fontSize * 1.15 }
-  }
-
+  // Word-wrap helper used by both nowrap (for ellipsis fallback) and multiline.
   const wrap = (size: number): string[] => {
     setFont(size)
     const words = text.split(/\s+/).filter(Boolean)
@@ -183,6 +183,47 @@ function fitTextToBoxCanvas(
     }
     if (current) lines.push(current)
     return lines
+  }
+
+  // Resolve the user's chosen editor-px font size into canvas pixels.
+  const userPx =
+    userFontSizeEditorPx && userFontSizeEditorPx > 0 && canvasW > 0
+      ? (userFontSizeEditorPx * canvasW) / BATCH_EDITOR_REFERENCE_WIDTH
+      : boxH * 0.6
+
+  // ── MULTILINE → keep the user's font size, wrap to as many lines as needed.
+  if (wrapMode === "multiline") {
+    const lines = wrap(userPx)
+    return { lines, fontSize: userPx, lineHeight: userPx * 1.2 }
+  }
+
+  // ── NO WRAP → single line at user font size, truncate with "…".
+  if (wrapMode === "nowrap") {
+    setFont(userPx)
+    if (ctx.measureText(text).width <= maxW) {
+      return { lines: [text], fontSize: userPx, lineHeight: userPx * 1.15 }
+    }
+    const ellipsis = "…"
+    let lo = 0, hi = text.length
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1
+      const trial = text.slice(0, mid) + ellipsis
+      if (ctx.measureText(trial).width <= maxW) lo = mid
+      else hi = mid - 1
+    }
+    return { lines: [text.slice(0, lo) + ellipsis], fontSize: userPx, lineHeight: userPx * 1.15 }
+  }
+
+  // ── WRAP (legacy auto-fit) → shrink to one line, fall back to wrapped+shrunk.
+  const minFont = Math.max(8, boxH * 0.28)
+  let fontSize = boxH * 0.78
+  setFont(fontSize)
+  while (ctx.measureText(text).width > maxW && fontSize > minFont) {
+    fontSize -= 0.5
+    setFont(fontSize)
+  }
+  if (ctx.measureText(text).width <= maxW) {
+    return { lines: [text], fontSize, lineHeight: fontSize * 1.15 }
   }
 
   let lines = wrap(fontSize)
@@ -286,6 +327,7 @@ async function renderIdCard(
         const fontWeight = field.fontWeight || "normal"
         const { lines, lineHeight } = fitTextToBoxCanvas(
           ctx, value, fw, fh, fontFamily, fontWeight,
+          printW, field.fontSize, field.textWrap || "wrap",
         )
 
         ctx.fillStyle = field.fontColor || "#0f172a"
@@ -298,7 +340,12 @@ async function renderIdCard(
         ctx.clip()
         const textX = align === "center" ? fx + fw / 2 : align === "right" ? fx + fw - padding : fx + padding
         const totalH = lines.length * lineHeight
-        const firstLineY = fy + (fh - totalH) / 2 + lineHeight / 2
+        // Multi-line addresses must top-align so the first line is always visible
+        // even when the address overflows the bottom of the box.
+        const isMultiline = (field.textWrap || "wrap") === "multiline"
+        const firstLineY = isMultiline
+          ? fy + padding + lineHeight / 2
+          : fy + (fh - totalH) / 2 + lineHeight / 2
         for (let i = 0; i < lines.length; i++) {
           ctx.fillText(lines[i], textX, firstLineY + i * lineHeight)
         }
@@ -363,34 +410,71 @@ async function renderIdCardSvg(
                    field.fieldKey === "serialNumber" ? student.serialNumber : "")
       const value = String(val || "").trim()
       if (value) {
-        let fontSize = Math.round(fh * 0.78)
+        const wrapMode = ((field as any).textWrap || "wrap") as "nowrap" | "wrap" | "multiline"
         const textAnchor = field.textAlign === "center" ? "middle" : field.textAlign === "right" ? "end" : "start"
         const padding = 4
         const textX = field.textAlign === "center" ? fx + fw / 2 : field.textAlign === "right" ? fx + fw - padding : fx + padding
-        const textY = fy + fh / 2
         const fontWeight = field.fontWeight || "normal"
         const fontFamily = field.fontFamily || "Arial"
         const fill = field.fontColor || "#0f172a"
-        const escaped = value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
-        // Auto-fit when "wrap" mode is enabled — measure with a canvas and shrink
-        // the font-size so the full string always fits inside the box.
-        if ((field as any).textWrap === "wrap") {
+        const userPx =
+          field.fontSize && field.fontSize > 0
+            ? (field.fontSize * w) / BATCH_EDITOR_REFERENCE_WIDTH
+            : fh * 0.6
+
+        const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+
+        // ── MULTILINE → keep user font size, wrap onto <tspan> rows.
+        if (wrapMode === "multiline") {
           const maxWidth = Math.max(1, fw - padding * 2)
           const measureCanvas = document.createElement("canvas")
           const mctx = measureCanvas.getContext("2d")
+          const fontPrefix = fontWeight === "bold" ? "bold " : ""
+          const wrappedLines: string[] = []
           if (mctx) {
-            const fontPrefix = fontWeight === "bold" ? "bold " : ""
-            mctx.font = `${fontPrefix}${fontSize}px ${fontFamily}`
-            let w = mctx.measureText(value).width
-            const minFs = Math.max(8, fh * 0.3)
-            while (w > maxWidth && fontSize > minFs) {
-              fontSize -= 0.5
-              mctx.font = `${fontPrefix}${fontSize}px ${fontFamily}`
-              w = mctx.measureText(value).width
+            mctx.font = `${fontPrefix}${userPx}px ${fontFamily}`
+            const words = value.split(/\s+/).filter(Boolean)
+            let current = ""
+            for (const wd of words) {
+              const tentative = current ? current + " " + wd : wd
+              if (mctx.measureText(tentative).width <= maxWidth) current = tentative
+              else { if (current) wrappedLines.push(current); current = wd }
             }
+            if (current) wrappedLines.push(current)
+          } else {
+            wrappedLines.push(value)
           }
+          const lineHeight = userPx * 1.2
+          // Top-align so first line is visible even if it overflows.
+          const firstLineY = fy + padding + userPx
+          const tspans = wrappedLines
+            .map((ln, i) => `<tspan x="${textX.toFixed(1)}" y="${(firstLineY + i * lineHeight).toFixed(1)}">${escape(ln)}</tspan>`)
+            .join("")
+          lines.push(`  <text font-family="${fontFamily}" font-size="${userPx.toFixed(1)}" fill="${fill}" font-weight="${fontWeight}" text-anchor="${textAnchor}">${tspans}</text>`)
+        } else {
+          // wrap (auto-fit) or nowrap: single-line behaviour as before.
+          let fontSize = Math.round(fh * 0.78)
+          const textY = fy + fh / 2
+          if (wrapMode === "wrap") {
+            const maxWidth = Math.max(1, fw - padding * 2)
+            const measureCanvas = document.createElement("canvas")
+            const mctx = measureCanvas.getContext("2d")
+            if (mctx) {
+              const fontPrefix = fontWeight === "bold" ? "bold " : ""
+              mctx.font = `${fontPrefix}${fontSize}px ${fontFamily}`
+              let ww = mctx.measureText(value).width
+              const minFs = Math.max(8, fh * 0.3)
+              while (ww > maxWidth && fontSize > minFs) {
+                fontSize -= 0.5
+                mctx.font = `${fontPrefix}${fontSize}px ${fontFamily}`
+                ww = mctx.measureText(value).width
+              }
+            }
+          } else if (wrapMode === "nowrap") {
+            fontSize = Math.round(userPx)
+          }
+          lines.push(`  <text x="${textX.toFixed(1)}" y="${textY.toFixed(1)}" font-family="${fontFamily}" font-size="${fontSize}" fill="${fill}" font-weight="${fontWeight}" text-anchor="${textAnchor}" dominant-baseline="central">${escape(value)}</text>`)
         }
-        lines.push(`  <text x="${textX.toFixed(1)}" y="${textY.toFixed(1)}" font-family="${fontFamily}" font-size="${fontSize}" fill="${fill}" font-weight="${fontWeight}" text-anchor="${textAnchor}" dominant-baseline="central">${escaped}</text>`)
       }
     }
   }
