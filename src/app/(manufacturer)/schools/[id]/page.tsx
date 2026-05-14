@@ -127,6 +127,10 @@ export default function SchoolDetailPage() {
   const [newExpiry, setNewExpiry] = useState("")
   const [addingClass, setAddingClass] = useState(false)
 
+  // Inline expiry editor (per-row): which class is being edited + its draft value
+  const [editingExpiryFor, setEditingExpiryFor] = useState<string | null>(null)
+  const [editingExpiryValue, setEditingExpiryValue] = useState<string>("")
+
   // Batch generation
   const [generatingBatch, setGeneratingBatch] = useState(false)
 
@@ -304,6 +308,57 @@ export default function SchoolDetailPage() {
     })
     toast.success(isActive ? "Class deactivated" : "Class activated")
     fetchClasses()
+  }
+
+  // Open the inline expiry editor for a row, prefilled with the current value
+  // (converted from ISO → "YYYY-MM-DDTHH:mm" for <input type="datetime-local">).
+  const startEditExpiry = (cid: string, currentIso: string | null) => {
+    let initial = ""
+    if (currentIso) {
+      const d = new Date(currentIso)
+      if (!isNaN(d.getTime())) {
+        // Build local datetime-local value (avoid UTC shift)
+        const pad = (n: number) => String(n).padStart(2, "0")
+        initial = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+      }
+    }
+    setEditingExpiryFor(cid)
+    setEditingExpiryValue(initial)
+  }
+
+  const cancelEditExpiry = () => {
+    setEditingExpiryFor(null)
+    setEditingExpiryValue("")
+  }
+
+  // Save new expiry. If the class was expired/inactive and the new expiry is
+  // in the future (or cleared), automatically reactivate it so the link works
+  // again without a separate click.
+  const saveEditExpiry = async (cid: string) => {
+    const raw = editingExpiryValue.trim()
+    const expiresAt = raw ? new Date(raw).toISOString() : null
+    const willBeActive = !expiresAt || new Date(expiresAt).getTime() > Date.now()
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/classes/${cid}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          expiresAt,
+          // Reactivate when the new expiry is in the future (or removed entirely)
+          ...(willBeActive ? { isActive: true } : {}),
+        }),
+      })
+      if (!res.ok) throw new Error("Failed")
+      toast.success(
+        expiresAt
+          ? willBeActive ? "Expiry updated — link reactivated" : "Expiry updated"
+          : "Expiry removed — link reactivated"
+      )
+      cancelEditExpiry()
+      fetchClasses()
+    } catch {
+      toast.error("Could not update expiry")
+    }
   }
 
   const handleDeleteClass = async (cid: string, name: string) => {
@@ -1184,6 +1239,14 @@ export default function SchoolDetailPage() {
                           <button className="btn btn-outline" onClick={() => copyLink(cls.linkToken)} style={{ fontSize: 11, padding: '5px 10px' }}>📋 Copy</button>
                           <button className="btn btn-outline" onClick={() => shareWhatsApp(cls.linkToken, cls.name)} style={{ fontSize: 11, padding: '5px 10px', color: '#22c55e', borderColor: '#22c55e' }}>💬 WhatsApp</button>
                           <button className="btn btn-outline" onClick={() => shareEmail(cls.linkToken, cls.name)} style={{ fontSize: 11, padding: '5px 10px' }}>📧 Email</button>
+                          <button
+                            className="btn btn-outline"
+                            onClick={() => startEditExpiry(cls.id, cls.expiresAt)}
+                            style={{ fontSize: 11, padding: '5px 10px' }}
+                            title="Edit when this link expires. Setting a future date will also reactivate an expired link."
+                          >
+                            📅 Edit Expiry
+                          </button>
                           <button className="btn btn-outline" onClick={() => handleToggleClass(cls.id, cls.isActive)} style={{ fontSize: 11, padding: '5px 10px' }}>
                             {cls.isActive ? "Deactivate" : "Activate"}
                           </button>
@@ -1191,6 +1254,53 @@ export default function SchoolDetailPage() {
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/></svg>
                           </button>
                         </div>
+                        {/* Inline expiry editor — appears under the action buttons for the row being edited */}
+                        {editingExpiryFor === cls.id && (
+                          <div
+                            style={{
+                              marginTop: 8,
+                              padding: 10,
+                              background: '#f8fafc',
+                              border: '1px solid #e2e8f0',
+                              borderRadius: 8,
+                              display: 'flex',
+                              gap: 6,
+                              alignItems: 'center',
+                              justifyContent: 'flex-end',
+                              flexWrap: 'wrap',
+                            }}
+                          >
+                            <input
+                              type="datetime-local"
+                              value={editingExpiryValue}
+                              onChange={(e) => setEditingExpiryValue(e.target.value)}
+                              style={{ fontSize: 12, padding: '6px 8px', border: '1px solid #cbd5e1', borderRadius: 6 }}
+                            />
+                            <button
+                              className="btn btn-outline"
+                              onClick={() => { setEditingExpiryValue("") }}
+                              style={{ fontSize: 11, padding: '5px 10px' }}
+                              title="Remove expiry (link never expires)"
+                            >
+                              Clear
+                            </button>
+                            <button
+                              className="btn btn-primary"
+                              onClick={() => saveEditExpiry(cls.id)}
+                              style={{ fontSize: 11, padding: '5px 12px' }}
+                            >
+                              Save{(() => {
+                                const raw = editingExpiryValue.trim()
+                                const future = !raw || new Date(raw).getTime() > Date.now()
+                                const isExpired = cls.expiresAt ? new Date(cls.expiresAt).getTime() < Date.now() : false
+                                return future && (isExpired || !cls.isActive) ? " & Reactivate" : ""
+                              })()}
+                            </button>
+                            <button className="btn btn-outline" onClick={cancelEditExpiry} style={{ fontSize: 11, padding: '5px 10px' }}>
+                              Cancel
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   )})

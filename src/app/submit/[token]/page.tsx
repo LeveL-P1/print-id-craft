@@ -529,8 +529,78 @@ export default function SubmitPage() {
           {step === "photo" && (
             <div>
               <p style={{ fontSize: 14, color: '#64748b', marginBottom: 16 }}>
-                Upload a passport-size photo. Our AI will automatically process the background.
+                Upload a passport-style photo. If your photo already has a plain
+                background like the sample below, no AI processing is needed.
               </p>
+
+              {/* Reference Sample + Instructions card */}
+              {!photoPreview && (
+                <div style={{
+                  display: 'flex', gap: 14, alignItems: 'stretch', flexWrap: 'wrap',
+                  padding: 14, background: '#f0f9ff', border: '1px solid #bae6fd',
+                  borderRadius: 12, marginBottom: 16,
+                }}>
+                  {/* Sample reference photo */}
+                  <div style={{ flex: '0 0 110px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div style={{
+                      width: 110, aspectRatio: '3 / 4', borderRadius: 8, overflow: 'hidden',
+                      border: '2px solid #22c55e', background: '#fee2e2',
+                      display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+                      position: 'relative',
+                    }}>
+                      {/* Real reference image if provided in /public/sample-id-photo.jpg.
+                          Falls back to an SVG silhouette illustration so the card always renders. */}
+                      <img
+                        src="/sample-id-photo.jpg"
+                        alt="Sample ID photo"
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                      />
+                      <svg
+                        viewBox="0 0 60 80" width="100%" height="100%"
+                        style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+                        aria-hidden
+                      >
+                        {/* Subtle silhouette overlay — only visible if the photo above failed to load */}
+                        <circle cx="30" cy="26" r="11" fill="#fecaca" />
+                        <path d="M8 80 C 10 56, 50 56, 52 80 Z" fill="#1e3a5f" />
+                      </svg>
+                      <div style={{
+                        position: 'absolute', top: 4, left: 4,
+                        background: '#22c55e', color: 'white',
+                        fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+                      }}>SAMPLE</div>
+                    </div>
+                    <div style={{ fontSize: 10, color: '#0369a1', marginTop: 6, textAlign: 'center', fontWeight: 600 }}>
+                      Reference photo
+                    </div>
+                  </div>
+
+                  {/* Instructions */}
+                  <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#0c4a6e', marginBottom: 6 }}>
+                      📸 How to take the perfect ID photo
+                    </div>
+                    <ul style={{
+                      margin: 0, paddingLeft: 18, fontSize: 12,
+                      color: '#0369a1', lineHeight: 1.7,
+                    }}>
+                      <li><strong>Front-facing</strong> — look straight at the camera</li>
+                      <li><strong>Head &amp; shoulders only</strong> — passport style</li>
+                      <li><strong>Plain solid background</strong> (red curtain, wall, or any single colour)</li>
+                      <li><strong>School uniform</strong> with tie/blazer if applicable</li>
+                      <li><strong>Bright, even lighting</strong> — no shadows on face</li>
+                      <li><strong>Neutral expression</strong>, eyes open, no sunglasses/cap</li>
+                    </ul>
+                    <div style={{
+                      marginTop: 8, padding: '6px 10px', background: '#dcfce7',
+                      borderRadius: 6, fontSize: 11, color: '#166534', fontWeight: 600,
+                    }}>
+                      ✅ If your photo already looks like the sample, we skip AI processing and use it as-is.
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {!photoPreview ? (
                 <PhotoVerifier
@@ -546,13 +616,21 @@ export default function SubmitPage() {
                 />
               ) : (
                 <div style={{ maxWidth: 400, margin: '0 auto' }}>
-                  <div style={{ padding: '10px 14px', background: '#dcfce7', borderRadius: 10, fontSize: 13, color: '#16a34a', fontWeight: 600, marginBottom: 12, textAlign: 'center' }}>
-                    ✅ Photo verified — proceed to background processing
+                  <div style={{
+                    padding: '10px 14px',
+                    background: bgSkippable ? '#dcfce7' : '#fef3c7',
+                    borderRadius: 10, fontSize: 13,
+                    color: bgSkippable ? '#16a34a' : '#92400e',
+                    fontWeight: 600, marginBottom: 12, textAlign: 'center',
+                  }}>
+                    {bgSkippable
+                      ? "✅ Photo verified — background is already plain, no AI needed"
+                      : "✅ Photo verified — AI will clean up the background next"}
                   </div>
                   <div style={{ borderRadius: 10, overflow: 'hidden', border: '2px solid #22c55e', maxWidth: 200, margin: '0 auto' }}>
                     <img src={photoPreview} alt="Preview" style={{ width: '100%', display: 'block' }} />
                   </div>
-                  <button onClick={() => { setPhotoPreview(""); setPhotoFile(null); setCroppedPhoto(""); setPhotoVerified(false) }} className="btn btn-outline" style={{ width: '100%', marginTop: 12, fontSize: 12 }}>
+                  <button onClick={() => { setPhotoPreview(""); setPhotoFile(null); setCroppedPhoto(""); setPhotoVerified(false); setBgSkippable(false) }} className="btn btn-outline" style={{ width: '100%', marginTop: 12, fontSize: 12 }}>
                     Choose Different Photo
                   </button>
                 </div>
@@ -569,7 +647,7 @@ export default function SubmitPage() {
                     setStep("bgprocess")
                   }
                 }}>
-                  {bgSkippable ? "Skip to Review →" : "Process Background →"}
+                  {bgSkippable ? "Continue to Review →" : "Process Background →"}
                 </button>
               </div>
             </div>
