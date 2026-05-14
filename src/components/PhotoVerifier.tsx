@@ -1135,24 +1135,52 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
                   {/* Action Buttons for rejected photos */}
                   {!result.valid && (
                     <div style={{ marginTop: 12 }}>
-                      {/* Critical rejection banner */}
+                      {/* Critical rejection banner — list the EXACT failing
+                          checks so the parent knows precisely what to fix
+                          instead of seeing a generic "rejected" message. */}
                       {criticalFails.length > 0 && (
                         <div style={{
                           padding: '10px 14px', borderRadius: 8,
                           background: '#fef2f2', border: '1px solid #fecaca',
                           marginBottom: 10
                         }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: '#dc2626', marginBottom: 4 }}>
-                            🚫 Photo Rejected — Does Not Meet ID Card Standards
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#dc2626', marginBottom: 6 }}>
+                            🚫 Photo Rejected — {criticalFails.length === 1 ? "reason below" : `${criticalFails.length} reasons below`}
                           </div>
-                          <div style={{ fontSize: 11, color: '#991b1b', lineHeight: 1.6 }}>
-                            {criticalFails.some(c => c.label === "Face Detected" || c.label === "ID Photo Content")
-                              ? "This photo does not contain a valid front-facing face. ID cards require a clear head-and-shoulders portrait."
-                              : criticalFails.some(c => c.label === "Front-Facing")
-                                ? "Please look directly at the camera. Side angles are not accepted for ID cards."
-                                : "Please fix the issues listed above and try again."
-                            }
-                          </div>
+                          <ol style={{
+                            margin: 0, paddingLeft: 18, fontSize: 11,
+                            color: '#991b1b', lineHeight: 1.55,
+                          }}>
+                            {criticalFails.map((c, i) => (
+                              <li key={`crit-${i}`} style={{ marginBottom: 4 }}>
+                                <strong>{c.label}:</strong> {c.detail}
+                                {c.tip && (
+                                  <div style={{ color: '#7f1d1d', fontWeight: 500, marginTop: 1 }}>
+                                    → {c.tip}
+                                  </div>
+                                )}
+                              </li>
+                            ))}
+                          </ol>
+                          {/* Also surface any warning-level failures so the
+                              parent fixes everything in one re-upload. */}
+                          {failedChecks.some(c => c.severity !== "critical") && (
+                            <div style={{
+                              marginTop: 8, paddingTop: 8,
+                              borderTop: '1px dashed #fecaca',
+                              fontSize: 11, color: '#92400e',
+                            }}>
+                              <div style={{ fontWeight: 700, marginBottom: 2 }}>Also improve:</div>
+                              <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.5 }}>
+                                {failedChecks.filter(c => c.severity !== "critical").map((c, i) => (
+                                  <li key={`warn-${i}`}>
+                                    <strong>{c.label}:</strong> {c.detail}
+                                    {c.tip && <span style={{ color: '#a16207' }}> — {c.tip}</span>}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
                         </div>
                       )}
                       {/* Warning-only: still needs re-upload since auto-accept is strict now */}

@@ -49,7 +49,9 @@ const fieldIntent = (field: FieldConfig): FieldIntent => {
   const hay = `${k} ${l}`
   if (/\b(mobile|phone|contact|whatsapp|tel)\b/.test(hay)) return "mobile"
   if (/\b(addr|address)\b/.test(hay)) return "address"
-  if (/\b(roll|admission ?no|adm ?no)\b/.test(hay)) return "roll"
+  // Roll number / GR (General Register) number / Admission number — all the
+  // same kind of student identifier from a form-rendering point of view.
+  if (/\b(roll|gr\.?\s*no|gr\b|general\s*register|admission\s*no|adm\.?\s*no)\b/.test(hay)) return "roll"
   if (/\b(house ?flag|flag ?colou?r|^house$|colou?r ?house|^colour$|^color$)\b/.test(hay)) return "flag"
   if (/\b(name|father|mother|guardian|surname)\b/.test(hay)) return "name"
   return "default"
@@ -761,8 +763,12 @@ export default function SubmitPage() {
                     )
                   }
 
-                  // ── Roll number: numeric, with example placeholder ──
+                  // ── Roll / GR / Admission number: numeric, with example placeholder ──
                   if (intent === "roll") {
+                    const lbl = field.label.toLowerCase()
+                    // Choose an example that matches the label so a school using
+                    // "GR No." doesn't see a single-digit roll-number style hint.
+                    const example = /gr/.test(lbl) || /admission/.test(lbl) ? "2851" : "7"
                     return (
                       <div key={field.key} className="form-group">
                         <label>
@@ -776,7 +782,7 @@ export default function SubmitPage() {
                           required={field.required}
                           value={value}
                           onChange={e => handleFieldChange(field.key, e.target.value.replace(/\D/g, ""))}
-                          placeholder="e.g. 7"
+                          placeholder={`e.g. ${example}`}
                         />
                       </div>
                     )
