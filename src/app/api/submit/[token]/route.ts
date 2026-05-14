@@ -28,12 +28,33 @@ export async function GET(req: Request, { params }: { params: { token: string } 
 
     const template = cls.school.template
 
-    // Re-derive fieldConfig from fieldMappings on every read so the public form
-    // always shows exactly the fields placed on the JPG template — no extra/stale
-    // default fields, correct label names, correct order.
+    // fieldConfig is auto-synced from Excel on every import — it has the EXACT Excel column
+    // names as labels (e.g. "GR NO", "House", "MOBILE") and the correct stored data keys.
+    // Use it as the primary form field source so the public form always matches the school's
+    // Excel exactly.  Fall back to deriving from fieldMappings only for JPG-template-only
+    // schools that have never imported an Excel.
     const rawMappings = (template?.fieldMappings || []) as any[]
+    const rawFieldConf = (template?.fieldConfig || []) as any[]
+
+    // Keys/labels that students should not fill in (system-managed or auto-filled)
+    const FORM_SKIP_KEYS = new Set(["class", "classSection", "photoUrl"])
+    const FORM_SKIP_LABELS = new Set(["class", "class-section", "photo url", "photourl"])
+
     let resolvedFieldConfig: any[]
-    if (rawMappings.length > 0) {
+    if (rawFieldConf.length > 0) {
+      resolvedFieldConfig = rawFieldConf
+        .filter((f: any) =>
+          !FORM_SKIP_KEYS.has(f.key) &&
+          !FORM_SKIP_LABELS.has((f.label || "").toLowerCase().trim())
+        )
+        .map((f: any) => {
+          const k = (f.key || "").toLowerCase()
+          const l = (f.label || "").toLowerCase()
+          let formType = f.type || "text"
+          if (k === "phone" || k.includes("mob") || l.includes("mobile") || l.includes("phone")) formType = "tel"
+          return { key: f.key, label: f.label, type: formType, required: true }
+        })
+    } else if (rawMappings.length > 0) {
       resolvedFieldConfig = rawMappings
         .filter((m: any) => m.type !== "photo")
         .map((m: any) => {
@@ -43,12 +64,18 @@ export async function GET(req: Request, { params }: { params: { token: string } 
           return { key: m.fieldKey, label: m.label, type: formType, required: true }
         })
     } else {
-      resolvedFieldConfig = (template?.fieldConfig || []) as any[]
+      resolvedFieldConfig = []
     }
 
-    // Only query students for house/flag colours when the template actually has
-    // a flag-type mapping. For schools without flags this avoids a full table scan.
-    const hasFlagMapping = rawMappings.some((m: any) => m.type === "flag")
+    // Detect flag/house field from EITHER fieldMappings (type=flag) OR fieldConfig key/label.
+    const FLAG_FIELD_KEYS = ["flagColor", "houseFlag", "house_flag", "houseColor", "house_color"]
+    const FLAG_LABEL_WORDS = ["house", "flag", "colour", "color"]
+    const hasFlagMapping =
+      rawMappings.some((m: any) => m.type === "flag") ||
+      rawFieldConf.some((f: any) =>
+        FLAG_FIELD_KEYS.includes(f.key) ||
+        FLAG_LABEL_WORDS.some(w => (f.label || "").toLowerCase().includes(w))
+      )
     const FLAG_KEYS = ["flagColor", "Flag Color", "flag_color", "House", "house", "Colour", "colour", "houseFlag", "house_flag", "houseColor", "house_color"]
     const flagColorSet = new Set<string>()
     if (hasFlagMapping) {

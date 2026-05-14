@@ -1420,7 +1420,14 @@ export default function SchoolDetailPage() {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
                 Add Student
               </button>
-              {(templateData?.fieldMappings as any[])?.some((m: any) => m.type === 'flag') && (
+              {((): boolean => {
+                const maps = (templateData?.fieldMappings as any[]) || []
+                const conf = (templateData?.fieldConfig as any[]) || []
+                const FLAG_KEYS = ["flagColor","houseFlag","house_flag","houseColor","house_color"]
+                const FLAG_WORDS = ["house","flag","colour","color"]
+                return maps.some((m: any) => m.type === 'flag') ||
+                  conf.some((f: any) => FLAG_KEYS.includes(f.key) || FLAG_WORDS.some(w => (f.label||'').toLowerCase().includes(w)))
+              })() && (
               <button className="btn btn-outline" onClick={() => { if (flagColors.length === 0) fetchFlags(); setFlagUploadOpen(true) }} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#f59e0b', color: '#d97706' }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>
                 Manage Flags{flagColors.length > 0 ? ` (${flagColors.length})` : ''}
@@ -1474,30 +1481,39 @@ export default function SchoolDetailPage() {
             <div className="data-table-wrapper" style={{ overflowX: 'auto', position: 'relative', opacity: tabLoading ? 0.5 : 1, transition: 'opacity 0.15s' }}>
               {tabLoading && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5, background: 'rgba(255,255,255,0.6)', borderRadius: 14 }}><div className="login-spinner" style={{ width: 28, height: 28, borderColor: 'rgba(59,130,246,0.2)', borderTopColor: '#3b82f6' }} /></div>}
               {(() => {
-                // Derive display columns from template fieldMappings (correct per-school field set,
-                // in the order the admin placed them on the template image).
-                // Falls back to student formData keys only when no template mappings exist yet.
+                // fieldConfig is auto-synced from Excel on every import — it has the EXACT
+                // Excel column names as labels and the correct stored data keys.
+                // Use it as the primary column source so every school shows exactly what
+                // was in their Excel (e.g. "GR NO" not "ROLL NO. / NO", "House" not "HOUSE FLAG").
+                // fieldMappings is only for physical card printing layout — fall back to it
+                // only when no Excel has ever been imported for this school.
                 const keyToLabel: Record<string, string> = {}
-                const templateMappings = (templateData?.fieldMappings || []) as Array<{ fieldKey: string; label: string; type: string }>
-                const templateTextMappings = templateMappings.filter(
-                  m => m.type !== "photo" && m.fieldKey !== "class" && m.fieldKey !== "classSection"
-                )
+                const fieldConf = (templateData?.fieldConfig || []) as Array<{ key: string; label: string; type: string }>
+                const fieldMappingsArr = (templateData?.fieldMappings || []) as Array<{ fieldKey: string; label: string; type: string }>
+                const SKIP_KEYS = new Set(["class", "classSection", "photoUrl"])
+                const SKIP_LABELS = new Set(["class", "class-section", "photo url", "photourl"])
 
                 let dataColumns: string[]
-                if (templateTextMappings.length > 0) {
-                  dataColumns = templateTextMappings.map(m => m.fieldKey)
-                  for (const m of templateTextMappings) keyToLabel[m.fieldKey] = m.label
+                if (fieldConf.length > 0) {
+                  const visible = fieldConf.filter(f =>
+                    !SKIP_KEYS.has(f.key) &&
+                    !SKIP_LABELS.has((f.label || "").toLowerCase().trim())
+                  )
+                  dataColumns = visible.map(f => f.key)
+                  for (const f of visible) keyToLabel[f.key] = f.label
+                } else if (fieldMappingsArr.length > 0) {
+                  const visible = fieldMappingsArr.filter(
+                    m => m.type !== "photo" && m.fieldKey !== "class" && m.fieldKey !== "classSection"
+                  )
+                  dataColumns = visible.map(m => m.fieldKey)
+                  for (const m of visible) keyToLabel[m.fieldKey] = m.label
                 } else {
-                  // Fallback: collect keys from student formData (schools without a JPG template)
+                  // Last resort: collect unique keys from student formData
                   const fallback: Record<string, string> = {
                     srNo: "NO.", fullName: "Name", grNo: "GR NO", photoId: "PHOTO NO.",
                     flagColor: "House", phone: "MOBILE", address: "Address", rollNo: "Roll No.",
                     dob: "DOB", bloodGroup: "Blood Group", fatherName: "Father Name",
                     motherName: "Mother Name", section: "Section", branch: "Branch",
-                  }
-                  const fc = (templateData?.fieldConfig || []) as Array<{ key: string; label: string }>
-                  for (const f of fc) {
-                    if (f.key && f.label && f.key !== "class" && f.key !== "classSection") fallback[f.key] = f.label
                   }
                   const keySet = new Set<string>()
                   const allKeys: string[] = []
@@ -1553,7 +1569,7 @@ export default function SchoolDetailPage() {
                           mobile:     ["phone", "Phone", "MOBILE", "Mobile"],
                           flagColor:  ["houseFlag", "house", "House", "House Flag", "Flag", "Colour", "colour", "Color"],
                           houseFlag:  ["flagColor", "house", "House", "House Flag", "Flag"],
-                          rollNo:     ["Roll No", "Roll No.", "roll no", "RollNo", "no", "NO", "srNo"],
+                          rollNo:     ["grNo", "GR NO", "GR No", "Roll No", "Roll No.", "roll no", "RollNo", "no", "NO", "srNo"],
                           grNo:       ["GR NO", "GR No", "GRNo", "gr_no", "Gr No"],
                           srNo:       ["no", "NO", "No", "sr_no", "Sr No", "rollNo"],
                           photoId:    ["Photo ID", "PHOTO NO.", "PHOTO NO", "Photo No", "photo_id", "PhotoId"],
