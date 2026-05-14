@@ -347,13 +347,40 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         })
 
         // ── 9. Background Uniformity ──
-        const bgScore = analyzeBackgroundUniformity(ctx, img.width, img.height)
+        // We now require BOTH high uniformity AND a colour match against the
+        // school's selected template colour before we can safely skip the AI
+        // background-replacement step. A "plain but wrong colour" background
+        // (e.g. blue wall when the school wants red) still needs AI re-colour.
+        // The decision is exposed via a custom property `_bgQualityGood` on
+        // the check object so handleFile() can read it without re-running the
+        // analysis.
+        const bg = analyzeBackgroundUniformity(ctx, img.width, img.height)
+        const target = parseColor(schoolBgColor)
+        const detectedColorDistance = target ? Math.round(colorDistance(bg.dominantRgb, target)) : null
+        // Uniform enough to call "plain": score >= 75 AND dominant bin > 60%.
+        const isUniform = bg.score >= 75 && bg.dominantRatio >= 0.6
+        // "Matches school colour" within ΔE ≈ 50 (lenient — JPEG colour shift,
+        // ambient light, slight camera WB differences are normal).
+        const matchesSchool = target !== null && detectedColorDistance !== null && detectedColorDistance < 50
+        const bgQualityGood = isUniform && (target === null || matchesSchool)
+        const bgDetail =
+          !isUniform
+            ? `${bg.score}% uniform — mixed background`
+            : matchesSchool
+              ? `Plain & matches school colour ✓`
+              : target
+                ? `Plain but wrong colour — AI will recolour to school's choice`
+                : `${bg.score}% uniform`
         checks.push({
-          passed: bgScore >= 55,
+          passed: isUniform,
           severity: "warning",
           label: "Background",
-          detail: `${bgScore}% uniform`,
-          tip: "Use a plain, solid-colored wall as background"
+          detail: bgDetail,
+          tip: target
+            ? `For fastest results, take the photo against a plain wall in the school's colour. Otherwise our AI will replace it.`
+            : `Use a plain, solid-coloured wall as background.`,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ...(({ _bgQualityGood: bgQualityGood } as any)),
         })
 
         // ── 10. Face Detection (CRITICAL for ID cards) ──
@@ -515,35 +542,118 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
     } catch { return 50 }
   }
 
-  const analyzeBackgroundUniformity = (ctx: CanvasRenderingContext2D, w: number, h: number): number => {
-    const sampleSize = Math.min(20, Math.floor(w * 0.1))
-    const samples: { r: number; g: number; b: number }[] = []
+  // Analyses the edge bands of the photo (top, bottom, left strips — we skip
+  // the bottom-centre where shoulders sit) and reports three things needed by
+  // the caller:
+  //   • score        — 0-100 uniformity score; higher means more "plain"
+  //   • dominantRgb  — most common edge colour (the apparent background)
+  //   • dominantRatio — fraction of edge pixels matching the dominant bin
+  //                     (rejects 50/50 white-window/dark-wall splits which
+  //                     have low stdDev per channel but obviously aren't plain)
+  // The previous implementation used only stdDev and over-rated mixed
+  // backgrounds (window-frames, curtains) as "uniform".
+  const analyzeBackgroundUniformity = (
+    ctx: CanvasRenderingContext2D, w: number, h: number
+  ): { score: number; dominantRgb: { r: number; g: number; b: number }; dominantRatio: number } => {
+    type RGB = { r: number; g: number; b: number }
+    const samples: RGB[] = []
     const collectSamples = (x: number, y: number, width: number, height: number) => {
       try {
         const data = ctx.getImageData(x, y, width, height).data
         for (let i = 0; i < data.length; i += 16) {
           samples.push({ r: data[i], g: data[i + 1], b: data[i + 2] })
         }
-      } catch { /* CORS */ }
+      } catch { /* CORS — ignore this band */ }
     }
-    collectSamples(0, 0, w, sampleSize)
-    collectSamples(0, h - sampleSize, w, sampleSize)
-    collectSamples(0, 0, sampleSize, h)
-    collectSamples(w - sampleSize, 0, sampleSize, h)
-    if (samples.length === 0) return 50
+    const topBand = Math.max(20, Math.floor(h * 0.12))
+    const sideBand = Math.max(20, Math.floor(w * 0.10))
+    // Edge strips only: top, top-left, top-right. We deliberately skip the
+    // bottom strip because that's where shoulders / clothing sit in a
+    // head-and-shoulders portrait and would dilute the background sample.
+    collectSamples(0, 0, w, topBand)
+    collectSamples(0, topBand, sideBand, Math.floor(h * 0.55))
+    collectSamples(w - sideBand, topBand, sideBand, Math.floor(h * 0.55))
+
+    if (samples.length === 0) {
+      return { score: 50, dominantRgb: { r: 255, g: 255, b: 255 }, dominantRatio: 0 }
+    }
+
+    // Quantised colour histogram (4 bits/channel = 4096 bins) — robust to JPEG
+    // noise. Each bin is 16 RGB units wide, which corresponds visually to
+    // "the same colour" for background-detection purposes.
+    const hist = new Map<number, number>()
+    for (const p of samples) {
+      const bin = ((p.r >> 4) << 8) | ((p.g >> 4) << 4) | (p.b >> 4)
+      hist.set(bin, (hist.get(bin) || 0) + 1)
+    }
+    let topBin = 0, topCount = 0
+    // Use Array.from to keep tsconfig compatibility (no --downlevelIteration).
+    Array.from(hist.entries()).forEach(([bin, count]) => {
+      if (count > topCount) { topCount = count; topBin = bin }
+    })
+    const dominantRatio = topCount / samples.length
+
+    // Average inside the dominant bin gives us the representative colour.
+    const dR = (topBin >> 8) & 0xf, dG = (topBin >> 4) & 0xf, dB = topBin & 0xf
+    const minR = dR * 16, minG = dG * 16, minB = dB * 16
+    let sR = 0, sG = 0, sB = 0, n = 0
+    for (const p of samples) {
+      if (p.r >= minR && p.r < minR + 16 && p.g >= minG && p.g < minG + 16 && p.b >= minB && p.b < minB + 16) {
+        sR += p.r; sG += p.g; sB += p.b; n++
+      }
+    }
+    const dominantRgb = n > 0
+      ? { r: Math.round(sR / n), g: Math.round(sG / n), b: Math.round(sB / n) }
+      : { r: minR + 8, g: minG + 8, b: minB + 8 }
+
+    // Score combines (a) stdDev across samples and (b) how concentrated the
+    // dominant bin is. A photo with a single solid wall has very high
+    // dominantRatio AND low stdDev; a curtain+window scene has low ratio
+    // and high stdDev → low score.
     const avgR = samples.reduce((s, p) => s + p.r, 0) / samples.length
     const avgG = samples.reduce((s, p) => s + p.g, 0) / samples.length
     const avgB = samples.reduce((s, p) => s + p.b, 0) / samples.length
-    const variance = samples.reduce((s, p) => s + (p.r - avgR) ** 2 + (p.g - avgG) ** 2 + (p.b - avgB) ** 2, 0) / (samples.length * 3)
+    const variance = samples.reduce(
+      (s, p) => s + (p.r - avgR) ** 2 + (p.g - avgG) ** 2 + (p.b - avgB) ** 2, 0
+    ) / (samples.length * 3)
     const stdDev = Math.sqrt(variance)
-    if (stdDev < 15) return 95
-    if (stdDev < 25) return 85
-    if (stdDev < 35) return 75
-    if (stdDev < 45) return 65
-    if (stdDev < 55) return 55
-    if (stdDev < 70) return 45
-    return 30
+
+    // stdDev → 0-50 points
+    let stdScore = 50
+    if (stdDev > 70) stdScore = 0
+    else if (stdDev > 55) stdScore = 10
+    else if (stdDev > 45) stdScore = 20
+    else if (stdDev > 35) stdScore = 30
+    else if (stdDev > 25) stdScore = 40
+    // dominantRatio → 0-50 points (heavy weight — most reliable signal)
+    let domScore = 0
+    if (dominantRatio > 0.85) domScore = 50
+    else if (dominantRatio > 0.70) domScore = 40
+    else if (dominantRatio > 0.55) domScore = 25
+    else if (dominantRatio > 0.40) domScore = 10
+    return { score: Math.min(100, stdScore + domScore), dominantRgb, dominantRatio }
   }
+
+  // Parse "#RRGGBB" / "rgb(r,g,b)" into an {r,g,b} object — small helper for
+  // comparing the detected dominant background colour against the school's
+  // selected template colour.
+  const parseColor = (input: string | undefined): { r: number; g: number; b: number } | null => {
+    if (!input) return null
+    const hex = input.trim().replace(/^#/, "")
+    if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+      return {
+        r: parseInt(hex.slice(0, 2), 16),
+        g: parseInt(hex.slice(2, 4), 16),
+        b: parseInt(hex.slice(4, 6), 16),
+      }
+    }
+    const m = input.match(/rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/)
+    if (m) return { r: +m[1], g: +m[2], b: +m[3] }
+    return null
+  }
+  // Euclidean RGB distance — fine for our threshold (~40 units = "same colour").
+  const colorDistance = (a: { r: number; g: number; b: number }, b: { r: number; g: number; b: number }): number =>
+    Math.sqrt((a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2)
 
   const analyzeFrontFacing = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
     try {
@@ -905,7 +1015,12 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
     const criticalFails = verificationResult.checks.filter(c => !c.passed && c.severity === "critical")
     if (criticalFails.length === 0) {
       const bgCheck = verificationResult.checks.find(c => c.label === "Background")
-      const bgGood = bgCheck ? bgCheck.passed : false
+      // bgGood = "skip AI safely". Requires the photo's edge background to
+      // be BOTH plain (high uniformity) AND a colour match for the school's
+      // template choice. analyzeBackgroundUniformity attaches the combined
+      // flag via _bgQualityGood; fall back to bgCheck.passed for older paths.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const bgGood = (bgCheck as any)?._bgQualityGood ?? !!bgCheck?.passed
       onPhotoAccepted(adjustedFile, previewUrl, bgGood)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -109,6 +109,11 @@ export default function PhotoBgProcessor({ photoUrl, defaultBgColor, onProcessed
   const [error, setError] = useState("")
   const [photoLoaded, setPhotoLoaded] = useState(false)
   const [photoDataUrl, setPhotoDataUrl] = useState<string>("")
+  // Warning string set by applyBackground when the post-composite uniformity
+  // check detects that the AI left non-uniform / off-colour artefacts in the
+  // background region. Surfaced to the user so they know to retake the photo
+  // rather than ship a flawed ID card.
+  const [bgQualityIssue, setBgQualityIssue] = useState<string>("")
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   const activePreset = BG_COLOR_PRESETS.find(p => p.hex.toLowerCase() === selectedColor.toLowerCase())
@@ -271,6 +276,94 @@ export default function PhotoBgProcessor({ photoUrl, defaultBgColor, onProcessed
           }
         }
 
+        // Step 2b: Connected-component cleanup. The AI segmenter sometimes
+        // leaves small isolated "islands" of alpha>0 inside the background
+        // region — chunks of dark wall mis-classified as foreground because
+        // they're similar in colour to hair / dark clothes. These show up
+        // as black spots on the final ID card. We BFS the foreground mask,
+        // keep only the biggest blob (the person, which touches the centre)
+        // and zero-out everything else.
+        try {
+          const total = w * h
+          const fg = new Uint8Array(total)
+          for (let i = 0; i < total; i++) fg[i] = data[i * 4 + 3] > 128 ? 1 : 0
+
+          const label = new Int32Array(total) // 0 = unvisited
+          const sizes: number[] = [0] // dummy for label 0
+          const centreLabels = new Set<number>()
+          // Centre region used to identify the "main" component (the person
+          // is always near the middle of an ID portrait).
+          const cxMin = Math.floor(w * 0.30), cxMax = Math.floor(w * 0.70)
+          const cyMin = Math.floor(h * 0.20), cyMax = Math.floor(h * 0.70)
+          // Queue: flat Int32Array used as a ring buffer to avoid GC churn.
+          const queue = new Int32Array(total)
+          let nextLabel = 1
+          for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+              const idx = y * w + x
+              if (!fg[idx] || label[idx]) continue
+              const lbl = nextLabel++
+              let size = 0
+              let head = 0, tail = 0
+              queue[tail++] = idx
+              label[idx] = lbl
+              while (head < tail) {
+                const p = queue[head++]
+                size++
+                const py = (p / w) | 0
+                const px = p - py * w
+                if (px >= cxMin && px < cxMax && py >= cyMin && py < cyMax) {
+                  centreLabels.add(lbl)
+                }
+                if (px > 0) {
+                  const n = p - 1
+                  if (fg[n] && !label[n]) { label[n] = lbl; queue[tail++] = n }
+                }
+                if (px < w - 1) {
+                  const n = p + 1
+                  if (fg[n] && !label[n]) { label[n] = lbl; queue[tail++] = n }
+                }
+                if (py > 0) {
+                  const n = p - w
+                  if (fg[n] && !label[n]) { label[n] = lbl; queue[tail++] = n }
+                }
+                if (py < h - 1) {
+                  const n = p + w
+                  if (fg[n] && !label[n]) { label[n] = lbl; queue[tail++] = n }
+                }
+              }
+              sizes[lbl] = size
+            }
+          }
+          // Pick the largest component that overlaps the centre region. If
+          // none overlap the centre (weird selfie), fall back to overall
+          // largest component.
+          let keepLabel = 0, keepSize = 0
+          centreLabels.forEach(lbl => {
+            if (sizes[lbl] > keepSize) { keepSize = sizes[lbl]; keepLabel = lbl }
+          })
+          if (keepLabel === 0) {
+            for (let lbl = 1; lbl < sizes.length; lbl++) {
+              if (sizes[lbl] > keepSize) { keepSize = sizes[lbl]; keepLabel = lbl }
+            }
+          }
+          // Zero alpha on every pixel whose label != keepLabel. Tiny
+          // components (size < 0.05% of image) are always dropped even
+          // if they border the centre, as those are clearly noise.
+          const noiseThreshold = Math.max(50, Math.floor(total * 0.0005))
+          for (let i = 0; i < total; i++) {
+            const lbl = label[i]
+            if (lbl === 0) continue
+            if (lbl !== keepLabel && sizes[lbl] < noiseThreshold * 20) {
+              data[i * 4 + 3] = 0
+            } else if (lbl !== keepLabel && sizes[lbl] < noiseThreshold) {
+              data[i * 4 + 3] = 0
+            }
+          }
+        } catch (e) {
+          console.warn("Connected-component cleanup skipped:", e)
+        }
+
         ctx.putImageData(imageData, 0, 0)
       } catch {
         // If edge refinement fails, continue with original alpha
@@ -281,21 +374,67 @@ export default function PhotoBgProcessor({ photoUrl, defaultBgColor, onProcessed
       finalCanvas.width = canvas.width
       finalCanvas.height = canvas.height
       const fCtx = finalCanvas.getContext("2d")
+      const ctxToRead = fCtx || ctx
       if (fCtx) {
         fCtx.fillStyle = bgColor
         fCtx.fillRect(0, 0, finalCanvas.width, finalCanvas.height)
         fCtx.drawImage(canvas, 0, 0)
-        const resultUrl = finalCanvas.toDataURL("image/jpeg", 0.95)
-        setProcessedUrl(resultUrl)
       } else {
         // Fallback: simple composite without edge refinement
         ctx.globalCompositeOperation = "destination-over"
         ctx.fillStyle = bgColor
         ctx.fillRect(0, 0, canvas.width, canvas.height)
         ctx.globalCompositeOperation = "source-over"
-        const resultUrl = canvas.toDataURL("image/jpeg", 0.95)
-        setProcessedUrl(resultUrl)
       }
+
+      // Step 4: Verify the output background is uniformly the target colour
+      // — count edge-region pixels that deviate by > ΔE 30 from bgColor.
+      // If more than 3% deviate, surface a warning so the parent can retake
+      // the photo rather than submit one with visible mask artefacts.
+      try {
+        const targetRgb = (() => {
+          const hex = bgColor.replace(/^#/, "")
+          if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+            return {
+              r: parseInt(hex.slice(0, 2), 16),
+              g: parseInt(hex.slice(2, 4), 16),
+              b: parseInt(hex.slice(4, 6), 16),
+            }
+          }
+          return { r: 255, g: 255, b: 255 }
+        })()
+        const w2 = (fCtx ? finalCanvas : canvas).width
+        const h2 = (fCtx ? finalCanvas : canvas).height
+        const sourceCtx = ctxToRead
+        const topBand = sourceCtx.getImageData(0, 0, w2, Math.max(20, Math.floor(h2 * 0.08))).data
+        const sideW = Math.max(20, Math.floor(w2 * 0.06))
+        const leftBand = sourceCtx.getImageData(0, 0, sideW, Math.floor(h2 * 0.6)).data
+        const rightBand = sourceCtx.getImageData(w2 - sideW, 0, sideW, Math.floor(h2 * 0.6)).data
+        let off = 0, total = 0
+        const test = (band: Uint8ClampedArray) => {
+          for (let i = 0; i < band.length; i += 16) {
+            total++
+            const dr = band[i] - targetRgb.r
+            const dg = band[i + 1] - targetRgb.g
+            const db = band[i + 2] - targetRgb.b
+            if (Math.sqrt(dr * dr + dg * dg + db * db) > 30) off++
+          }
+        }
+        test(topBand); test(leftBand); test(rightBand)
+        const offRatio = total > 0 ? off / total : 0
+        if (offRatio > 0.03) {
+          setBgQualityIssue(`Background has ${Math.round(offRatio * 100)}% off-colour pixels (mask artefacts). Consider retaking the photo against a plainer wall for a cleaner ID card.`)
+        } else {
+          setBgQualityIssue("")
+        }
+      } catch {
+        setBgQualityIssue("")
+      }
+
+      const resultUrl = fCtx
+        ? finalCanvas.toDataURL("image/jpeg", 0.95)
+        : canvas.toDataURL("image/jpeg", 0.95)
+      setProcessedUrl(resultUrl)
     }
     img.src = transparentUrl
   }, [])
@@ -466,6 +605,25 @@ export default function PhotoBgProcessor({ photoUrl, defaultBgColor, onProcessed
               </div>
             </div>
           </div>
+
+          {/* AI artefact warning — shown when the post-composite check found
+              non-uniform pixels in the supposedly-plain background region.
+              Surfaces the exact deviation percentage so the parent can
+              decide between accepting or retaking the photo. */}
+          {bgQualityIssue && (
+            <div style={{
+              padding: '10px 14px', background: '#fffbeb',
+              border: '1px solid #fde68a', borderRadius: 10,
+              marginBottom: 16, fontSize: 12, color: '#92400e',
+              display: 'flex', alignItems: 'flex-start', gap: 8,
+            }}>
+              <span style={{ flexShrink: 0, fontSize: 16 }}>⚠️</span>
+              <div style={{ lineHeight: 1.5 }}>
+                <strong>Background not fully clean</strong>
+                <div style={{ marginTop: 2 }}>{bgQualityIssue}</div>
+              </div>
+            </div>
+          )}
 
           {/* Background Color Selector */}
           <div style={{

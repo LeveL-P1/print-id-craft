@@ -1056,7 +1056,26 @@ export default function SubmitPage() {
                     }}>
                       <li><strong>Front-facing</strong> — look straight at the camera</li>
                       <li><strong>Head &amp; shoulders only</strong> — passport style</li>
-                      <li><strong>Plain solid background</strong> (red curtain, wall, or any single colour)</li>
+                      <li>
+                        <strong>Plain solid background</strong> — best in your
+                        school&apos;s ID colour
+                        {config?.photoBgColor && (
+                          <>
+                            {": "}
+                            <span style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 6,
+                              verticalAlign: 'middle',
+                            }}>
+                              <span style={{
+                                display: 'inline-block', width: 14, height: 14,
+                                borderRadius: 3, background: config.photoBgColor,
+                                border: '1px solid rgba(0,0,0,0.15)',
+                              }} />
+                              <code style={{ fontSize: 11, color: '#0c4a6e' }}>{config.photoBgColor.toUpperCase()}</code>
+                            </span>
+                          </>
+                        )}
+                      </li>
                       <li><strong>School uniform</strong> with tie/blazer if applicable</li>
                       <li><strong>Bright, even lighting</strong> — no shadows on face</li>
                       <li><strong>Neutral expression</strong>, eyes open, no sunglasses/cap</li>
@@ -1065,7 +1084,14 @@ export default function SubmitPage() {
                       marginTop: 8, padding: '6px 10px', background: '#dcfce7',
                       borderRadius: 6, fontSize: 11, color: '#166534', fontWeight: 600,
                     }}>
-                      ✅ If your photo already looks like the sample, we skip AI processing and use it as-is.
+                      {config?.photoBgColor
+                        ? <>✅ Photo already against a <span style={{
+                            display: 'inline-block', width: 10, height: 10,
+                            borderRadius: 2, background: config.photoBgColor,
+                            border: '1px solid rgba(0,0,0,0.15)',
+                            verticalAlign: 'middle', margin: '0 2px',
+                          }} /> background? Skip AI &mdash; faster & sharper. Otherwise our AI re-colours it.</>
+                        : <>✅ If your photo already has a plain background, we skip AI and use it as-is.</>}
                     </div>
                   </div>
                 </div>
