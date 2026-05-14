@@ -1536,7 +1536,41 @@ export default function SchoolDetailPage() {
                   <tbody>
                     {students.map(s => {
                       const fd = s.formData as any
-                      const studentName = fd?.fullName || fd?.["Full Name"] || fd?.name || "—"
+                      // Smart field resolver: try exact key, then common cross-school aliases.
+                      // Needed because Excel import may store data under a different key than
+                      // what the template fieldMapper uses (e.g. "fullName" vs "name").
+                      const resolveCell = (key: string): string => {
+                        if (!fd || typeof fd !== "object") return ""
+                        if (fd[key] !== undefined && String(fd[key]).trim() !== "") return String(fd[key])
+                        const ALIASES: Record<string, string[]> = {
+                          name:       ["fullName", "Full Name", "Student Name", "StudentName", "student_name", "Name"],
+                          fullName:   ["name", "Full Name", "Student Name", "StudentName", "Name"],
+                          father:     ["fatherName", "Father Name", "Father's Name", "Father"],
+                          fatherName: ["father", "Father Name", "Father's Name", "Father"],
+                          mother:     ["motherName", "Mother Name", "Mother's Name", "Mother"],
+                          motherName: ["mother", "Mother Name", "Mother's Name", "Mother"],
+                          phone:      ["mobile", "Mobile", "MOBILE", "Phone", "mob", "MOB", "mob_father"],
+                          mobile:     ["phone", "Phone", "MOBILE", "Mobile"],
+                          flagColor:  ["houseFlag", "house", "House", "House Flag", "Flag", "Colour", "colour", "Color"],
+                          houseFlag:  ["flagColor", "house", "House", "House Flag", "Flag"],
+                          rollNo:     ["Roll No", "Roll No.", "roll no", "RollNo", "no", "NO", "srNo"],
+                          grNo:       ["GR NO", "GR No", "GRNo", "gr_no", "Gr No"],
+                          srNo:       ["no", "NO", "No", "sr_no", "Sr No", "rollNo"],
+                          photoId:    ["Photo ID", "PHOTO NO.", "PHOTO NO", "Photo No", "photo_id", "PhotoId"],
+                          branch:     ["Branch", "BRANCH"],
+                          address:    ["Address", "ADD", "Add:"],
+                        }
+                        for (const alt of (ALIASES[key] || [])) {
+                          if (fd[alt] !== undefined && String(fd[alt]).trim() !== "") return String(fd[alt])
+                        }
+                        // Case-insensitive fallback
+                        const lk = key.toLowerCase()
+                        for (const k of Object.keys(fd)) {
+                          if (k.toLowerCase() === lk && String(fd[k]).trim() !== "") return String(fd[k])
+                        }
+                        return ""
+                      }
+                      const studentName = resolveCell("name") || resolveCell("fullName") || "—"
                       const hasPhoto = !!s.photoUrl
 
                       return (
@@ -1555,14 +1589,14 @@ export default function SchoolDetailPage() {
                           </td>
                           {hasDynamicColumns ? (
                             dataColumns.map(k => {
-                              const val = fd?.[k] || ""
+                              const val = resolveCell(k)
                               const isPhotoIdCol = k === "photoId"
                               const isNumCol = k === "srNo" || k === "rollNo" || k === "grNo"
                               return (
                                 <td key={k} style={{
                                   fontSize: 12,
                                   fontFamily: isPhotoIdCol || isNumCol ? 'monospace' : 'inherit',
-                                  fontWeight: k === "fullName" ? 500 : 'normal',
+                                  fontWeight: (k === "fullName" || k === "name" || k === "studentName") ? 500 : 'normal',
                                   color: !val ? '#cbd5e1' : isPhotoIdCol ? '#6366f1' : '#334155',
                                   maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                                 }}>

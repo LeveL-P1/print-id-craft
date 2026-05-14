@@ -70,13 +70,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     // Field config from template
     const fieldConfig = (school.template?.fieldConfig || []) as Array<{ key: string; label: string; type: string; required: boolean }>
 
-    // Build a label→key mapping for flexible column matching
+    // Build a label→key mapping for flexible column matching.
+    // IMPORTANT: Apply generic aliases FIRST, then template fieldConfig LAST so
+    // that the school's own template keys always win over the generic defaults.
     const labelToKey: Record<string, string> = {}
-    for (const f of fieldConfig) {
-      labelToKey[f.label.toLowerCase().trim()] = f.key
-      labelToKey[f.key.toLowerCase().trim()] = f.key
-    }
-    // Common aliases
+
+    // Generic fallback aliases (lowest priority)
     labelToKey["name"] = "fullName"
     labelToKey["student name"] = "fullName"
     labelToKey["full name"] = "fullName"
@@ -161,6 +160,13 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     labelToKey["color"] = "flagColor"
     labelToKey["group color"] = "flagColor"
     labelToKey["group colour"] = "flagColor"
+
+    // Template fieldConfig applied LAST — highest priority so school-specific
+    // field keys always override the generic aliases above.
+    for (const f of fieldConfig) {
+      labelToKey[f.label.toLowerCase().trim()] = f.key
+      labelToKey[f.key.toLowerCase().trim()] = f.key
+    }
 
     // Map Excel columns to our field keys
     const excelHeaders = rawRows.length > 0 ? Object.keys(rawRows[0]) : []
