@@ -565,6 +565,22 @@ export default function SubmitPage() {
                         <circle cx="30" cy="26" r="11" fill="#fecaca" />
                         <path d="M8 80 C 10 56, 50 56, 52 80 Z" fill="#1e3a5f" />
                       </svg>
+                      {/* Privacy: blur the face region of the sample reference photo so a real
+                          student's identity is never exposed when an admin drops a photo into
+                          /public/sample-id-photo.jpg. The oval is sized to cover the upper face
+                          area of a standard 3:4 head-and-shoulders portrait. */}
+                      <div
+                        aria-hidden
+                        style={{
+                          position: 'absolute',
+                          top: '6%', left: '22%', width: '56%', height: '46%',
+                          borderRadius: '50%',
+                          backdropFilter: 'blur(12px)',
+                          WebkitBackdropFilter: 'blur(12px)',
+                          background: 'rgba(255,255,255,0.05)',
+                          pointerEvents: 'none',
+                        }}
+                      />
                       <div style={{
                         position: 'absolute', top: 4, left: 4,
                         background: '#22c55e', color: 'white',
@@ -573,6 +589,7 @@ export default function SubmitPage() {
                     </div>
                     <div style={{ fontSize: 10, color: '#0369a1', marginTop: 6, textAlign: 'center', fontWeight: 600 }}>
                       Reference photo
+                      <div style={{ fontSize: 9, color: '#94a3b8', fontWeight: 500 }}>(face blurred for privacy)</div>
                     </div>
                   </div>
 
