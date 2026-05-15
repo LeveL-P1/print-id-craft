@@ -862,7 +862,7 @@ function canvasToBmpBuffer(canvas: HTMLCanvasElement): ArrayBuffer {
 // 300 DPI ≈ 11.811 pixels per millimetre — matches the resolution at which
 // individual card canvases are rendered, so cards are placed pixel-for-pixel
 // without resampling loss.
-const BMP_PX_PER_MM = 11.811
+const BMP_PX_PER_MM = 300 / 25.4
 
 type BmpPageLayout = {
   paperWidth: number
@@ -921,6 +921,7 @@ async function buildBmpPagesFromCards(
   pageCanvas.height = pageHpx
   const pageCtx = pageCanvas.getContext("2d")
   if (!pageCtx) throw new Error("Page canvas 2D context unavailable")
+  pageCtx.imageSmoothingEnabled = false
 
   const drawPage = async (pageIdx: number, side: "front" | "back") => {
     pageCtx.fillStyle = "#ffffff"
@@ -942,7 +943,10 @@ async function buildBmpPagesFromCards(
       const yPx = Math.round(yMm * BMP_PX_PER_MM)
       try {
         const img = await getCachedImage(url)
-        if (img) pageCtx.drawImage(img, xPx, yPx, cardWpx, cardHpx)
+        if (img) {
+          pageCtx.imageSmoothingEnabled = false
+          pageCtx.drawImage(img, xPx, yPx, cardWpx, cardHpx)
+        }
       } catch (err) {
         console.error(`[BMP page ${pageIdx + 1}] failed card ${card.serialNumber}`, err)
       }
