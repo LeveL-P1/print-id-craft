@@ -798,22 +798,11 @@ async function downloadAsCdrZip(
 type OutputFormat = "JPEG" | "CDR" | "PDF_PRINT" | "BMP"
 
 /**
- * Convert a PNG/JPEG data URL to a 24-bit BMP ArrayBuffer.
- * Returns raw bytes — avoids the costly base64→atob→Uint8Array roundtrip.
- * Uses the canvas pool and image cache for efficiency.
+ * Encode raw RGBA pixel data (top-down, 4 bytes/pixel) to a 24-bit BMP ArrayBuffer.
+ * The BMP file format stores rows bottom-up in BGR order with each row padded to
+ * a 4-byte boundary.
  */
-async function dataUrlToBmpBuffer(dataUrl: string): Promise<ArrayBuffer> {
-  const img = await getCachedImage(dataUrl)
-  if (!img) throw new Error("Failed to load image for BMP conversion")
-
-  const w = img.naturalWidth
-  const h = img.naturalHeight
-  const { canvas, ctx } = acquireCanvas(w, h)
-  ctx.drawImage(img, 0, 0)
-  const imageData = ctx.getImageData(0, 0, w, h)
-  const pixels = imageData.data // RGBA, top-down
-  releaseCanvas(canvas)
-
+function encodeRgbaToBmpBuffer(pixels: Uint8ClampedArray, w: number, h: number): ArrayBuffer {
   // Row size must be multiple of 4 bytes (24bpp = 3 bytes/pixel)
   const rowSize = Math.ceil((w * 3) / 4) * 4
   const pixelDataSize = rowSize * h
@@ -821,52 +810,184 @@ async function dataUrlToBmpBuffer(dataUrl: string): Promise<ArrayBuffer> {
 
   const buffer = new ArrayBuffer(fileSize)
   const view = new DataView(buffer)
+  const bytes = new Uint8Array(buffer)
 
   // BMP file header
   view.setUint8(0, 0x42) // 'B'
   view.setUint8(1, 0x4D) // 'M'
-  view.setUint32(2, fileSize, true)   // file size
-  view.setUint32(6, 0, true)          // reserved
-  view.setUint32(10, 54, true)        // pixel data offset
+  view.setUint32(2, fileSize, true)
+  view.setUint32(6, 0, true)
+  view.setUint32(10, 54, true)
 
   // DIB header (BITMAPINFOHEADER)
-  view.setUint32(14, 40, true)        // header size
-  view.setInt32(18, w, true)          // width
-  view.setInt32(22, h, true)          // height (positive = bottom-up)
-  view.setUint16(26, 1, true)         // color planes
-  view.setUint16(28, 24, true)        // bits per pixel
-  view.setUint32(30, 0, true)         // no compression
+  view.setUint32(14, 40, true)
+  view.setInt32(18, w, true)
+  view.setInt32(22, h, true)            // positive height → bottom-up
+  view.setUint16(26, 1, true)
+  view.setUint16(28, 24, true)
+  view.setUint32(30, 0, true)
   view.setUint32(34, pixelDataSize, true)
-  view.setInt32(38, 2835, true)       // X pixels per meter (~72 DPI)
-  view.setInt32(42, 2835, true)       // Y pixels per meter
-  view.setUint32(46, 0, true)         // colors in table
-  view.setUint32(50, 0, true)         // important colors
+  view.setInt32(38, 11811, true)        // X pixels/meter ≈ 300 DPI
+  view.setInt32(42, 11811, true)        // Y pixels/meter ≈ 300 DPI
+  view.setUint32(46, 0, true)
+  view.setUint32(50, 0, true)
 
-  // Pixel data — BMP stores rows bottom-up, BGR order
+  // Pixel data — bottom-up rows, BGR order
+  const rowPad = rowSize - w * 3
   let offset = 54
   for (let row = h - 1; row >= 0; row--) {
+    let i = row * w * 4
     for (let col = 0; col < w; col++) {
-      const i = (row * w + col) * 4
-      view.setUint8(offset++, pixels[i + 2]) // B
-      view.setUint8(offset++, pixels[i + 1]) // G
-      view.setUint8(offset++, pixels[i + 0]) // R
+      bytes[offset++] = pixels[i + 2] // B
+      bytes[offset++] = pixels[i + 1] // G
+      bytes[offset++] = pixels[i + 0] // R
+      i += 4
     }
-    // Padding to align row to 4 bytes
-    for (let p = 0; p < rowSize - w * 3; p++) view.setUint8(offset++, 0)
+    for (let p = 0; p < rowPad; p++) bytes[offset++] = 0
   }
 
   return buffer
 }
 
-/** Prompt user to pick a folder (via File System Access API) and save BMP files into it */
-async function saveBmpFilesToFolder(
+/** Encode an HTMLCanvasElement to a 24-bit BMP ArrayBuffer. */
+function canvasToBmpBuffer(canvas: HTMLCanvasElement): ArrayBuffer {
+  const ctx = canvas.getContext("2d")
+  if (!ctx) throw new Error("Canvas 2D context unavailable")
+  const w = canvas.width
+  const h = canvas.height
+  const imageData = ctx.getImageData(0, 0, w, h)
+  return encodeRgbaToBmpBuffer(imageData.data, w, h)
+}
+
+// 300 DPI ≈ 11.811 pixels per millimetre — matches the resolution at which
+// individual card canvases are rendered, so cards are placed pixel-for-pixel
+// without resampling loss.
+const BMP_PX_PER_MM = 11.811
+
+type BmpPageLayout = {
+  paperWidth: number
+  paperHeight: number
+  cardWidth: number
+  cardHeight: number
+  h1stPosition: number
+  v1stPosition: number
+  hPitch: number
+  vPitch: number
+}
+
+type BmpPageFile = { name: string; buffer: ArrayBuffer }
+
+/**
+ * Compose multi-card BMP pages from rendered card data URLs.
+ * Uses the same grid math as `generateDirectPdf` so PDF and BMP outputs are
+ * visually identical (paper size, gaps, mirrored back columns).
+ */
+async function buildBmpPagesFromCards(
   cards: { serialNumber: string; frontDataUrl: string; backDataUrl?: string }[],
+  layout: BmpPageLayout,
+  schoolName: string,
+  onProgress?: (done: number, total: number, status: string) => void,
+): Promise<BmpPageFile[]> {
+  const { paperWidth, paperHeight, cardWidth, cardHeight,
+    h1stPosition, v1stPosition, hPitch, vPitch } = layout
+
+  // Pixel canvas size (300 DPI)
+  const pageWpx = Math.max(1, Math.round(paperWidth * BMP_PX_PER_MM))
+  const pageHpx = Math.max(1, Math.round(paperHeight * BMP_PX_PER_MM))
+  const cardWpx = Math.max(1, Math.round(cardWidth * BMP_PX_PER_MM))
+  const cardHpx = Math.max(1, Math.round(cardHeight * BMP_PX_PER_MM))
+
+  // Layout math (mirrors generateDirectPdf)
+  const hasCustomX = h1stPosition > 0
+  const hasCustomY = v1stPosition > 0
+  const availW = hasCustomX ? paperWidth - h1stPosition : paperWidth
+  const availH = hasCustomY ? paperHeight - v1stPosition : paperHeight
+  const cols = Math.max(1, Math.floor((availW + (hPitch - cardWidth)) / hPitch))
+  const rows = Math.max(1, Math.floor((availH + (vPitch - cardHeight)) / vPitch))
+  const cardsPerPage = cols * rows
+  const totalPages = Math.ceil(cards.length / cardsPerPage)
+  const usedW = cols * hPitch - (hPitch - cardWidth)
+  const usedH = rows * vPitch - (vPitch - cardHeight)
+  const startXmm = hasCustomX ? h1stPosition : (paperWidth - usedW) / 2
+  const startYmm = hasCustomY ? v1stPosition : (paperHeight - usedH) / 2
+
+  const hasBackSide = cards.some(c => !!c.backDataUrl)
+  const safeSchool = schoolName.replace(/[^a-zA-Z0-9]/g, "_")
+  const out: BmpPageFile[] = []
+
+  // Reusable page canvas — one big allocation reused across pages saves memory.
+  const pageCanvas = document.createElement("canvas")
+  pageCanvas.width = pageWpx
+  pageCanvas.height = pageHpx
+  const pageCtx = pageCanvas.getContext("2d")
+  if (!pageCtx) throw new Error("Page canvas 2D context unavailable")
+
+  const drawPage = async (pageIdx: number, side: "front" | "back") => {
+    pageCtx.fillStyle = "#ffffff"
+    pageCtx.fillRect(0, 0, pageWpx, pageHpx)
+
+    for (let slot = 0; slot < cardsPerPage; slot++) {
+      const cardIdx = pageIdx * cardsPerPage + slot
+      if (cardIdx >= cards.length) break
+      const card = cards[cardIdx]
+      const url = side === "front" ? card.frontDataUrl : card.backDataUrl
+      if (!url) continue
+      const row = Math.floor(slot / cols)
+      const col = slot % cols
+      // Mirror columns for back side so duplex print aligns
+      const placeCol = side === "back" ? (cols - 1) - col : col
+      const xMm = startXmm + placeCol * hPitch
+      const yMm = startYmm + row * vPitch
+      const xPx = Math.round(xMm * BMP_PX_PER_MM)
+      const yPx = Math.round(yMm * BMP_PX_PER_MM)
+      try {
+        const img = await getCachedImage(url)
+        if (img) pageCtx.drawImage(img, xPx, yPx, cardWpx, cardHpx)
+      } catch (err) {
+        console.error(`[BMP page ${pageIdx + 1}] failed card ${card.serialNumber}`, err)
+      }
+    }
+  }
+
+  const totalUnits = totalPages * (hasBackSide ? 2 : 1)
+  let unit = 0
+
+  for (let p = 0; p < totalPages; p++) {
+    onProgress?.(unit, totalUnits, `Composing page ${p + 1}/${totalPages} (front)...`)
+    await drawPage(p, "front")
+    const frontBuf = canvasToBmpBuffer(pageCanvas)
+    out.push({ name: `${safeSchool}_Front_Page${p + 1}.bmp`, buffer: frontBuf })
+    unit++
+    onProgress?.(unit, totalUnits, `Page ${p + 1}/${totalPages} front encoded`)
+    // Yield to UI between pages
+    await new Promise(r => setTimeout(r, 0))
+  }
+  if (hasBackSide) {
+    for (let p = 0; p < totalPages; p++) {
+      onProgress?.(unit, totalUnits, `Composing page ${p + 1}/${totalPages} (back)...`)
+      await drawPage(p, "back")
+      const backBuf = canvasToBmpBuffer(pageCanvas)
+      out.push({ name: `${safeSchool}_Back_Page${p + 1}.bmp`, buffer: backBuf })
+      unit++
+      onProgress?.(unit, totalUnits, `Page ${p + 1}/${totalPages} back encoded`)
+      await new Promise(r => setTimeout(r, 0))
+    }
+  }
+
+  return out
+}
+
+/**
+ * Save composed BMP pages to a user-chosen folder (File System Access API) or
+ * fall back to a ZIP download on browsers without that support.
+ */
+async function saveBmpPagesToFolder(
+  pages: BmpPageFile[],
   onProgress: (current: number, total: number) => void,
 ): Promise<void> {
-  const total = cards.reduce((acc, c) => acc + 1 + (c.backDataUrl ? 1 : 0), 0)
   let done = 0
+  const total = pages.length
 
-  // Use the File System Access API if available (Chromium/Electron)
   if ((window as any).showDirectoryPicker) {
     let dirHandle: FileSystemDirectoryHandle
     try {
@@ -874,45 +995,26 @@ async function saveBmpFilesToFolder(
     } catch {
       return // user cancelled
     }
-    for (const card of cards) {
-      const frontBuf = await dataUrlToBmpBuffer(card.frontDataUrl)
-      const frontFile = await dirHandle.getFileHandle(`${card.serialNumber}_front.bmp`, { create: true })
-      const frontWritable = await (frontFile as any).createWritable()
-      await frontWritable.write(frontBuf)
-      await frontWritable.close()
+    for (const page of pages) {
+      const fileHandle = await dirHandle.getFileHandle(page.name, { create: true })
+      const writable = await (fileHandle as any).createWritable()
+      await writable.write(page.buffer)
+      await writable.close()
       done++
       onProgress(done, total)
-
-      if (card.backDataUrl) {
-        const backBuf = await dataUrlToBmpBuffer(card.backDataUrl)
-        const backFile = await dirHandle.getFileHandle(`${card.serialNumber}_back.bmp`, { create: true })
-        const backWritable = await (backFile as any).createWritable()
-        await backWritable.write(backBuf)
-        await backWritable.close()
-        done++
-        onProgress(done, total)
-      }
     }
   } else {
-    // Fallback: pack BMP files into a ZIP and download
     const { default: JSZip } = await import("jszip")
     const zip = new JSZip()
-    for (const card of cards) {
-      const frontBuf = await dataUrlToBmpBuffer(card.frontDataUrl)
-      zip.file(`${card.serialNumber}_front.bmp`, frontBuf)
+    for (const page of pages) {
+      zip.file(page.name, page.buffer)
       done++
       onProgress(done, total)
-      if (card.backDataUrl) {
-        const backBuf = await dataUrlToBmpBuffer(card.backDataUrl)
-        zip.file(`${card.serialNumber}_back.bmp`, backBuf)
-        done++
-        onProgress(done, total)
-      }
     }
     const blob = await zip.generateAsync({ type: "blob" })
     const a = document.createElement("a")
     a.href = URL.createObjectURL(blob)
-    a.download = "IDCards-BMP.zip"
+    a.download = "IDCards-BMP-Pages.zip"
     a.click()
     URL.revokeObjectURL(a.href)
   }
@@ -1329,6 +1431,22 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
         setLastCardDims({ w: bmpCw, h: bmpCh })
         const bmpStudentIds = renderedCards.map(c => c.id)
         const bmpRendered = renderedCards.slice()
+
+        // Compute the grid that buildBmpPagesFromCards will use, so the
+        // verification panel shows EXACTLY how the cards will be laid out
+        // on the printed BMP pages (matches PDF math).
+        const bmpHPitch = printConfig.h2ndPosition > 0 ? printConfig.h2ndPosition : bmpCw
+        const bmpVPitch = printConfig.v2ndPosition > 0 ? printConfig.v2ndPosition : bmpCh
+        const bmpAvailW = printConfig.h1stPosition > 0
+          ? printConfig.paperWidth - printConfig.h1stPosition
+          : printConfig.paperWidth
+        const bmpAvailH = printConfig.v1stPosition > 0
+          ? printConfig.paperHeight - printConfig.v1stPosition
+          : printConfig.paperHeight
+        const bmpCols = Math.max(1, Math.floor((bmpAvailW + (bmpHPitch - bmpCw)) / bmpHPitch))
+        const bmpRows = Math.max(1, Math.floor((bmpAvailH + (bmpVPitch - bmpCh)) / bmpVPitch))
+        const bmpTotalPages = Math.ceil(bmpRendered.length / (bmpCols * bmpRows))
+
         setPendingSave({
           format: "BMP",
           cardCount: bmpRendered.length,
@@ -1338,12 +1456,40 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
           cardH: bmpCh,
           h1stPosition: printConfig.h1stPosition,
           v1stPosition: printConfig.v1stPosition,
-          hPitch: printConfig.h2ndPosition,
-          vPitch: printConfig.v2ndPosition,
+          hPitch: bmpHPitch,
+          vPitch: bmpVPitch,
+          cols: bmpCols,
+          rows: bmpRows,
+          totalPages: bmpTotalPages,
+          // Reuse pdfCards/pdfStudentIds slots so the layout-edit restage flow
+          // (Edit Layout → Print Setup → OK) can be shared with PDF.
+          pdfCards: bmpRendered.map(c => ({
+            serialNumber: c.serialNumber,
+            frontDataUrl: c.frontDataUrl,
+            backDataUrl: c.backDataUrl,
+          })),
+          pdfStudentIds: bmpStudentIds,
           save: async () => {
-            setProgress({ current: 0, total: bmpRendered.length, status: "Converting to BMP & saving..." })
-            await saveBmpFilesToFolder(bmpRendered, (done, total) => {
-              setProgress({ current: done, total, status: `Saving BMP ${done}/${total}...` })
+            setProgress({ current: 0, total: bmpTotalPages, status: "Composing BMP pages..." })
+            const pages = await buildBmpPagesFromCards(
+              bmpRendered,
+              {
+                paperWidth: printConfig.paperWidth,
+                paperHeight: printConfig.paperHeight,
+                cardWidth: bmpCw,
+                cardHeight: bmpCh,
+                h1stPosition: printConfig.h1stPosition,
+                v1stPosition: printConfig.v1stPosition,
+                hPitch: bmpHPitch,
+                vPitch: bmpVPitch,
+              },
+              schoolName,
+              (done, total, status) => {
+                setProgress({ current: done, total, status })
+              },
+            )
+            await saveBmpPagesToFolder(pages, (done, total) => {
+              setProgress({ current: done, total, status: `Saving BMP page ${done}/${total}...` })
             })
             await fetch(`/api/schools/${schoolId}/generate`, {
               method: "POST",
@@ -1352,7 +1498,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
             })
           },
         })
-        setProgress({ current: totalCount, total: totalCount, status: `Ready! ${renderedCards.length} BMP cards staged. Verify size below, then click Download.` })
+        setProgress({ current: totalCount, total: totalCount, status: `Ready! ${bmpRendered.length} cards staged on ${bmpTotalPages} BMP page(s) (${bmpCols}×${bmpRows} per page). Verify layout below, then click Download.` })
 
       // ──── JPEG PATH (existing) ────
       } else {
@@ -1470,12 +1616,14 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
     setProgress({ current: 0, total: 0, status: "" })
   }, [])
 
-  // Re-stage PDF save using already-rendered cards but a (possibly new) printConfig.
+  // Re-stage save (PDF or BMP) using already-rendered cards but a (possibly new) printConfig.
   // Called when the user clicks "Edit Layout" and confirms the dialog — avoids re-rendering.
   const restagePdfSave = useCallback((cfg: PrintConfig, cw: number, ch: number) => {
-    if (!pendingSave || pendingSave.format !== "PDF_PRINT" || !pendingSave.pdfCards || !pendingSave.pdfStudentIds) return
+    if (!pendingSave || !pendingSave.pdfCards || !pendingSave.pdfStudentIds) return
+    if (pendingSave.format !== "PDF_PRINT" && pendingSave.format !== "BMP") return
     const cards = pendingSave.pdfCards
     const studentIds = pendingSave.pdfStudentIds
+    const fmt = pendingSave.format
     const hPitch = cfg.h2ndPosition > 0 ? cfg.h2ndPosition : cw
     const vPitch = cfg.v2ndPosition > 0 ? cfg.v2ndPosition : ch
     const availW = cfg.h1stPosition > 0 ? cfg.paperWidth - cfg.h1stPosition : cfg.paperWidth
@@ -1485,7 +1633,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
     const totalPages = Math.ceil(cards.length / (cols * rows))
     setLastCardDims({ w: cw, h: ch })
     setPendingSave({
-      format: "PDF_PRINT",
+      format: fmt,
       cardCount: cards.length,
       pageW: cfg.paperWidth,
       pageH: cfg.paperHeight,
@@ -1500,27 +1648,54 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
       totalPages,
       pdfCards: cards,
       pdfStudentIds: studentIds,
-      save: async () => {
-        await generateDirectPdf({
-          cards,
-          schoolName,
-          paperWidth: cfg.paperWidth,
-          paperHeight: cfg.paperHeight,
-          cardWidth: cw,
-          cardHeight: ch,
-          h1stPosition: cfg.h1stPosition,
-          v1stPosition: cfg.v1stPosition,
-          hPitch: cfg.h2ndPosition > 0 ? cfg.h2ndPosition : undefined,
-          vPitch: cfg.v2ndPosition > 0 ? cfg.v2ndPosition : undefined,
-          marginMm: 0,
-          gapMm: 0,
-        })
-        await fetch(`/api/schools/${schoolId}/generate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ studentIds }),
-        })
-      },
+      save: fmt === "PDF_PRINT"
+        ? async () => {
+            await generateDirectPdf({
+              cards,
+              schoolName,
+              paperWidth: cfg.paperWidth,
+              paperHeight: cfg.paperHeight,
+              cardWidth: cw,
+              cardHeight: ch,
+              h1stPosition: cfg.h1stPosition,
+              v1stPosition: cfg.v1stPosition,
+              hPitch: cfg.h2ndPosition > 0 ? cfg.h2ndPosition : undefined,
+              vPitch: cfg.v2ndPosition > 0 ? cfg.v2ndPosition : undefined,
+              marginMm: 0,
+              gapMm: 0,
+            })
+            await fetch(`/api/schools/${schoolId}/generate`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ studentIds }),
+            })
+          }
+        : async () => {
+            setProgress({ current: 0, total: totalPages, status: "Composing BMP pages..." })
+            const pages = await buildBmpPagesFromCards(
+              cards,
+              {
+                paperWidth: cfg.paperWidth,
+                paperHeight: cfg.paperHeight,
+                cardWidth: cw,
+                cardHeight: ch,
+                h1stPosition: cfg.h1stPosition,
+                v1stPosition: cfg.v1stPosition,
+                hPitch,
+                vPitch,
+              },
+              schoolName,
+              (done, total, status) => setProgress({ current: done, total, status }),
+            )
+            await saveBmpPagesToFolder(pages, (done, total) => {
+              setProgress({ current: done, total, status: `Saving BMP page ${done}/${total}...` })
+            })
+            await fetch(`/api/schools/${schoolId}/generate`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ studentIds }),
+            })
+          },
     })
     setProgress({ current: cards.length, total: cards.length, status: `Layout updated! (${cols}×${rows} = ${cols * rows} per page · ${totalPages} pages)` })
   }, [pendingSave, schoolId, schoolName])
@@ -1635,7 +1810,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
               <option value="JPEG">📷 JPEG (Print-Ready Images)</option>
               <option value="CDR">📐 CDR (CorelDRAW Vector)</option>
               <option value="PDF_PRINT">📄 PDF Print (Best for Printing)</option>
-              <option value="BMP">🖼️ BMP (Save Locally per Person)</option>
+              <option value="BMP">🖼️ BMP (Combined Print Pages)</option>
             </select>
           </div>
         </div>
@@ -1670,10 +1845,10 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
             color: "#14532d",
             lineHeight: 1.5,
           }}>
-            <strong>🖼️ BMP Save — Save Locally per Person:</strong> Renders each ID card and saves individual
-            <strong> .bmp files</strong> to a folder you choose on your computer. Each file is named
-            by the student&apos;s serial number. Requires a modern browser (Chrome/Edge/Electron).
-            On unsupported browsers, downloads a ZIP of BMP files instead.
+            <strong>🖼️ BMP Print Pages — Combined Sheet Output:</strong> Lays multiple ID cards on each
+            BMP page using your <strong>Print Setup</strong> (page size, gaps, first-card position) — same math as PDF.
+            One <strong>.bmp file per page</strong> is saved to a folder you pick. Requires a modern browser
+            (Chrome/Edge/Electron). On unsupported browsers, downloads a ZIP of BMP pages instead.
           </div>
         )}
 
@@ -1935,7 +2110,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
               <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginTop: 2 }}>
                 {pendingSave.format === "PDF_PRINT" ? "📄 PDF Print Sheet" :
                  pendingSave.format === "JPEG" ? "📷 JPEG (ZIP)" :
-                 pendingSave.format === "BMP" ? "🖼️ BMP files" :
+                 pendingSave.format === "BMP" ? "🖼️ BMP Print Pages" :
                  "📐 CorelDRAW (ZIP)"}
               </div>
             </div>
@@ -1945,7 +2120,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
                 {pendingSave.cardW} × {pendingSave.cardH} mm
               </div>
             </div>
-            {pendingSave.format === "PDF_PRINT" && (
+            {(pendingSave.format === "PDF_PRINT" || pendingSave.format === "BMP") && (
               <>
                 <div>
                   <div style={{ fontSize: 10, fontWeight: 700, color: "#92400e", textTransform: "uppercase", letterSpacing: 0.5 }}>Page Size</div>
@@ -1990,7 +2165,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
             </div>
           </div>
 
-          {pendingSave.format === "PDF_PRINT" && pendingSave.hPitch > 0 && pendingSave.vPitch > 0 && (
+          {(pendingSave.format === "PDF_PRINT" || pendingSave.format === "BMP") && pendingSave.hPitch > 0 && pendingSave.vPitch > 0 && (
             (pendingSave.hPitch < pendingSave.cardW || pendingSave.vPitch < pendingSave.cardH) && (
               <div style={{
                 background: "#fee2e2",
@@ -2009,7 +2184,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
           )}
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            {pendingSave.format === "PDF_PRINT" && (
+            {(pendingSave.format === "PDF_PRINT" || pendingSave.format === "BMP") && (
               <button
                 onClick={() => setShowPrintDialog(true)}
                 disabled={downloading}
@@ -2049,7 +2224,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
                 gap: 8,
               }}
             >
-              {downloading ? "Downloading..." : `✅ Confirm & Download ${pendingSave.format === "PDF_PRINT" ? "PDF" : pendingSave.format}`}
+              {downloading ? "Downloading..." : `✅ Confirm & Download ${pendingSave.format === "PDF_PRINT" ? "PDF" : pendingSave.format === "BMP" ? "BMP Pages" : pendingSave.format}`}
             </button>
             <button
               onClick={handleCancelDownload}
@@ -2180,15 +2355,17 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
       {showPrintDialog && (
         <PrintDialog
           initial={printConfig}
+          cardWidthMm={templateCardDims?.w}
+          cardHeightMm={templateCardDims?.h}
           onOk={(cfg: PrintConfig) => {
             // Stamp current card dims so future loads can detect stale pitch values.
             const cfgWithDims: PrintConfig = { ...cfg, cardWidthMm: templateCardDims?.w, cardHeightMm: templateCardDims?.h }
             setPrintConfig(cfgWithDims)
             setShowPrintDialog(false)
             savePrintConfig(cfgWithDims)
-            // If a PDF save is staged, re-stage immediately with the new layout
-            // (no re-render needed — card images are already drawn).
-            if (pendingSave?.format === "PDF_PRINT") {
+            // If a PDF or BMP save is staged, re-stage immediately with the new
+            // layout (no re-render needed — card images are already drawn).
+            if (pendingSave?.format === "PDF_PRINT" || pendingSave?.format === "BMP") {
               const cw = templateCardDims?.w || pendingSave.cardW
               const ch = templateCardDims?.h || pendingSave.cardH
               restagePdfSave(cfgWithDims, cw, ch)

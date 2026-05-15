@@ -979,20 +979,37 @@ const PAPER_PRESETS: Record<string, { width: number; height: number }> = {
 
 export function PrintDialog({
   initial,
+  cardWidthMm,
+  cardHeightMm,
   onOk,
   onCancel,
 }: {
   initial?: Partial<PrintConfig>
+  /** Locked card width from the template — displayed read-only. */
+  cardWidthMm?: number
+  /** Locked card height from the template — displayed read-only. */
+  cardHeightMm?: number
   onOk: (cfg: PrintConfig) => void
   onCancel: () => void
 }) {
+  // Card size is sourced from the template (locked). Fall back to the
+  // initial config's snapshot, then to standard 85.6×54 if neither is set.
+  const cardW = Number(cardWidthMm ?? initial?.cardWidthMm ?? 85.6) || 85.6
+  const cardH = Number(cardHeightMm ?? initial?.cardHeightMm ?? 54) || 54
+
   const [paper, setPaper] = useState(initial?.paper || "A4 Horizontal")
   const [paperWidth, setPaperWidth] = useState(initial?.paperWidth ?? 297)
   const [paperHeight, setPaperHeight] = useState(initial?.paperHeight ?? 210)
   const [h1, setH1] = useState(initial?.h1stPosition ?? 0)
-  const [h2, setH2] = useState(initial?.h2ndPosition ?? 0)
   const [v1, setV1] = useState(initial?.v1stPosition ?? 0)
-  const [v2, setV2] = useState(initial?.v2ndPosition ?? 0)
+  // Derive gap from pitch (= cardSize + gap) stored on the saved config.
+  // Defaults: 3 mm horizontal, 15 mm vertical (Aaryans spec) when not yet configured.
+  const initHPitch = initial?.h2ndPosition ?? 0
+  const initVPitch = initial?.v2ndPosition ?? 0
+  const initGapH = initHPitch > 0 ? Math.max(0, initHPitch - cardW) : 3
+  const initGapV = initVPitch > 0 ? Math.max(0, initVPitch - cardH) : 15
+  const [gapH, setGapH] = useState<number>(initGapH)
+  const [gapV, setGapV] = useState<number>(initGapV)
 
   const handlePaperChange = (key: string) => {
     setPaper(key)
@@ -1000,16 +1017,30 @@ export function PrintDialog({
     if (p) { setPaperWidth(p.width); setPaperHeight(p.height) }
   }
 
-  const fieldRowStyle: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    flexWrap: "wrap",
-    marginBottom: 8,
+  // Computed pitches (card-to-card distance) — these are what's persisted.
+  const hPitch = cardW + Math.max(0, gapH)
+  const vPitch = cardH + Math.max(0, gapV)
+
+  // Live layout preview
+  const availW = h1 > 0 ? paperWidth - h1 : paperWidth
+  const availH = v1 > 0 ? paperHeight - v1 : paperHeight
+  const cols = Math.max(0, Math.floor((availW + (hPitch - cardW)) / hPitch))
+  const rows = Math.max(0, Math.floor((availH + (vPitch - cardH)) / vPitch))
+  const cardsPerPage = cols * rows
+
+  const lockedBoxStyle: React.CSSProperties = {
+    width: 60,
+    border: "1px solid #c0c0c0",
+    background: "#f0f0f0",
+    color: "#555",
+    padding: "2px 4px",
+    fontFamily: "Tahoma, Arial, sans-serif",
+    fontSize: 12,
+    textAlign: "right",
   }
 
   return (
-    <DialogShell title="Print Setup" onClose={onCancel} width={460}>
+    <DialogShell title="Print Setup" onClose={onCancel} width={480}>
       {/* Select Paper row */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         <label style={{ width: 90, fontWeight: 700, flexShrink: 0 }}>Select Paper</label>
@@ -1054,78 +1085,102 @@ export function PrintDialog({
         </div>
       </div>
 
-      {/* ID-Card Position box */}
-      <div style={{ border: "1px solid #808080", padding: "10px 14px", marginBottom: 16, minWidth: 0 }}>
-        <div style={{ fontWeight: 700, marginBottom: 10 }}>ID-Card Position</div>
-
-        {/* Horizontal */}
-        <div style={{ fontWeight: 700, marginBottom: 6 }}>Horizontal</div>
+      {/* ID Card Size — locked, sourced from template */}
+      <div style={{ border: "1px solid #808080", padding: "10px 14px", marginBottom: 14, minWidth: 0, background: "#f8f8f8" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <label style={{ width: 130, fontSize: 11 }}>1st ID-Card Position</label>
+          <div style={{ fontWeight: 700 }}>🪪 ID Card Size</div>
+          <span style={{
+            fontSize: 10, padding: "1px 6px", borderRadius: 4,
+            background: "#fde68a", color: "#78350f", fontWeight: 700,
+            border: "1px solid #f59e0b",
+          }}>LOCKED</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <label style={{ width: 80, fontSize: 11 }}>Card Size</label>
+          <div style={lockedBoxStyle}>{cardW}</div>
+          <span>×</span>
+          <div style={lockedBoxStyle}>{cardH}</div>
+          <span style={{ fontSize: 11, color: "#555" }}>(mm)</span>
+        </div>
+        <div style={{ fontSize: 10, color: "#666", marginTop: 4 }}>
+          Card dimensions are set in the template editor. Adjust the gap below to control spacing.
+        </div>
+      </div>
+
+      {/* Gap between cards */}
+      <div style={{ border: "1px solid #808080", padding: "10px 14px", marginBottom: 14, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, marginBottom: 10 }}>Gap Between Cards</div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+          <label style={{ width: 150, fontSize: 11 }}>Horizontal Gap (column)</label>
+          <WinInput
+            type="number"
+            value={gapH}
+            onChange={(v) => setGapH(Math.max(0, Number(v) || 0))}
+            style={{ width: 55 }}
+          />
+          <span style={{ fontSize: 11, color: "#555" }}>(mm)</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+          <label style={{ width: 150, fontSize: 11 }}>Vertical Gap (row)</label>
+          <WinInput
+            type="number"
+            value={gapV}
+            onChange={(v) => setGapV(Math.max(0, Number(v) || 0))}
+            style={{ width: 55 }}
+          />
+          <span style={{ fontSize: 11, color: "#555" }}>(mm)</span>
+        </div>
+        <div style={{ fontSize: 10, color: "#666" }}>
+          Pitch (card-to-card): H {hPitch.toFixed(1)} mm · V {vPitch.toFixed(1)} mm
+        </div>
+      </div>
+
+      {/* Page Margin / First Card Position */}
+      <div style={{ border: "1px solid #808080", padding: "10px 14px", marginBottom: 14, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, marginBottom: 10 }}>First Card Position (page margin)</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+          <label style={{ width: 150, fontSize: 11 }}>X offset from left</label>
           <WinInput
             type="number"
             value={h1}
-            onChange={(v) => setH1(Number(v))}
+            onChange={(v) => setH1(Math.max(0, Number(v) || 0))}
             style={{ width: 55 }}
           />
-          <span style={{ fontSize: 11, color: "#555" }}>(in mm)</span>
+          <span style={{ fontSize: 11, color: "#555" }}>(mm, 0 = auto-center)</span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-          <label style={{ width: 130, fontSize: 11 }}>2nd Position (Card Width)</label>
-          <WinInput
-            type="number"
-            value={h2}
-            onChange={(v) => setH2(Number(v))}
-            style={{ width: 55 }}
-          />
-          <span style={{ fontSize: 11, color: "#555" }}>(in mm)</span>
-        </div>
-
-        {/* Vertical */}
-        <div style={{ fontWeight: 700, marginBottom: 6 }}>Vertical</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <label style={{ width: 130, fontSize: 11 }}>1st ID-Card Position</label>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <label style={{ width: 150, fontSize: 11 }}>Y offset from top</label>
           <WinInput
             type="number"
             value={v1}
-            onChange={(v) => setV1(Number(v))}
+            onChange={(v) => setV1(Math.max(0, Number(v) || 0))}
             style={{ width: 55 }}
           />
-          <span style={{ fontSize: 11, color: "#555" }}>(in mm)</span>
-        </div>
-        <div style={fieldRowStyle}>
-          <label style={{ width: 130, fontSize: 11 }}>2nd Position (Card Height)</label>
-          <WinInput
-            type="number"
-            value={v2}
-            onChange={(v) => setV2(Number(v))}
-            style={{ width: 55 }}
-          />
-          <span style={{ fontSize: 11, color: "#555" }}>(in mm)</span>
+          <span style={{ fontSize: 11, color: "#555" }}>(mm, 0 = auto-center)</span>
         </div>
       </div>
 
       {/* Cards-per-page preview */}
-      {h2 > 0 && v2 > 0 && (
-        <div style={{
-          background: "#e8e8e8", border: "1px inset #808080",
-          padding: "6px 10px", marginBottom: 12, fontSize: 11,
-        }}>
-          {(() => {
-            const cols = Math.floor((paperWidth - h1) / h2)
-            const rows = Math.floor((paperHeight - v1) / v2)
-            const total = Math.max(0, cols) * Math.max(0, rows)
-            return (
-              <span>
-                Layout preview: <strong>{Math.max(0, cols)} cols × {Math.max(0, rows)} rows = {total} cards/page</strong>
-              </span>
-            )
-          })()}
-        </div>
-      )}
+      <div style={{
+        background: "#e8f4fd", border: "1px inset #93c5fd",
+        padding: "8px 12px", marginBottom: 12, fontSize: 12,
+      }}>
+        <span>
+          Layout preview: <strong>{cols} cols × {rows} rows = {cardsPerPage} cards/page</strong>
+        </span>
+      </div>
 
       <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-        <WinButton onClick={() => onOk({ paper, paperWidth, paperHeight, h1stPosition: h1, h2ndPosition: h2, v1stPosition: v1, v2ndPosition: v2 })}>
+        <WinButton onClick={() => onOk({
+          paper, paperWidth, paperHeight,
+          h1stPosition: h1,
+          h2ndPosition: hPitch,
+          v1stPosition: v1,
+          v2ndPosition: vPitch,
+          cardWidthMm: cardW,
+          cardHeightMm: cardH,
+        })}>
           Ok
         </WinButton>
         <WinButton onClick={onCancel}>Cancel</WinButton>
