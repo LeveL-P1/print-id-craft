@@ -156,66 +156,28 @@ const SAMPLE_DATA: Record<string, string> = {
   serialNumber: "PLAY-B1-0001",
 }
 
-/**
- * AutoFitText — renders text on a single line and auto-shrinks the font
- * (via horizontal scaling) so the entire string is always visible inside
- * the parent box. Used when the user enables the "Wrap" option, meaning:
- * "make sure the full name fits inside the ID card, don't truncate with ...".
- */
-function AutoFitText({
+function FixedWrapText({
   text,
   style,
-  align = "left",
 }: {
   text: string
   style: React.CSSProperties
-  align?: "left" | "center" | "right"
 }) {
-  const containerRef = useRef<HTMLDivElement | null>(null)
-  const spanRef = useRef<HTMLSpanElement | null>(null)
-  const [scale, setScale] = useState(1)
-
-  useEffect(() => {
-    const fit = () => {
-      const c = containerRef.current
-      const s = spanRef.current
-      if (!c || !s) return
-      const cw = c.clientWidth
-      // Reset scale to measure natural width
-      s.style.transform = "scaleX(1)"
-      const sw = s.scrollWidth
-      if (sw <= 0 || cw <= 0) return
-      const next = sw > cw ? cw / sw : 1
-      setScale(next)
-    }
-    fit()
-    const ro = new ResizeObserver(fit)
-    if (containerRef.current) ro.observe(containerRef.current)
-    if (spanRef.current) ro.observe(spanRef.current)
-    return () => ro.disconnect()
-  }, [text, style.fontSize, style.fontFamily, style.fontWeight, style.fontStyle, style.letterSpacing])
-
-  const justify = align === "center" ? "center" : align === "right" ? "flex-end" : "flex-start"
-  const origin = align === "center" ? "center" : align === "right" ? "right" : "left"
-
   return (
-    <div
-      ref={containerRef}
-      style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: justify, overflow: "hidden" }}
+    <span
+      style={{
+        ...style,
+        whiteSpace: "normal",
+        overflowWrap: "break-word",
+        wordBreak: "break-word",
+        overflow: "hidden",
+        width: "100%",
+        height: "100%",
+        display: "block",
+      }}
     >
-      <span
-        ref={spanRef}
-        style={{
-          ...style,
-          whiteSpace: "nowrap",
-          display: "inline-block",
-          transform: `scaleX(${scale})`,
-          transformOrigin: `${origin} center`,
-        }}
-      >
-        {text}
-      </span>
-    </div>
+      {text}
+    </span>
   )
 }
 
@@ -1848,14 +1810,12 @@ export default function JpgTemplateMapper({
                           </span>
                         )
                       }
-                      // "wrap" mode → auto-shrink text so the full string fits on a single line
-                      // inside the box (never truncated with "...").
+                      // "wrap" mode → keep selected font size and wrap text inside the box.
                       if (m.textWrap === "wrap") {
                         return (
-                          <AutoFitText
+                          <FixedWrapText
                             text={displayText}
                             style={baseStyle}
-                            align={(m.textAlign as any) || "left"}
                           />
                         )
                       }

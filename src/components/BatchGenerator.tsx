@@ -296,26 +296,10 @@ function fitTextToBoxCanvas(
     return { lines: [text.slice(0, lo) + ellipsis], fontSize: userPx, lineHeight: userPx * 1.15 }
   }
 
-  // ── WRAP → start from the user's chosen font size, then shrink only if needed.
-  const minFont = Math.max(7, boxH * 0.28)
-  let fontSize = userPx
+  const fontSize = userPx
   setFont(fontSize)
-  while (ctx.measureText(text).width > maxW && fontSize > minFont) {
-    fontSize -= 0.5
-    setFont(fontSize)
-  }
-  if (ctx.measureText(text).width <= maxW) {
-    return { lines: [text], fontSize, lineHeight: fontSize * 1.15 }
-  }
-
-  let lines = wrap(fontSize)
-  let lineHeight = fontSize * 1.15
-  while (lines.length * lineHeight > maxH && fontSize > minFont) {
-    fontSize -= 0.5
-    lines = wrap(fontSize)
-    lineHeight = fontSize * 1.15
-  }
-  return { lines, fontSize, lineHeight }
+  const lines = ctx.measureText(text).width <= maxW ? [text] : wrap(fontSize)
+  return { lines, fontSize, lineHeight: fontSize * 1.15 }
 }
 
 /**
@@ -624,12 +608,24 @@ async function renderIdCardSvg(
             if (mctx) {
               const fontPrefix = fontWeight === "bold" ? "bold " : ""
               mctx.font = `${fontPrefix}${fontSize}px ${fontFamily}`
-              let ww = mctx.measureText(value).width
-              const minFs = Math.max(7, fh * 0.28)
-              while (ww > maxWidth && fontSize > minFs) {
-                fontSize -= 0.5
-                mctx.font = `${fontPrefix}${fontSize}px ${fontFamily}`
-                ww = mctx.measureText(value).width
+              if (mctx.measureText(value).width > maxWidth) {
+                const words = value.split(/\s+/).filter(Boolean)
+                const wrappedLines: string[] = []
+                let current = ""
+                for (const wd of words) {
+                  const tentative = current ? current + " " + wd : wd
+                  if (mctx.measureText(tentative).width <= maxWidth) current = tentative
+                  else { if (current) wrappedLines.push(current); current = wd }
+                }
+                if (current) wrappedLines.push(current)
+                const lineHeight = fontSize * 1.15
+                const firstLineY = fy + padding + fontSize
+                const tspans = wrappedLines
+                  .map((ln, i) => `<tspan x="${textX.toFixed(1)}" y="${(firstLineY + i * lineHeight).toFixed(1)}">${escape(ln)}</tspan>`)
+                  .join("")
+                const decorAttr2 = svgTextDecor ? ` text-decoration="${svgTextDecor}"` : ""
+                lines.push(`  <text font-family="${fontFamily}" font-size="${fontSize}" fill="${fill}" font-weight="${fontWeight}" font-style="${svgFontStyle}"${decorAttr2} text-anchor="${textAnchor}">${tspans}</text>`)
+                continue
               }
             }
           } else if (wrapMode === "nowrap") {
