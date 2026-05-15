@@ -3813,14 +3813,16 @@ export default function JpgTemplateMapper({
         <FontDialog
           initial={{
             fontFamily: selectedMapping.fontFamily || "Arial",
-            fontStyle: selectedMapping.fontStyle === "italic" ? (selectedMapping.fontWeight === "bold" ? "Bold Italic" : "Italic") : (selectedMapping.fontWeight === "bold" ? "Bold" : "Regular"),
+            fontStyle: selectedMapping.fontStyle === "italic" ? (selectedMapping.fontWeight === "bold" ? "Bold Italic" : "Italic") : (selectedMapping.fontWeight === "bold" ? (/(narrow|condensed)/i.test(selectedMapping.fontFamily || "") ? "Narrow Bold" : "Bold") : "Regular"),
             fontSize: selectedMapping.fontSize,
             strikeout: selectedMapping.textDecoration === "line-through",
             underline: selectedMapping.textDecoration === "underline",
           }}
           onChange={(cfg: FontConfig) => {
+            const isNarrowBold = cfg.fontStyle.toLowerCase().includes("narrow")
+            const nextFontFamily = isNarrowBold && !/(narrow|condensed)/i.test(cfg.fontFamily) ? "Arial Narrow" : cfg.fontFamily
             updateMapping(selectedMapping.id, {
-              fontFamily: cfg.fontFamily,
+              fontFamily: nextFontFamily,
               fontWeight: cfg.fontStyle.toLowerCase().includes("bold") ? "bold" : "normal",
               fontStyle: cfg.fontStyle.toLowerCase().includes("italic") ? "italic" : "normal",
               fontSize: cfg.fontSize,

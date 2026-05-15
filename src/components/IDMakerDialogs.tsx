@@ -417,7 +417,7 @@ const FONT_LIST = [
   "Oswald", "PT Sans Narrow",
   "Noto Sans Devanagari", "Noto Sans",
 ]
-const FONT_STYLES = ["Regular", "Italic", "Bold", "Bold Italic"]
+const FONT_STYLES = ["Regular", "Italic", "Bold", "Bold Italic", "Narrow Bold"]
 const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36, 48, 72]
 
 export type FontConfig = {
@@ -454,7 +454,7 @@ export function FontDialog({
   }, [fontFamily, fontStyle, fontSize, strikeout, underline, onChange])
 
   const previewStyle: React.CSSProperties = {
-    fontFamily,
+    fontFamily: fontStyle.toLowerCase().includes("narrow") && !/(narrow|condensed)/i.test(fontFamily) ? "Arial Narrow" : fontFamily,
     fontSize: Math.min(fontSize, 24),
     fontWeight: fontStyle.toLowerCase().includes("bold") ? "bold" : "normal",
     fontStyle: fontStyle.toLowerCase().includes("italic") ? "italic" : "normal",

@@ -246,9 +246,9 @@ function fitTextToBox(
     return { lines: [text.slice(0, lo) + ellipsis], fontSize: userPx, lineHeight: userPx * 1.15 }
   }
 
-  // ── WRAP (legacy auto-fit): shrink to one line, fall back to wrapped+shrunk.
+  // ── WRAP: start from the user's chosen font size, then shrink only if needed.
   const minFont = Math.max(7 * scale, boxH * 0.28)
-  let fontSize = boxH * 0.78
+  let fontSize = userPx
   setFont(fontSize)
   while (ctx.measureText(text).width > maxW && fontSize > minFont) {
     fontSize -= 0.5
