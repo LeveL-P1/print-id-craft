@@ -1437,7 +1437,7 @@ export default function JpgTemplateMapper({
           </div>
 
           {/* Canvas Area with Zoom */}
-          <div style={{ overflowX: "auto", overflowY: "visible", padding: 16, background: "#0f172a", display: "flex", justifyContent: "center", alignItems: "flex-start" }}>
+          <div style={{ overflowX: "auto", overflowY: "visible", padding: showRulers && !showPreview ? "36px 36px 36px 40px" : "16px", background: "#0f172a", display: "flex", justifyContent: "center", alignItems: "flex-start" }}>
           <div
             ref={containerRef}
             style={{
@@ -1447,7 +1447,7 @@ export default function JpgTemplateMapper({
               background: "transparent",
               border: "none",
               borderRadius: 8,
-              overflow: "hidden",
+              overflow: showRulers && !showPreview ? "visible" : "hidden",
               transformOrigin: "top left",
               flexShrink: 0,
             }}
@@ -1463,41 +1463,89 @@ export default function JpgTemplateMapper({
               if (file) handleImageUpload(file)
             }}
           >
-            {/* Ruler overlays */}
-            {showRulers && !showPreview && (
-              <>
-                {/* Top ruler */}
-                <div style={{
-                  position: "absolute", top: 0, left: 0, right: 0, height: 16,
-                  background: "rgba(30,41,59,0.85)", zIndex: 20, display: "flex", pointerEvents: "none",
-                }}>
-                  {Array.from({ length: 11 }).map((_, i) => (
-                    <div key={i} style={{
-                      position: "absolute", left: `${i * 10}%`, top: 0, height: "100%",
-                      borderLeft: "1px solid rgba(148,163,184,0.5)",
-                      display: "flex", alignItems: "flex-end", paddingLeft: 2,
-                    }}>
-                      <span style={{ fontSize: 7, color: "#94a3b8", fontFamily: "monospace" }}>{i * 10}</span>
-                    </div>
-                  ))}
-                </div>
-                {/* Left ruler */}
-                <div style={{
-                  position: "absolute", top: 0, left: 0, bottom: 0, width: 16,
-                  background: "rgba(30,41,59,0.85)", zIndex: 20, pointerEvents: "none",
-                }}>
-                  {Array.from({ length: 11 }).map((_, i) => (
-                    <div key={i} style={{
-                      position: "absolute", top: `${i * 10}%`, left: 0, width: "100%",
-                      borderTop: "1px solid rgba(148,163,184,0.5)",
-                      display: "flex", alignItems: "flex-start", paddingLeft: 2, paddingTop: 1,
-                    }}>
-                      <span style={{ fontSize: 7, color: "#94a3b8", fontFamily: "monospace", writingMode: "vertical-lr" }}>{i * 10}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
+            {/* Ruler overlays — real mm scale */}
+            {showRulers && !showPreview && (() => {
+              const cw = cardWidth || 85.6
+              const ch = cardHeight || 54
+              const stepMm = 5
+              const hTicks = Math.floor(cw / stepMm)
+              const vTicks = Math.floor(ch / stepMm)
+              return (
+                <>
+                  {/* Top ruler (mm) */}
+                  <div style={{
+                    position: "absolute", top: -20, left: 0, right: 0, height: 20,
+                    background: "rgba(30,41,59,0.92)", zIndex: 20, pointerEvents: "none",
+                    borderBottom: "1px solid #f59e0b",
+                  }}>
+                    {Array.from({ length: hTicks + 1 }).map((_, i) => {
+                      const mm = i * stepMm
+                      const pct = (mm / cw) * 100
+                      const isMajor = mm % 10 === 0
+                      return (
+                        <div key={i} style={{
+                          position: "absolute", left: `${pct}%`, top: 0, height: "100%",
+                          borderLeft: `1px solid ${isMajor ? "#f59e0b" : "rgba(148,163,184,0.4)"}`,
+                          display: "flex", alignItems: "flex-end", paddingLeft: 1,
+                        }}>
+                          {isMajor && (
+                            <span style={{ fontSize: 8, color: "#fbbf24", fontFamily: "monospace", fontWeight: 700 }}>{mm}</span>
+                          )}
+                        </div>
+                      )
+                    })}
+                    <span style={{ position: "absolute", right: 2, top: 1, fontSize: 7, color: "#94a3b8", fontFamily: "monospace" }}>mm</span>
+                  </div>
+                  {/* Left ruler (mm) */}
+                  <div style={{
+                    position: "absolute", top: 0, left: -22, bottom: 0, width: 22,
+                    background: "rgba(30,41,59,0.92)", zIndex: 20, pointerEvents: "none",
+                    borderRight: "1px solid #f59e0b",
+                  }}>
+                    {Array.from({ length: vTicks + 1 }).map((_, i) => {
+                      const mm = i * stepMm
+                      const pct = (mm / ch) * 100
+                      const isMajor = mm % 10 === 0
+                      return (
+                        <div key={i} style={{
+                          position: "absolute", top: `${pct}%`, left: 0, width: "100%",
+                          borderTop: `1px solid ${isMajor ? "#f59e0b" : "rgba(148,163,184,0.4)"}`,
+                          display: "flex", alignItems: "flex-start", justifyContent: "flex-end", paddingRight: 2, paddingTop: 1,
+                        }}>
+                          {isMajor && (
+                            <span style={{ fontSize: 8, color: "#fbbf24", fontFamily: "monospace", fontWeight: 700 }}>{mm}</span>
+                          )}
+                        </div>
+                      )
+                    })}
+                    <span style={{ position: "absolute", left: 1, bottom: 2, fontSize: 7, color: "#94a3b8", fontFamily: "monospace", writingMode: "vertical-lr" }}>mm</span>
+                  </div>
+                  {/* Bottom width label */}
+                  <div style={{
+                    position: "absolute", bottom: -18, left: 0, right: 0, height: 18,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    pointerEvents: "none", zIndex: 20,
+                  }}>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, color: "#fbbf24", fontFamily: "monospace",
+                      background: "rgba(30,41,59,0.9)", padding: "1px 8px", borderRadius: 4,
+                    }}>↔ {cw} mm</span>
+                  </div>
+                  {/* Right height label */}
+                  <div style={{
+                    position: "absolute", top: 0, right: -20, bottom: 0, width: 20,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    pointerEvents: "none", zIndex: 20,
+                  }}>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, color: "#fbbf24", fontFamily: "monospace",
+                      background: "rgba(30,41,59,0.9)", padding: "1px 6px", borderRadius: 4,
+                      writingMode: "vertical-lr",
+                    }}>↕ {ch} mm</span>
+                  </div>
+                </>
+              )
+            })()}
 
             {/* Grid overlay */}
             {showGrid && !showPreview && (
