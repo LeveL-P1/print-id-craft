@@ -363,20 +363,20 @@ async function renderIdCard(
       if (student.photoUrl) {
         const photoImg = await getCachedImage(student.photoUrl)
         if (photoImg) {
-          // Contain-fit: show the ENTIRE photo, no cropping
+          // Cover-fit: fill the entire box, crop overflow
           const photoAspect = photoImg.naturalWidth / photoImg.naturalHeight
           const boxAspect = fw / fh
           let dx: number, dy: number, dw: number, dh: number
           if (photoAspect > boxAspect) {
-            dw = fw
-            dh = fw / photoAspect
-            dx = fx
-            dy = fy + (fh - dh) / 2
-          } else {
             dh = fh
             dw = fh * photoAspect
             dx = fx + (fw - dw) / 2
             dy = fy
+          } else {
+            dw = fw
+            dh = fw / photoAspect
+            dx = fx
+            dy = fy + (fh - dh) / 2
           }
           ctx.save()
           pathRoundedRect(ctx, fx, fy, fw, fh, radiusPx)
