@@ -494,67 +494,6 @@ export default function JpgTemplateMapper({
     }
   }, [schoolId])
 
-  // ── Target card aspect ratio for PVC printing (56mm × 88mm) ──
-  const CARD_RATIO = 56 / 88 // 0.6364
-  const RATIO_TOLERANCE = 0.01 // ~1% tolerance
-
-  /**
-   * Loads a File as an HTMLImageElement for dimension checking.
-   */
-  const loadImageFromFile = (file: File): Promise<HTMLImageElement> =>
-    new Promise((resolve, reject) => {
-      const img = new Image()
-      img.onload = () => resolve(img)
-      img.onerror = () => reject(new Error("Failed to load image"))
-      img.src = URL.createObjectURL(file)
-    })
-
-  /**
-   * Auto-crops an image to the target 56:88 card ratio using center-crop.
-   * Returns a new File with the cropped image.
-   */
-  const cropToCardRatio = async (file: File, img: HTMLImageElement): Promise<File> => {
-    const { naturalWidth: w, naturalHeight: h } = img
-    const srcAspect = w / h
-
-    let cropW: number, cropH: number
-    if (srcAspect > CARD_RATIO) {
-      // Wider than 56:88 → keep height, trim sides
-      cropH = h
-      cropW = Math.round(h * CARD_RATIO)
-    } else {
-      // Taller than 56:88 → keep width, trim top/bottom
-      cropW = w
-      cropH = Math.round(w / CARD_RATIO)
-    }
-
-    const cropX = Math.round((w - cropW) / 2)
-    const cropY = Math.round((h - cropH) / 2)
-
-    const canvas = document.createElement("canvas")
-    canvas.width = cropW
-    canvas.height = cropH
-    const ctx = canvas.getContext("2d")!
-    ctx.imageSmoothingEnabled = true
-    ctx.imageSmoothingQuality = "high"
-    ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
-
-    // Convert canvas back to a File (preserve original format when possible)
-    const mimeType = file.type === "image/png" ? "image/png" : "image/jpeg"
-    const quality = mimeType === "image/jpeg" ? 0.95 : undefined
-
-    return new Promise<File>((resolve) => {
-      canvas.toBlob(
-        (blob) => {
-          const croppedFile = new File([blob!], file.name, { type: mimeType })
-          resolve(croppedFile)
-        },
-        mimeType,
-        quality
-      )
-    })
-  }
-
   const handleImageUpload = async (file: File) => {
     if (!file.type.startsWith("image/")) {
       alert("Please upload a valid image file (JPG, PNG, or WebP)")
@@ -566,27 +505,7 @@ export default function JpgTemplateMapper({
     }
     setUploading(true)
     try {
-      // Check aspect ratio and auto-crop if needed
-      const img = await loadImageFromFile(file)
-      const srcAspect = img.naturalWidth / img.naturalHeight
-      const needsCrop = Math.abs(srcAspect - CARD_RATIO) > RATIO_TOLERANCE
-
-      let fileToUpload = file
-      if (needsCrop) {
-        fileToUpload = await cropToCardRatio(file, img)
-        // Inform the admin
-        alert(
-          `⚠️ Template auto-cropped to 56×88mm card ratio.\n\n` +
-          `Original: ${img.naturalWidth}×${img.naturalHeight}px (ratio ${srcAspect.toFixed(3)})\n` +
-          `Card ratio: ${CARD_RATIO.toFixed(3)}\n\n` +
-          `The edges were trimmed to fit the standard PVC card dimensions. ` +
-          `If important content was cut off, use an image editor to resize your template to exactly 56:88 proportions.`
-        )
-      }
-      // Clean up object URL
-      URL.revokeObjectURL(img.src)
-
-      const url = await onUploadImage(fileToUpload)
+      const url = await onUploadImage(file)
       setImageUrl(url)
     } catch (err: any) {
       console.error("Upload failed:", err)
