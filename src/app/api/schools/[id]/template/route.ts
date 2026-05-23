@@ -146,7 +146,16 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
 
     // When the card size is locked, prevent accidental overwrite of dimensions
     // unless the request explicitly unlocks (cardSizeLocked === false).
-    const existing = await prisma.template.findUnique({ where: { schoolId: params.id }, select: { cardSizeLocked: true } })
+    const existing = await prisma.template.findUnique({ where: { schoolId: params.id }, select: { cardSizeLocked: true, printConfig: true } })
+
+    // Merge incoming printConfig with existing to preserve fontSizeUnit flag.
+    // Without this, savePrintConfig (paper/position settings) would wipe the
+    // "fontSizeUnit: pt" marker, causing migrateTemplateToPt to re-run on
+    // the next GET and shrink every font size by ×0.4.
+    if (updateData.printConfig && typeof updateData.printConfig === "object") {
+      const existingPc = (existing?.printConfig as Record<string, any>) || {}
+      updateData.printConfig = { ...existingPc, ...updateData.printConfig }
+    }
     const isLocked = existing?.cardSizeLocked === true
     const isUnlocking = validated.cardSizeLocked === false
     if (isLocked && !isUnlocking) {

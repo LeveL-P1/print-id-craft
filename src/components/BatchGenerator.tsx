@@ -1120,7 +1120,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
       await fetch(`/api/schools/${schoolId}/template`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ printConfig: cfg }),
+        body: JSON.stringify({ printConfig: { ...cfg, fontSizeUnit: "pt" } }),
       })
       setPrintConfigSaved(true)
     } catch { /* non-fatal */ }
