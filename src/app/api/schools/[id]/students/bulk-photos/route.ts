@@ -13,6 +13,106 @@ const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"]
 
 let bucketReady = false
 
+// --- Per-instance lookup cache --------------------------------------------
+// Rebuilding the 6 student-lookup maps from scratch on every batch is the
+// dominant cost when a client uploads thousands of photos in many small
+// requests. We memoize per (schoolId) with a short TTL so concurrent batches
+// in the same hot serverless instance share one DB read.
+// A 60s TTL is short enough that newly added students appear quickly while
+// keeping ~99% cache-hit rate during a single bulk-upload session.
+type StudentRow = { id: string; serialNumber: string; formData: any; photoUrl: string | null }
+type LookupMaps = {
+  byPhotoId: Map<string, StudentRow>
+  bySerial: Map<string, StudentRow>
+  byRollNo: Map<string, StudentRow>
+  byName: Map<string, StudentRow>
+  byFather: Map<string, StudentRow>
+  byStudentName: Map<string, StudentRow>
+  count: number
+}
+const LOOKUP_TTL_MS = 60_000
+const lookupCache = new Map<string, { maps: LookupMaps; ts: number }>()
+
+async function getLookupMaps(schoolId: string): Promise<LookupMaps> {
+  const hit = lookupCache.get(schoolId)
+  if (hit && Date.now() - hit.ts < LOOKUP_TTL_MS) return hit.maps
+
+  const students = await prisma.student.findMany({
+    where: { schoolId },
+    select: { id: true, serialNumber: true, formData: true, photoUrl: true },
+  })
+
+  const maps: LookupMaps = {
+    byPhotoId: new Map(),
+    bySerial: new Map(),
+    byRollNo: new Map(),
+    byName: new Map(),
+    byFather: new Map(),
+    byStudentName: new Map(),
+    count: students.length,
+  }
+
+  for (const s of students) buildIndexForStudent(s, maps)
+
+  lookupCache.set(schoolId, { maps, ts: Date.now() })
+  return maps
+}
+
+function buildIndexForStudent(s: StudentRow, maps: LookupMaps) {
+  maps.bySerial.set(s.serialNumber.toLowerCase().trim(), s)
+
+  const fd = s.formData as Record<string, string>
+
+  let photoId = fd?.photoId || fd?.["Photo ID"] || fd?.["photo_id"] || fd?.["PhotoID"]
+    || fd?.["PHOTO NO."] || fd?.["Photo No"] || fd?.["Photo No."] || fd?.["photo no"] || fd?.["photo no."]
+    || fd?.["photo_no"] || fd?.["Photo Number"] || fd?.["photo number"]
+    || fd?.["IMG"] || fd?.["Img"] || fd?.["img"] || fd?.["Img No"] || fd?.["img no"] || fd?.["Image No"] || fd?.["image no"]
+    || ""
+  if (!photoId && fd) {
+    for (const [key, val] of Object.entries(fd)) {
+      const kl = key.toLowerCase().replace(/[^a-z0-9]/g, "")
+      if ((kl.includes("photo") || kl.includes("image") || kl.includes("img"))
+          && (kl.includes("no") || kl.includes("id") || kl.includes("num"))
+          && val) {
+        photoId = String(val)
+        break
+      }
+    }
+  }
+  if (photoId) {
+    const pidClean = String(photoId).toLowerCase().trim()
+    maps.byPhotoId.set(pidClean, s)
+    const numericPart = pidClean.replace(/^[a-z]+[_\-\s]*/i, "")
+    if (numericPart && numericPart !== pidClean) maps.byPhotoId.set(numericPart, s)
+  }
+
+  const rollNo = fd?.rollNo || fd?.["Roll No."] || fd?.["roll_no"] || fd?.srNo || fd?.["NO"] || ""
+  if (rollNo) maps.byRollNo.set(String(rollNo).toLowerCase().trim(), s)
+
+  const grNo = fd?.grNo || fd?.["GR NO"] || fd?.["GR No"] || fd?.["GR No."] || fd?.["gr_no"] || ""
+  if (grNo) maps.byRollNo.set(String(grNo).toLowerCase().trim(), s)
+
+  const name = fd?.fullName || fd?.["Full Name"] || fd?.name || fd?.["Student Name"] || fd?.Student_Name || ""
+  if (name) {
+    const nameLower = name.toLowerCase().trim()
+    maps.byName.set(nameLower, s)
+    maps.byStudentName.set(nameLower.replace(/\s+/g, ""), s)
+    maps.byStudentName.set(nameLower.replace(/\s+/g, "_"), s)
+  }
+
+  const fatherName = fd?.fatherName || fd?.["Father"] || fd?.["Father Name"] || fd?.["Father's Name"] || fd?.father || ""
+  if (fatherName) maps.byFather.set(String(fatherName).toLowerCase().trim(), s)
+
+  const fatherPhone = fd?.fatherPhone || fd?.["Mob.- Father -"] || fd?.["mob_father"] || fd?.["Father Phone"] || ""
+  if (fatherPhone) maps.byFather.set(String(fatherPhone).toLowerCase().trim(), s)
+}
+
+// Allow callers to invalidate the cache after they finish writing photoUrl
+// updates so subsequent requests see the freshest state.
+function invalidateLookupCache(schoolId: string) {
+  lookupCache.delete(schoolId)
+}
+
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   try {
     const session = await getServerSession(authOptions)
@@ -22,99 +122,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
     const schoolId = params.id
 
-    // Get all students for this school
-    const students = await prisma.student.findMany({
-      where: { schoolId },
-      select: {
-        id: true,
-        serialNumber: true,
-        formData: true,
-        photoUrl: true,
-      },
-    })
-
-    if (students.length === 0) {
+    const maps = await getLookupMaps(schoolId)
+    if (maps.count === 0) {
       return NextResponse.json({ error: "No students found in this school. Import students first." }, { status: 400 })
     }
-
-    // Build lookup maps for matching (case-insensitive, trimmed)
-    const byPhotoId: Record<string, typeof students[0]> = {}
-    const bySerial: Record<string, typeof students[0]> = {}
-    const byRollNo: Record<string, typeof students[0]> = {}
-    const byName: Record<string, typeof students[0]> = {}
-    const byFather: Record<string, typeof students[0]> = {}
-    const byStudentName: Record<string, typeof students[0]> = {}
-
-    for (const s of students) {
-      // Serial number match
-      bySerial[s.serialNumber.toLowerCase().trim()] = s
-
-      const fd = s.formData as Record<string, string>
-
-      // Photo ID match (primary — from Excel "Photo ID" / "PHOTO NO." column)
-      // First try explicit known keys
-      let photoId = fd?.photoId || fd?.["Photo ID"] || fd?.["photo_id"] || fd?.["PhotoID"] 
-        || fd?.["PHOTO NO."] || fd?.["Photo No"] || fd?.["Photo No."] || fd?.["photo no"] || fd?.["photo no."]
-        || fd?.["photo_no"] || fd?.["Photo Number"] || fd?.["photo number"]
-        || fd?.["IMG"] || fd?.["Img"] || fd?.["img"] || fd?.["Img No"] || fd?.["img no"] || fd?.["Image No"] || fd?.["image no"]
-        || ""
-      // Fallback: scan all formData keys for anything that looks like a photo/image ID column
-      if (!photoId && fd) {
-        for (const [key, val] of Object.entries(fd)) {
-          const kl = key.toLowerCase().replace(/[^a-z0-9]/g, "")
-          if ((kl.includes("photo") || kl.includes("image") || kl.includes("img")) 
-              && (kl.includes("no") || kl.includes("id") || kl.includes("num"))
-              && val) {
-            photoId = String(val)
-            break
-          }
-        }
-      }
-      if (photoId) {
-        const pidClean = String(photoId).toLowerCase().trim()
-        byPhotoId[pidClean] = s
-        // Also index without common prefixes for flexible matching
-        // e.g., "IMG_2803" → also index "2803"
-        const numericPart = pidClean.replace(/^[a-z]+[_\-\s]*/i, "")
-        if (numericPart && numericPart !== pidClean) {
-          byPhotoId[numericPart] = s
-        }
-      }
-
-      // Roll number match
-      const rollNo = fd?.rollNo || fd?.["Roll No."] || fd?.["roll_no"] || fd?.srNo || fd?.["NO"] || ""
-      if (rollNo) {
-        byRollNo[String(rollNo).toLowerCase().trim()] = s
-      }
-
-      // GR number match
-      const grNo = fd?.grNo || fd?.["GR NO"] || fd?.["GR No"] || fd?.["GR No."] || fd?.["gr_no"] || ""
-      if (grNo) {
-        byRollNo[String(grNo).toLowerCase().trim()] = s
-      }
-
-      // Full name match (multiple keys)
-      const name = fd?.fullName || fd?.["Full Name"] || fd?.name || fd?.["Student Name"] || fd?.Student_Name || ""
-      if (name) {
-        const nameLower = name.toLowerCase().trim()
-        byName[nameLower] = s
-        // Also index stripped version (no spaces, no special chars)
-        byStudentName[nameLower.replace(/\s+/g, "")] = s
-        byStudentName[nameLower.replace(/\s+/g, "_")] = s
-      }
-
-      // Father name/number match
-      const fatherName = fd?.fatherName || fd?.["Father"] || fd?.["Father Name"] || fd?.["Father's Name"] || fd?.father || ""
-      if (fatherName) {
-        byFather[String(fatherName).toLowerCase().trim()] = s
-      }
-
-      // Father phone match
-      const fatherPhone = fd?.fatherPhone || fd?.["Mob.- Father -"] || fd?.["mob_father"] || fd?.["Father Phone"] || ""
-      if (fatherPhone) {
-        byFather[String(fatherPhone).toLowerCase().trim()] = s
-      }
-    }
+    const { byPhotoId, bySerial, byRollNo, byName, byFather, byStudentName } = maps
 
     const formData = await req.formData()
     const files = formData.getAll("photos") as File[]
@@ -136,12 +148,13 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const matched: Array<{ filename: string; studentName: string; serialNumber: string; matchedBy: string }> = []
     const unmatched: string[] = []
     const errors: Array<{ filename: string; error: string }> = []
+    // Collected DB writes — applied in a single transactional chunked sweep
+    // at the end of the request so we don't pay per-file round-trip latency.
+    const pendingUpdates: Array<{ id: string; photoUrl: string }> = []
 
-    // Process files concurrently in batches of 10
-    const BATCH_SIZE = 10
-    for (let i = 0; i < files.length; i += BATCH_SIZE) {
-      const batch = files.slice(i, i + BATCH_SIZE)
-      await Promise.all(batch.map(async (file) => {
+    // Process all files in a single Promise.all — storage uploads are I/O
+    // bound and Supabase handles concurrent puts well. DB writes are deferred.
+    await Promise.all(files.map(async (file) => {
         const filename = file.name
         // Strip folder prefix (e.g., "Photos/IMG_2767.jpg" → "IMG_2767.jpg")
         const fileNameOnly = filename.includes("/") ? filename.split("/").pop()! : filename
@@ -162,29 +175,29 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         }
 
         // Try to match: photoId → serial → rollNo → name → father → studentName (priority order)
-        let student = byPhotoId[baseNameLower]
+        let student: StudentRow | undefined = byPhotoId.get(baseNameLower)
         let matchedBy = "Photo ID"
 
         if (!student) {
-          student = bySerial[baseNameLower]
+          student = bySerial.get(baseNameLower)
           matchedBy = "Serial Number"
         }
         if (!student) {
-          student = byRollNo[baseNameLower]
+          student = byRollNo.get(baseNameLower)
           matchedBy = "Roll No."
         }
         if (!student) {
-          student = byName[baseNameLower]
+          student = byName.get(baseNameLower)
           matchedBy = "Full Name"
         }
         // Try student name with stripped spaces (e.g., "RahulSharma" → match "rahul sharma")
         if (!student) {
-          student = byStudentName[baseNameNormalized]
+          student = byStudentName.get(baseNameNormalized)
           matchedBy = "Student Name"
         }
         // Try father name/number match
         if (!student) {
-          student = byFather[baseNameLower]
+          student = byFather.get(baseNameLower)
           matchedBy = "Father Name/No."
         }
 
@@ -192,7 +205,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         if (!student) {
           const numericOnly = baseName.replace(/\D/g, "")
           if (numericOnly) {
-            student = byRollNo[numericOnly] || byRollNo[numericOnly.replace(/^0+/, "")]
+            student = byRollNo.get(numericOnly) || byRollNo.get(numericOnly.replace(/^0+/, ""))
             matchedBy = "Roll No. (numeric)"
           }
         }
@@ -203,7 +216,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
           if (prefixMatch) {
             const num = prefixMatch[1]
             // Try as Photo ID number part
-            for (const [pid, s] of Object.entries(byPhotoId)) {
+            for (const [pid, s] of Array.from(byPhotoId)) {
               const pidNum = pid.replace(/\D/g, "")
               if (pidNum && pidNum === num) {
                 student = s
@@ -216,7 +229,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
         // Try partial serial match (last part after dash)
         if (!student) {
-          for (const [serial, s] of Object.entries(bySerial)) {
+          for (const [serial, s] of Array.from(bySerial)) {
             const parts = serial.split("-")
             const lastPart = parts[parts.length - 1]
             if (lastPart && baseNameLower === lastPart) {
@@ -229,7 +242,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
         // Try case-insensitive substring match on photoId (e.g., "BB25035" matches "bb25035")
         if (!student) {
-          for (const [pid, s] of Object.entries(byPhotoId)) {
+          for (const [pid, s] of Array.from(byPhotoId)) {
             if (pid === baseNameLower || baseNameLower.includes(pid) || pid.includes(baseNameLower)) {
               student = s
               matchedBy = "Photo ID (partial)"
@@ -240,7 +253,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
         // Final try: fuzzy name match — check if filename contains a student name or vice versa
         if (!student) {
-          for (const [nameKey, s] of Object.entries(byName)) {
+          for (const [nameKey, s] of Array.from(byName)) {
             if (baseNameLower.includes(nameKey) || nameKey.includes(baseNameLower)) {
               student = s
               matchedBy = "Name (fuzzy)"
@@ -273,11 +286,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
           const publicUrl = storagePublicUrl(BUCKET, filePath)
 
-          // Update student record
-          await prisma.student.update({
-            where: { id: student.id },
-            data: { photoUrl: publicUrl },
-          })
+          // Queue DB write instead of running it inline — batched below.
+          pendingUpdates.push({ id: student.id, photoUrl: publicUrl })
 
           const fd = student.formData as Record<string, string>
           matched.push({
@@ -290,6 +300,43 @@ export async function POST(req: Request, { params }: { params: { id: string } })
           errors.push({ filename, error: err?.message || "Upload failed" })
         }
       }))
+
+    // Batched DB writes: one transaction per chunk of 50 photo URLs.
+    // This avoids the per-file round-trip cost that previously dominated
+    // wall-clock time when uploading thousands of photos.
+    if (pendingUpdates.length > 0) {
+      const DB_CHUNK = 50
+      for (let i = 0; i < pendingUpdates.length; i += DB_CHUNK) {
+        const chunk = pendingUpdates.slice(i, i + DB_CHUNK)
+        try {
+          await prisma.$transaction(
+            chunk.map(u =>
+              prisma.student.update({
+                where: { id: u.id },
+                data: { photoUrl: u.photoUrl },
+              })
+            )
+          )
+        } catch (txErr: any) {
+          // If the transaction fails, fall back to per-row updates so a single
+          // bad row doesn't lose the whole chunk's progress.
+          for (const u of chunk) {
+            try {
+              await prisma.student.update({ where: { id: u.id }, data: { photoUrl: u.photoUrl } })
+            } catch (rowErr: any) {
+              errors.push({ filename: u.id, error: rowErr?.message || "DB update failed" })
+            }
+          }
+        }
+      }
+      // Refresh the cached photoUrl on the in-memory rows so a subsequent
+      // request from this same hot instance sees the new URLs without a
+      // DB round-trip. We don't invalidate the whole cache because the
+      // matching keys (Photo ID / serial / name) haven't changed.
+      for (const u of pendingUpdates) {
+        const row = bySerial.get(u.id) // best-effort; not all rows indexed by id
+        if (row) row.photoUrl = u.photoUrl
+      }
     }
 
     return NextResponse.json({

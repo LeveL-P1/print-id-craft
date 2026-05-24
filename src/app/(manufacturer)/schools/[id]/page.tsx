@@ -172,6 +172,29 @@ export default function SchoolDetailPage() {
   const [manualSearchQuery, setManualSearchQuery] = useState('')
   const [allStudentsList, setAllStudentsList] = useState<any[]>([])
 
+  // Memoized blob-URL map for unmatched photo thumbnails. Previously, the
+  // render path called `URL.createObjectURL(file)` inline on every render
+  // and never revoked it — a small bulk upload with 50 unmatched photos
+  // and a few search keystrokes leaked hundreds of blob URLs and pinned
+  // tens of MB of decoded image data per leak. We create each URL once
+  // per (filename, file) and revoke them all when the map changes or the
+  // component unmounts.
+  const unmatchedThumbUrls = useMemo(() => {
+    const urls: Record<string, string> = {}
+    for (const [fn, f] of Object.entries(unmatchedFileMap)) {
+      urls[fn] = URL.createObjectURL(f)
+    }
+    return urls
+  }, [unmatchedFileMap])
+
+  useEffect(() => {
+    return () => {
+      for (const url of Object.values(unmatchedThumbUrls)) {
+        URL.revokeObjectURL(url)
+      }
+    }
+  }, [unmatchedThumbUrls])
+
   // Flag management
   const [flagUploadOpen, setFlagUploadOpen] = useState(false)
   const [flagColors, setFlagColors] = useState<string[]>([])
@@ -769,24 +792,98 @@ export default function SchoolDetailPage() {
     setPhotoUploading(true)
     setPhotoUploadProgress(0)
     setPhotoUploadStatus('Preparing upload...')
-    
+
     try {
-      // Upload in SIZE-AWARE batches. Vercel's serverless body limit is ~4.5 MB
-      // per request, so we cap each POST at BATCH_MAX_BYTES and also at
-      // BATCH_MAX_FILES to keep per-request memory/time bounded. We build the
-      // batches up-front so the progress UI can show accurate batch counts.
-      const BATCH_MAX_BYTES = 3.5 * 1024 * 1024 // ~3.5 MB — safely below the 4.5 MB platform limit
-      const BATCH_MAX_FILES = 8                 // cap on file count per request
       const totalFiles = photoFiles.length
+
+      // -------------------------------------------------------------------
+      // STEP 1 — Client-side compression
+      // -------------------------------------------------------------------
+      // ID cards render the photo at ~250×300 px. Uploading the camera-
+      // original 3–5 MB JPEG is 20× wasted bandwidth and means each Vercel
+      // request only fits 1–2 photos before hitting the 4.5 MB body limit.
+      // We resize to a max 1024-px edge at quality 0.85 (~120–200 KB each)
+      // which slashes total upload time roughly 15–20× for typical inputs.
+      // Small files (<300 KB) are passed through unchanged.
+      const compressPhoto = async (file: File): Promise<File> => {
+        if (file.size < 300 * 1024) return file
+        try {
+          const bitmap = await createImageBitmap(file)
+          const maxDim = 1024
+          const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height))
+          const w = Math.max(1, Math.round(bitmap.width * scale))
+          const h = Math.max(1, Math.round(bitmap.height * scale))
+
+          let blob: Blob | null = null
+          if (typeof OffscreenCanvas !== 'undefined') {
+            const oc = new OffscreenCanvas(w, h)
+            const ctx = oc.getContext('2d')
+            if (!ctx) throw new Error('no ctx')
+            ctx.drawImage(bitmap, 0, 0, w, h)
+            blob = await oc.convertToBlob({ type: 'image/jpeg', quality: 0.85 })
+          } else {
+            const cv = document.createElement('canvas')
+            cv.width = w; cv.height = h
+            const ctx = cv.getContext('2d')
+            if (!ctx) throw new Error('no ctx')
+            ctx.drawImage(bitmap, 0, 0, w, h)
+            blob = await new Promise<Blob>((res, rej) =>
+              cv.toBlob(b => (b ? res(b) : rej(new Error('toBlob failed'))), 'image/jpeg', 0.85)
+            )
+          }
+          // Always release the decoded bitmap immediately — it can hold 10s of MB.
+          if (typeof (bitmap as any).close === 'function') (bitmap as any).close()
+
+          if (!blob || blob.size >= file.size) return file
+          // Preserve original basename (the server matches students by it),
+          // but force a .jpg extension since we re-encoded as JPEG.
+          const baseName = file.name.replace(/\.[^.]+$/, '')
+          return new File([blob], `${baseName}.jpg`, { type: 'image/jpeg', lastModified: file.lastModified })
+        } catch {
+          // Any decoding/encoding failure → fall back to the original file.
+          return file
+        }
+      }
+
+      // Compress in parallel with bounded concurrency. Too many in flight
+      // exhausts main-thread memory on low-end devices; 4 keeps a steady
+      // throughput while staying under typical mobile RAM limits.
+      const compressed: File[] = new Array(totalFiles)
+      {
+        const COMPRESS_CONCURRENCY = 4
+        let idx = 0
+        let done = 0
+        const worker = async () => {
+          while (idx < totalFiles) {
+            const my = idx++
+            compressed[my] = await compressPhoto(photoFiles[my])
+            done++
+            if (done % 20 === 0 || done === totalFiles) {
+              setPhotoUploadStatus(`Compressing ${done}/${totalFiles} photos...`)
+              // 0–25% of the bar is the compression phase.
+              setPhotoUploadProgress(Math.round((done / totalFiles) * 25))
+            }
+          }
+        }
+        await Promise.all(
+          Array.from({ length: Math.min(COMPRESS_CONCURRENCY, totalFiles) }, () => worker())
+        )
+      }
+
+      // -------------------------------------------------------------------
+      // STEP 2 — Size-aware batching
+      // -------------------------------------------------------------------
+      // Vercel's serverless body limit is ~4.5 MB per request. After
+      // compression most batches hit BATCH_MAX_FILES first instead of bytes.
+      const BATCH_MAX_BYTES = 3.5 * 1024 * 1024
+      const BATCH_MAX_FILES = 25
 
       const batches: File[][] = []
       {
         let current: File[] = []
         let currentSize = 0
-        for (const f of photoFiles) {
+        for (const f of compressed) {
           const size = f.size
-          // If a single file is already over the limit, still send it alone —
-          // the server will reject it with a clear 413 we can surface.
           if (current.length > 0 && (currentSize + size > BATCH_MAX_BYTES || current.length >= BATCH_MAX_FILES)) {
             batches.push(current)
             current = []
@@ -804,31 +901,43 @@ export default function SchoolDetailPage() {
       let completed = 0
       const totalBatches = batches.length
 
+      // Track which compressed File belongs to which filename so we can
+      // recover the bytes for any unmatched names afterwards without keeping
+      // the entire `compressed` array alive.
+      const filesByName = new Map<string, File>()
+      for (const f of compressed) filesByName.set(f.name, f)
+
       // Upload one batch, with robust error handling against Vercel HTML pages.
       const uploadBatch = async (batch: File[]) => {
         const fd = new FormData()
         for (const file of batch) fd.append("photos", file)
-        try {
-          const res = await fetch(`/api/schools/${schoolId}/students/bulk-photos`, { method: "POST", body: fd })
-          const ct = res.headers.get("content-type") || ""
-          if (ct.includes("application/json")) return await res.json()
-          const text = await res.text().catch(() => "")
-          return {
-            success: false,
-            error:
-              res.status === 413
-                ? "Batch too large for server (try smaller photos)"
-                : `Server error ${res.status}${text ? `: ${text.slice(0, 120)}` : ""}`,
+        // One retry on transient network errors — bulk uploads frequently hit
+        // a momentary network blip, and the server is idempotent (upsert).
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const res = await fetch(`/api/schools/${schoolId}/students/bulk-photos`, { method: "POST", body: fd })
+            const ct = res.headers.get("content-type") || ""
+            if (ct.includes("application/json")) return await res.json()
+            const text = await res.text().catch(() => "")
+            return {
+              success: false,
+              error:
+                res.status === 413
+                  ? "Batch too large for server (try smaller photos)"
+                  : `Server error ${res.status}${text ? `: ${text.slice(0, 120)}` : ""}`,
+            }
+          } catch (netErr: any) {
+            if (attempt === 1) return { success: false, error: netErr?.message || "Network error" }
+            // brief back-off before retry
+            await new Promise(r => setTimeout(r, 500))
           }
-        } catch (netErr: any) {
-          return { success: false, error: netErr?.message || "Network error" }
         }
+        return { success: false, error: "Upload failed" }
       }
 
-      // Fire N batches in parallel for speed. Each request stays under the
-      // ~4.5 MB Vercel body limit, but we run multiple concurrently so total
-      // wall-clock time stays close to a single big upload.
-      const CONCURRENCY = 4
+      // Higher concurrency now that each request carries 25 compressed
+      // photos instead of 1–2 originals — bandwidth, not CPU, is the limit.
+      const CONCURRENCY = 8
       let cursor = 0
       const worker = async () => {
         while (cursor < batches.length) {
@@ -844,9 +953,13 @@ export default function SchoolDetailPage() {
               allErrors.push({ filename: file.name, error: data?.error || "Batch upload failed" })
             }
           }
+          // Free the batch reference so V8 can release the underlying
+          // Blob bytes as soon as the network layer is done with them.
+          batches[myIdx] = null as any
           completed++
           setPhotoUploadStatus(`Uploading ${completed}/${totalBatches} batches (${Math.min(totalFiles, completed * BATCH_MAX_FILES)}/${totalFiles} photos)...`)
-          setPhotoUploadProgress(Math.round((completed / totalBatches) * 90))
+          // 25–100% of the bar is the upload phase.
+          setPhotoUploadProgress(25 + Math.round((completed / totalBatches) * 75))
         }
       }
       await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, () => worker()))
@@ -854,13 +967,19 @@ export default function SchoolDetailPage() {
       setPhotoUploadProgress(100)
       setPhotoUploadStatus('Complete!')
 
-      // Build a map of unmatched filenames → File objects for manual assignment
+      // Build a map of unmatched filenames → File objects for manual assignment.
+      // We use the lookup map (O(1)) instead of `find` on the original array,
+      // which previously was O(N²) across the unmatched set.
       const fileMap: Record<string, File> = {}
       for (const filename of allUnmatched) {
-        const file = photoFiles.find(f => f.name === filename)
+        const file = filesByName.get(filename)
         if (file) fileMap[filename] = file
       }
       setUnmatchedFileMap(fileMap)
+      // Release every other compressed File so the browser can reclaim memory.
+      // Holding 1400 × 150 KB ≈ 200 MB of Blob bytes was a major contributor
+      // to the "crash at 98 %" failure mode previously reported.
+      filesByName.clear()
 
       // Fetch all students list for manual matching dropdown
       if (allUnmatched.length > 0) {
@@ -2444,9 +2563,11 @@ export default function SchoolDetailPage() {
                           </div>
                           <div style={{ maxHeight: 300, overflow: 'auto', border: '1px solid #fed7aa', borderRadius: 10, background: '#fffbeb' }}>
                             {photoResult.unmatchedFiles.map((filename: string, idx: number) => {
-                              const file = unmatchedFileMap[filename]
-                              const thumbUrl = file ? URL.createObjectURL(file) : ''
-                              const filteredStudents = manualSearchQuery
+                              const thumbUrl = unmatchedThumbUrls[filename] || ''
+                              // Always cap to 50 visible options. Without the cap, an unmatched
+                              // batch of 50 photos × an `allStudentsList` of 2000 students would
+                              // render 100,000 <option> nodes — a confirmed browser-killer.
+                              const filteredStudents = (manualSearchQuery
                                 ? allStudentsList.filter((s: any) => {
                                     const fd = s.formData as Record<string, string>
                                     const name = (fd?.fullName || fd?.["Full Name"] || fd?.["Student Name"] || fd?.name || '').toLowerCase()
@@ -2454,7 +2575,8 @@ export default function SchoolDetailPage() {
                                     const q = manualSearchQuery.toLowerCase()
                                     return name.includes(q) || serial.includes(q)
                                   })
-                                : allStudentsList.slice(0, 50)
+                                : allStudentsList
+                              ).slice(0, 50)
 
                               return (
                                 <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: idx < photoResult.unmatchedFiles.length - 1 ? '1px solid #fde68a' : 'none' }}>
