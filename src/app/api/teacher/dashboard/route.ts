@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { withStudentPhotoUrl } from "@/lib/student-photo-url"
 
 export const dynamic = "force-dynamic"
 
@@ -78,6 +79,7 @@ export async function GET(req: NextRequest) {
           id: true,
           serialNumber: true,
           photoUrl: true,
+          photoPath: true,
           formData: true,
           status: true,
           flagNote: true,
@@ -122,7 +124,7 @@ export async function GET(req: NextRequest) {
       data: {
         school,
         classes,
-        students,
+        students: students.map(withStudentPhotoUrl),
         stats,
         template,
         isMainTeacher,

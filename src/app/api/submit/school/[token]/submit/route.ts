@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { z } from "zod"
-import { rateLimit, getClientIp } from "@/lib/rate-limit"
+import { durableRateLimit, getClientIp } from "@/lib/rate-limit"
 import { storageUpload, storagePublicUrl } from "@/lib/storage"
 import QRCode from "qrcode"
 import { computeAutoAssignedFields } from "@/lib/submit-fields"
+import { getNextStudentSerial } from "@/lib/student-serial"
+import { reportError } from "@/lib/observability"
 
 /**
  * Public POST — creates a student record from a school-wide registration
@@ -23,13 +25,14 @@ const submitSchema = z.object({
     if (url.includes("supabase.co/storage/")) return true
     return false
   }, { message: "Invalid photo URL origin" }),
+  photoPath: z.string().optional().default(""),
 })
 
 export async function POST(req: Request, { params }: { params: { token: string } }) {
   try {
     // Rate limiting
     const ip = getClientIp(req)
-    const rl = rateLimit(`submit-school:${ip}`, 10, 60000)
+    const rl = await durableRateLimit(`submit-school:${params.token}:${ip}`, 12, 60000)
     if (!rl.success) {
       return NextResponse.json({ error: "Too many requests. Please try again later." }, { status: 429 })
     }
@@ -107,36 +110,17 @@ export async function POST(req: Request, { params }: { params: { token: string }
       }
     }
 
-    const schoolCode = school.name
-      .replace(/[^A-Za-z]/g, "")
-      .substring(0, 6)
-      .toUpperCase()
-
     let student: any = null
     let retries = 3
     while (retries > 0) {
       try {
-        const lastStudent = await prisma.student.findFirst({
-          where: { schoolId: school.id },
-          orderBy: { serialNumber: "desc" },
-          select: { serialNumber: true },
-        })
-        let nextNum = 1
-        if (lastStudent) {
-          const match = lastStudent.serialNumber.match(/-(\d+)$/)
-          if (match) {
-            nextNum = parseInt(match[1]) + 1
-          } else {
-            const count = await prisma.student.count({ where: { schoolId: school.id } })
-            nextNum = count + 1
-          }
-        }
-        const serialNumber = `${schoolCode}-${String(nextNum).padStart(4, "0")}`
-
         // Auto-assigned keys (NO, PHOTO NO.) — same logic as per-class endpoint.
-        const autoFields = await computeAutoAssignedFields(school.id)
-
         student = await prisma.$transaction(async (tx) => {
+          const serialNumber = await getNextStudentSerial(tx, school.id, school.name)
+          const autoFields = await computeAutoAssignedFields(school.id)
+          const photoPath = validated.photoPath?.startsWith(`students/${school.id}/`)
+            ? validated.photoPath
+            : ""
           const newStudent = await tx.student.create({
             data: {
               schoolId: school.id,
@@ -144,6 +128,7 @@ export async function POST(req: Request, { params }: { params: { token: string }
               serialNumber,
               formData: { ...validated.formData, ...autoFields, class: cls.name },
               photoUrl: validated.photoUrl || "",
+              photoPath,
               status: "SUBMITTED",
             },
           })
@@ -189,6 +174,11 @@ export async function POST(req: Request, { params }: { params: { token: string }
     )
   } catch (error: any) {
     console.error("POST /api/submit/school/[token]/submit error:", error)
+    await reportError(error, {
+      type: "SUBMIT_FAILED",
+      message: "Public school submit failed",
+      metadata: { token: params.token },
+    })
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.issues }, { status: 400 })
     }

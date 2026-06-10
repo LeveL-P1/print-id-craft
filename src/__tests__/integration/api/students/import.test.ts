@@ -16,8 +16,13 @@ describe('POST /api/schools/[id]/students/import', () => {
     ;(prisma.school.findUnique as any).mockResolvedValue({
       id: 's1',
       name: 'Test School',
-      classes: []
+      classes: [{ id: 'c1', name: 'Class 1' }],
+      template: { fieldConfig: [] }
     })
+    ;(prisma.student.findFirst as any).mockResolvedValue(null)
+    ;(prisma.student.count as any).mockResolvedValue(0)
+    ;(prisma.student.createMany as any).mockResolvedValue({ count: 0 })
+    ;(prisma.template.upsert as any).mockResolvedValue({})
   })
 
   function createMockFormData(csvString?: string, noFile: boolean = false) {
@@ -80,7 +85,7 @@ describe('POST /api/schools/[id]/students/import', () => {
       const createManyCall = (prisma.student.createMany as any).mock.calls[0][0]
       expect(createManyCall.data.length).toBe(2)
       expect(createManyCall.data[0].schoolId).toBe('s1')
-      expect(createManyCall.data[0].formData['Full Name']).toBe('John Doe')
+      expect(createManyCall.data[0].formData.fullName).toBe('John Doe')
     })
   })
 

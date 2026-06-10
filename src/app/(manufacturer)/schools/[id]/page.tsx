@@ -71,6 +71,7 @@ type StudentData = {
   id: string
   serialNumber: string
   photoUrl: string
+  photoPath?: string
   formData: any
   status: string
   flagNote: string | null
@@ -680,20 +681,24 @@ export default function SchoolDetailPage() {
     setEditSaving(true)
     try {
       let photoUrl = editStudentTarget?.photoUrl || ""
+      let photoPath = (editStudentTarget as any)?.photoPath || ""
       if (editPhotoFile) {
         const fd = new FormData()
         fd.append("file", editPhotoFile)
         fd.append("folder", `students/${schoolId}`)
         const res = await fetch("/api/upload", { method: "POST", body: fd })
         const data = await res.json()
-        if (res.ok && data.success) photoUrl = data.url
+        if (res.ok && data.success) {
+          photoUrl = data.url
+          photoPath = data.path || ""
+        }
         else { toast.error(data.error || "Photo upload failed"); setEditSaving(false); return }
       }
       if (editStudentTarget) {
         const res = await fetch(`/api/schools/${schoolId}/students/${editStudentTarget.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ formData: editFormFields, photoUrl, classId: editClassId }),
+          body: JSON.stringify({ formData: editFormFields, photoUrl, photoPath, classId: editClassId }),
         })
         const data = await res.json()
         if (data.success) {
@@ -705,7 +710,7 @@ export default function SchoolDetailPage() {
         const res = await fetch(`/api/schools/${schoolId}/students`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ formData: editFormFields, classId: editClassId, photoUrl }),
+          body: JSON.stringify({ formData: editFormFields, classId: editClassId, photoUrl, photoPath }),
         })
         const data = await res.json()
         if (data.success) {
@@ -1157,10 +1162,45 @@ export default function SchoolDetailPage() {
     }
   }
 
-  const handleExport = (format: "csv" | "excel") => {
+  const handleExport = async (format: "csv" | "excel" | "archive") => {
     const params = new URLSearchParams()
     if (classFilter) params.set("classId", classFilter)
     if (statusFilter) params.set("status", statusFilter)
+    if (format === "archive") {
+      try {
+        toast.message("Preparing archive export…")
+        const res = await fetch(`/api/schools/${schoolId}/export/archive?${params}`)
+        const data = await res.json()
+        if (!res.ok) {
+          toast.error(data.error || "Archive export failed")
+          return
+        }
+        const jobId = data.data?.jobId
+        if (!jobId) {
+          toast.error("Archive export did not return a job id")
+          return
+        }
+        for (let attempt = 0; attempt < 120; attempt++) {
+          await new Promise((r) => setTimeout(r, 2000))
+          const statusRes = await fetch(`/api/jobs/${jobId}`)
+          const statusData = await statusRes.json()
+          const job = statusData.data
+          if (job?.status === "COMPLETED") {
+            window.open(`/api/jobs/${jobId}/download`, "_blank")
+            toast.success("Archive ready — download started")
+            return
+          }
+          if (job?.status === "FAILED") {
+            toast.error(job.error || "Archive export failed")
+            return
+          }
+        }
+        toast.error("Archive export timed out. Check Operations → Recent Jobs.")
+      } catch {
+        toast.error("Archive export failed")
+      }
+      return
+    }
     window.open(`/api/schools/${schoolId}/export/${format}?${params}`, "_blank")
   }
 
@@ -2992,6 +3032,9 @@ export default function SchoolDetailPage() {
               </button>
               <button className="btn btn-outline" style={{ padding: '14px 28px' }} onClick={() => handleExport("excel")}>
                 📊 Download Excel
+              </button>
+              <button className="btn btn-outline" style={{ padding: '14px 28px' }} onClick={() => handleExport("archive")}>
+                🗂️ Complete Archive
               </button>
             </div>
           </div>

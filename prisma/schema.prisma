@@ -108,6 +108,7 @@ model Student {
   serialNumber  String        @unique
   formData      Json
   photoUrl      String        @default("")
+  photoPath     String        @default("")
   qrCodeUrl     String?
   status        StudentStatus @default(SUBMITTED)
   flagNote      String?
@@ -122,6 +123,51 @@ model Student {
   @@index([schoolId, serialNumber])
   @@index([classId])
   @@index([status])
+  @@index([photoPath])
+}
+
+model RateLimit {
+  key       String   @id
+  count     Int      @default(0)
+  resetAt   DateTime
+  updatedAt DateTime @updatedAt
+
+  @@index([resetAt])
+}
+
+model Job {
+  id          String    @id @default(cuid())
+  type        JobType
+  status      JobStatus @default(PENDING)
+  schoolId    String?
+  payload     Json?
+  result      Json?
+  error       String?
+  attempts    Int       @default(0)
+  createdById String?
+  createdAt   DateTime  @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  @@index([schoolId, status])
+  @@index([type, status])
+  @@index([createdAt])
+}
+
+model SystemEvent {
+  id        String          @id @default(cuid())
+  type      SystemEventType
+  severity  EventSeverity   @default(INFO)
+  message   String
+  schoolId  String?
+  userId    String?
+  metadata  Json?
+  createdAt DateTime        @default(now())
+
+  @@index([type, createdAt])
+  @@index([severity, createdAt])
+  @@index([schoolId, createdAt])
 }
 
 enum StudentStatus {
@@ -153,4 +199,36 @@ enum BatchStatus {
   GENERATING
   READY
   DOWNLOADED
+  FAILED
+}
+
+enum JobType {
+  IMPORT_STUDENTS
+  GENERATE_QR
+  GENERATE_PRINT_BATCH
+  EXPORT_SCHOOL_ARCHIVE
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum SystemEventType {
+  SUBMIT_FAILED
+  UPLOAD_FAILED
+  EXPORT_FAILED
+  IMPORT_FAILED
+  JOB_FAILED
+  SECURITY
+  MAINTENANCE
+}
+
+enum EventSeverity {
+  INFO
+  WARNING
+  ERROR
+  CRITICAL
 }

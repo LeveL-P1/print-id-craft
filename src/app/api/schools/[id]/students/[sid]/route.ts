@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { withStudentPhotoUrl } from "@/lib/student-photo-url"
 
 export async function GET(
   req: Request,
@@ -35,7 +36,7 @@ export async function GET(
       }
     }
 
-    return NextResponse.json({ success: true, data: student })
+    return NextResponse.json({ success: true, data: withStudentPhotoUrl(student) })
   } catch (error) {
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 })
   }
@@ -68,12 +69,15 @@ export async function PATCH(
     }
 
     const body = await req.json()
-    const { formData, photoUrl, teacherComment, status, classId } = body
+    const { formData, photoUrl, photoPath, teacherComment, status, classId } = body
 
     // Build update object
     const updateData: any = {}
     if (formData) updateData.formData = formData
     if (photoUrl !== undefined) updateData.photoUrl = photoUrl
+    if (photoPath !== undefined && typeof photoPath === "string" && photoPath.startsWith(`students/${params.id}/`)) {
+      updateData.photoPath = photoPath
+    }
     if (teacherComment !== undefined) updateData.teacherComment = teacherComment
     if (status) updateData.status = status
     if (classId) updateData.classId = classId
@@ -84,7 +88,7 @@ export async function PATCH(
       include: { class: { select: { id: true, name: true } } },
     })
 
-    return NextResponse.json({ success: true, data: student })
+    return NextResponse.json({ success: true, data: withStudentPhotoUrl(student) })
   } catch (error: any) {
     console.error("Update student error:", error)
     return NextResponse.json({ error: error?.message || "Update failed" }, { status: 500 })

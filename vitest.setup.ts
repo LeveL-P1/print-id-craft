@@ -25,6 +25,8 @@ vi.mock('@/lib/prisma', () => {
       student: {
         createMany: vi.fn(),
         findMany: vi.fn(),
+        findFirst: vi.fn(),
+        count: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
       },
@@ -34,14 +36,41 @@ vi.mock('@/lib/prisma', () => {
       },
       school: {
         findUnique: vi.fn(),
-      }
-    }
+      },
+      template: {
+        upsert: vi.fn(),
+      },
+      printBatch: {
+        findFirst: vi.fn(),
+      },
+      rateLimit: {
+        deleteMany: vi.fn(),
+      },
+      systemEvent: {
+        create: vi.fn(),
+        findMany: vi.fn(),
+      },
+      job: {
+        create: vi.fn(),
+        update: vi.fn(),
+        updateMany: vi.fn(),
+        findFirst: vi.fn(),
+        findUnique: vi.fn(),
+        findMany: vi.fn(),
+      },
+    },
+    batchExecute: vi.fn().mockResolvedValue({ results: [], errors: [] })
   }
 })
 
 // Mock NextAuth
 vi.mock('next-auth/next', () => ({
   getServerSession: vi.fn(),
+}))
+
+vi.mock('@/lib/jobs/enqueue', () => ({
+  enqueueJob: vi.fn().mockResolvedValue({ id: 'mock-job-id', status: 'PENDING' }),
+  kickJobWorker: vi.fn().mockResolvedValue(undefined),
 }))
 
 // Mock crypto.randomUUID
