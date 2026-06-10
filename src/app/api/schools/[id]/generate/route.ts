@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { studentPhotoUrl } from "@/lib/student-photo-url"
 
 export const maxDuration = 60; // Vercel function timeout config
 
@@ -61,6 +62,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         id: true,
         serialNumber: true,
         photoUrl: true,
+        photoPath: true,
         formData: true,
         class: { select: { name: true } },
       },
@@ -80,7 +82,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       return {
         id: s.id,
         serialNumber: s.serialNumber,
-        photoUrl: s.photoUrl,
+        photoUrl: studentPhotoUrl(s),
         className: s.class.name,
         formData: {
           ...formData,

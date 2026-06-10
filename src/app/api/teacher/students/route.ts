@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { withStudentPhotoUrl } from "@/lib/student-photo-url"
 
 export const dynamic = "force-dynamic"
 
@@ -43,6 +44,7 @@ export async function GET(req: Request) {
           id: true,
           serialNumber: true,
           photoUrl: true,
+          photoPath: true,
           formData: true,
           status: true,
           flagNote: true,
@@ -58,7 +60,7 @@ export async function GET(req: Request) {
 
     const response = NextResponse.json({
       success: true,
-      data: students,
+      data: students.map(withStudentPhotoUrl),
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
     })
     response.headers.set("Cache-Control", "private, max-age=5, stale-while-revalidate=10")

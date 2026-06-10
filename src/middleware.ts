@@ -56,7 +56,13 @@ export default withAuth(
       }
     }
 
-    // Login redirect if already authenticated — only redirect to dashboard
+    if (path.startsWith("/api/jobs/") && !path.startsWith("/api/jobs/process")) {
+      if (token?.role !== "MANUFACTURER") {
+        return addSecurityHeaders(NextResponse.json({ error: "Forbidden" }, { status: 403 }))
+      }
+    }
+
+    // Login redirect if already authenticated
     // if the user is visiting the correct portal for their role
     if (path === "/login" && token) {
       const mode = req.nextUrl.searchParams.get("mode")
@@ -87,6 +93,7 @@ export default withAuth(
           path.startsWith("/api/submit/") ||
           path.startsWith("/api/auth/") ||
           path.startsWith("/api/health") ||
+          path.startsWith("/api/jobs/process") ||
           path === "/login"
         ) {
           return true
@@ -106,5 +113,6 @@ export const config = {
     "/api/schools/:path*",
     "/api/teacher/:path*",
     "/api/admin/:path*",
+    "/api/jobs/:path*",
   ],
 }

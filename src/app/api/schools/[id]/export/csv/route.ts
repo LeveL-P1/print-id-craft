@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { csvCell } from "@/lib/spreadsheet-safety"
 
 export const maxDuration = 60; // Vercel function timeout config
 
@@ -35,7 +36,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
     const stream = new ReadableStream({
       async start(controller) {
-        const headers = "Serial Number,Full Name,Class,Roll No.,Date of Birth,Blood Group,Father Name,Mother Name,Phone,Address,Status,Submitted At";
+        const headers = "Serial Number,Full Name,Class,Roll No.,Date of Birth,Blood Group,Father Name,Mother Name,Phone,Address,Photo Path,Photo URL,Status,Submitted At";
         controller.enqueue(new TextEncoder().encode(headers + "\n"));
 
         let lastId: string | undefined = undefined;
@@ -69,9 +70,11 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
               fd.motherName || "",
               fd.phone || "",
               fd.address || "",
+              s.photoPath || "",
+              s.photoUrl || "",
               s.status,
               s.submittedAt ? new Date(s.submittedAt).toLocaleDateString() : "",
-            ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(",");
+            ].map(csvCell).join(",");
           }).join("\n");
 
           controller.enqueue(new TextEncoder().encode(rows + "\n"));

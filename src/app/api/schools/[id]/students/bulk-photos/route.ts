@@ -20,7 +20,7 @@ let bucketReady = false
 // in the same hot serverless instance share one DB read.
 // A 60s TTL is short enough that newly added students appear quickly while
 // keeping ~99% cache-hit rate during a single bulk-upload session.
-type StudentRow = { id: string; serialNumber: string; formData: any; photoUrl: string | null }
+type StudentRow = { id: string; serialNumber: string; formData: any; photoUrl: string | null; photoPath?: string | null }
 type LookupMaps = {
   byPhotoId: Map<string, StudentRow>
   bySerial: Map<string, StudentRow>
@@ -39,7 +39,7 @@ async function getLookupMaps(schoolId: string): Promise<LookupMaps> {
 
   const students = await prisma.student.findMany({
     where: { schoolId },
-    select: { id: true, serialNumber: true, formData: true, photoUrl: true },
+    select: { id: true, serialNumber: true, formData: true, photoUrl: true, photoPath: true },
   })
 
   const maps: LookupMaps = {
@@ -150,7 +150,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const errors: Array<{ filename: string; error: string }> = []
     // Collected DB writes — applied in a single transactional chunked sweep
     // at the end of the request so we don't pay per-file round-trip latency.
-    const pendingUpdates: Array<{ id: string; photoUrl: string }> = []
+    const pendingUpdates: Array<{ id: string; photoUrl: string; photoPath: string }> = []
 
     // Process all files in a single Promise.all — storage uploads are I/O
     // bound and Supabase handles concurrent puts well. DB writes are deferred.
@@ -287,7 +287,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
           const publicUrl = storagePublicUrl(BUCKET, filePath)
 
           // Queue DB write instead of running it inline — batched below.
-          pendingUpdates.push({ id: student.id, photoUrl: publicUrl })
+          pendingUpdates.push({ id: student.id, photoUrl: publicUrl, photoPath: filePath })
 
           const fd = student.formData as Record<string, string>
           matched.push({
@@ -313,7 +313,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
             chunk.map(u =>
               prisma.student.update({
                 where: { id: u.id },
-                data: { photoUrl: u.photoUrl },
+                data: { photoUrl: u.photoUrl, photoPath: u.photoPath },
               })
             )
           )
@@ -322,7 +322,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
           // bad row doesn't lose the whole chunk's progress.
           for (const u of chunk) {
             try {
-              await prisma.student.update({ where: { id: u.id }, data: { photoUrl: u.photoUrl } })
+              await prisma.student.update({ where: { id: u.id }, data: { photoUrl: u.photoUrl, photoPath: u.photoPath } })
             } catch (rowErr: any) {
               errors.push({ filename: u.id, error: rowErr?.message || "DB update failed" })
             }
@@ -335,7 +335,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       // matching keys (Photo ID / serial / name) haven't changed.
       for (const u of pendingUpdates) {
         const row = bySerial.get(u.id) // best-effort; not all rows indexed by id
-        if (row) row.photoUrl = u.photoUrl
+        if (row) {
+          row.photoUrl = u.photoUrl
+          row.photoPath = u.photoPath
+        }
       }
     }
 
