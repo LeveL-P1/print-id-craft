@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { buildExcelBuffer, columnWidthsFromRows } from "@/lib/excel"
+import * as XLSX from "xlsx"
 
 export const dynamic = "force-dynamic"
 
@@ -21,7 +21,7 @@ export async function GET(req: Request) {
     const url = new URL(req.url)
     const classId = url.searchParams.get("classId")
 
-    const where: Record<string, unknown> = { schoolId }
+    const where: any = { schoolId }
     if (classId) where.classId = classId
 
     const [students, school, classes] = await Promise.all([
@@ -40,29 +40,17 @@ export async function GET(req: Request) {
       }),
     ])
 
-    const wsData: unknown[][] = [
+    // Build worksheet data
+    const wsData: any[][] = [
       [school?.name || "School Export"],
       [`Export Date: ${new Date().toLocaleDateString()}`],
       [`Total Students: ${students.length}`],
       [],
-      [
-        "Serial Number",
-        "Full Name",
-        "Class",
-        "Roll No.",
-        "Date of Birth",
-        "Blood Group",
-        "Father Name",
-        "Mother Name",
-        "Phone",
-        "Address",
-        "Status",
-        "Submitted At",
-      ],
+      ["Serial Number", "Full Name", "Class", "Roll No.", "Date of Birth", "Blood Group", "Father Name", "Mother Name", "Phone", "Address", "Status", "Submitted At"],
     ]
 
     students.forEach((s) => {
-      const fd = s.formData as Record<string, string>
+      const fd = s.formData as any
       wsData.push([
         s.serialNumber,
         fd.fullName || "",
@@ -79,7 +67,24 @@ export async function GET(req: Request) {
       ])
     })
 
-    const summaryData: unknown[][] = [
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.aoa_to_sheet(wsData)
+
+    // Auto column widths
+    const headerRow = wsData[4]
+    const colWidths = headerRow.map((header: string, i: number) => {
+      const maxLen = Math.max(
+        header.length,
+        ...wsData.slice(5).map((row) => String(row[i] || "").length)
+      )
+      return { wch: Math.min(maxLen + 2, 40) }
+    })
+    ws["!cols"] = colWidths
+
+    XLSX.utils.book_append_sheet(wb, ws, "Students")
+
+    // Add class summary sheet
+    const summaryData: any[][] = [
       ["Class Summary"],
       [],
       ["Class Name", "Total Students", "Submitted", "Approved", "Flagged", "Pending", "Printed"],
@@ -98,21 +103,21 @@ export async function GET(req: Request) {
       ])
     })
 
-    const buffer = await buildExcelBuffer([
-      {
-        name: "Students",
-        rows: wsData,
-        columnWidths: columnWidthsFromRows(wsData, 4),
-      },
-      {
-        name: "Class Summary",
-        rows: summaryData,
-        columnWidths: columnWidthsFromRows(summaryData, 2),
-      },
-    ])
+    const summaryWs = XLSX.utils.aoa_to_sheet(summaryData)
+    const summaryColWidths = summaryData[2].map((header: string, i: number) => {
+      const maxLen = Math.max(
+        header.length,
+        ...summaryData.slice(3).map((row) => String(row[i] || "").length)
+      )
+      return { wch: Math.min(maxLen + 2, 30) }
+    })
+    summaryWs["!cols"] = summaryColWidths
+    XLSX.utils.book_append_sheet(wb, summaryWs, "Class Summary")
 
+    const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" })
     const dateStr = new Date().toISOString().slice(0, 10)
-    return new NextResponse(new Uint8Array(buffer), {
+
+    return new NextResponse(buffer, {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename="${school?.name || "students"}-${dateStr}.xlsx"`,

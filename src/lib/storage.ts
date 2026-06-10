@@ -7,7 +7,7 @@
  * All API routes should import from here instead of directly from supabase.ts
  */
 
-import { isOfflineMode, localUpload, localDelete, localPublicUrl, localList, localDownload } from "./local-storage"
+import { isOfflineMode, localUpload, localDelete, localPublicUrl, localList } from "./local-storage"
 
 // Re-export everything from supabase for backward compatibility
 export { supabase, supabaseClient, validateImageFile } from "./supabase"
@@ -46,20 +46,6 @@ export async function storageDelete(
   return { error }
 }
 
-export async function storageDownload(
-  bucket: string,
-  filePath: string
-): Promise<{ data: Buffer | null; error: any }> {
-  if (isOfflineMode()) {
-    return localDownload(bucket, filePath)
-  }
-
-  const { supabase } = await import("./supabase")
-  const { data, error } = await supabase.storage.from(bucket).download(filePath)
-  if (error || !data) return { data: null, error }
-  return { data: Buffer.from(await data.arrayBuffer()), error: null }
-}
-
 /**
  * Get a public URL for a stored file
  */
@@ -70,19 +56,6 @@ export function storagePublicUrl(bucket: string, filePath: string): string {
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
   return `${supabaseUrl}/storage/v1/object/public/${bucket}/${filePath}`
-}
-
-export async function storageSignedUrl(
-  bucket: string,
-  filePath: string,
-  expiresIn = 60 * 60
-): Promise<string> {
-  if (isOfflineMode()) {
-    return localPublicUrl(bucket, filePath)
-  }
-
-  const { getSignedUrl } = await import("./supabase")
-  return getSignedUrl(bucket, filePath, expiresIn)
 }
 
 /**

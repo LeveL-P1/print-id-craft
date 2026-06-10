@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { csvCell } from "@/lib/spreadsheet-safety"
 
 export const dynamic = "force-dynamic"
 
@@ -49,7 +48,7 @@ export async function GET(req: Request) {
         fd.bloodGroup || "",
         s.status,
         s.submittedAt ? new Date(s.submittedAt).toLocaleDateString() : "",
-      ].map(csvCell).join(",")
+      ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")
     })
 
     const csv = [headers, ...rows].join("\n")

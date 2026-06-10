@@ -2,8 +2,6 @@ import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { getNextStudentSerial } from "@/lib/student-serial"
-import { withStudentPhotoUrl } from "@/lib/student-photo-url"
 
 // Optimize: prefer longer-running function for connection reuse
 export const maxDuration = 10
@@ -46,7 +44,6 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           id: true,
           serialNumber: true,
           photoUrl: true,
-          photoPath: true,
           formData: true,
           status: true,
           flagNote: true,
@@ -64,7 +61,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
     const response = NextResponse.json({
       success: true,
-      data: students.map(withStudentPhotoUrl),
+      data: students,
       pagination: {
         page,
         limit,
@@ -97,19 +94,22 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     if (!school) return NextResponse.json({ error: "School not found" }, { status: 404 })
 
     const body = await req.json()
-    const { formData, classId, photoUrl, photoPath } = body
+    const { formData, classId, photoUrl } = body
     if (!classId) return NextResponse.json({ error: "classId is required" }, { status: 400 })
     if (!formData || typeof formData !== "object") return NextResponse.json({ error: "formData is required" }, { status: 400 })
 
-    const student = await prisma.$transaction(async (tx) => {
-      const serialNumber = await getNextStudentSerial(tx, schoolId, school.name)
-      const safePhotoPath = typeof photoPath === "string" && photoPath.startsWith(`students/${schoolId}/`)
-        ? photoPath
-        : ""
-      return tx.student.create({
-        data: { schoolId, classId, serialNumber, formData, photoUrl: photoUrl || "", photoPath: safePhotoPath, status: "SUBMITTED" },
-        include: { class: { select: { id: true, name: true } } },
-      })
+    const schoolCode = school.name.replace(/[^A-Za-z]/g, "").substring(0, 6).toUpperCase()
+    const lastStudent = await prisma.student.findFirst({ where: { schoolId }, orderBy: { serialNumber: "desc" } })
+    let nextNum = 1
+    if (lastStudent) {
+      const match = lastStudent.serialNumber.match(/-(\d+)$/)
+      nextNum = match ? parseInt(match[1]) + 1 : (await prisma.student.count({ where: { schoolId } })) + 1
+    }
+    const serialNumber = `${schoolCode}-${String(nextNum).padStart(4, "0")}`
+
+    const student = await prisma.student.create({
+      data: { schoolId, classId, serialNumber, formData, photoUrl: photoUrl || "", status: "SUBMITTED" },
+      include: { class: { select: { id: true, name: true } } },
     })
     return NextResponse.json({ success: true, data: student }, { status: 201 })
   } catch (error: any) {

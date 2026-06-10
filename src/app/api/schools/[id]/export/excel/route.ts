@@ -2,9 +2,9 @@ import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { buildExcelBuffer, columnWidthsFromRows } from "@/lib/excel"
+import * as XLSX from "xlsx"
 
-export const maxDuration = 60
+export const maxDuration = 60; // Vercel function timeout config
 
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
@@ -12,6 +12,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
+    // Manufacturer can export any school; Teacher can only export their own
     if (session.user?.role === "TEACHER") {
       if (session.user.schoolId !== params.id) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 })
@@ -24,7 +25,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     const classId = url.searchParams.get("classId")
     const status = url.searchParams.get("status")
 
-    const where: Record<string, unknown> = { schoolId: params.id }
+    const where: any = { schoolId: params.id }
     if (classId) where.classId = classId
     if (status) where.status = status
 
@@ -33,48 +34,34 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       select: { name: true },
     })
 
-    const wsData: unknown[][] = [
+    // Build worksheet data
+    const wsData: any[][] = [
       [school?.name || "School Export"],
       [`Export Date: ${new Date().toLocaleDateString()}`],
       [],
-      [
-        "Serial Number",
-        "Full Name",
-        "Class",
-        "Roll No.",
-        "Date of Birth",
-        "Blood Group",
-        "Father Name",
-        "Mother Name",
-        "Phone",
-        "Address",
-        "Photo Path",
-        "Photo URL",
-        "Status",
-        "Submitted At",
-      ],
+      ["Serial Number", "Full Name", "Class", "Roll No.", "Date of Birth", "Blood Group", "Father Name", "Mother Name", "Phone", "Address", "Status", "Submitted At"],
     ]
 
-    let cursor: string | undefined
-    let hasMore = true
+    let cursor: string | undefined = undefined;
+    let hasMore = true;
 
     while (hasMore) {
-      const students = await prisma.student.findMany({
+      const students: any[] = await prisma.student.findMany({
         where,
         include: { class: { select: { name: true } } },
         orderBy: { id: "asc" },
         take: 500,
         skip: cursor ? 1 : 0,
         ...(cursor ? { cursor: { id: cursor } } : {}),
-      })
+      });
 
       if (students.length === 0) {
-        hasMore = false
-        break
+        hasMore = false;
+        break;
       }
 
       students.forEach((s) => {
-        const fd = s.formData as Record<string, string>
+        const fd = s.formData as any
         wsData.push([
           s.serialNumber,
           fd.fullName || "",
@@ -86,25 +73,34 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           fd.motherName || "",
           fd.phone || "",
           fd.address || "",
-          s.photoPath || "",
-          s.photoUrl || "",
           s.status,
           s.submittedAt ? new Date(s.submittedAt).toLocaleDateString() : "",
         ])
       })
 
-      cursor = students[students.length - 1].id
+      cursor = students[students.length - 1].id;
     }
 
-    const buffer = await buildExcelBuffer([
-      {
-        name: "Students",
-        rows: wsData,
-        columnWidths: columnWidthsFromRows(wsData, 3),
-      },
-    ])
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.aoa_to_sheet(wsData)
 
-    return new NextResponse(new Uint8Array(buffer), {
+    // Auto column widths
+    const colWidths = wsData[3].map((header: string, i: number) => {
+      const maxLen = Math.max(
+        header.length,
+        ...wsData.slice(4).map((row) => String(row[i] || "").length)
+      )
+      return { wch: Math.min(maxLen + 2, 40) }
+    })
+    ws["!cols"] = colWidths
+
+    // Bold headers (row 4)
+    // XLSX doesn't support styling in community edition, but column widths work
+
+    XLSX.utils.book_append_sheet(wb, ws, "Students")
+    const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" })
+
+    return new NextResponse(buffer, {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename="${school?.name || "students"}-export.xlsx"`,

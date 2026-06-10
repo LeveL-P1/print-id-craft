@@ -379,6 +379,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
           tip: target
             ? `For fastest results, take the photo against a plain wall in the school's colour. Otherwise our AI will replace it.`
             : `Use a plain, solid-coloured wall as background.`,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ...(({ _bgQualityGood: bgQualityGood } as any)),
         })
 
@@ -1201,6 +1202,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
       // be BOTH plain (high uniformity) AND a colour match for the school's
       // template choice. analyzeBackgroundUniformity attaches the combined
       // flag via _bgQualityGood; fall back to bgCheck.passed for older paths.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const bgGood = (bgCheck as any)?._bgQualityGood ?? !!bgCheck?.passed
       onPhotoAccepted(adjustedFile, previewUrl, bgGood)
     }

@@ -12,14 +12,14 @@ import { useState, useEffect, useMemo } from 'react';
 // Surface: Soft Beige/Off-White (#FDFCF9, #F5F5F0)
 // Text: Charcoal (#1F2937, #111827)
 
-const NAV_LINKS = [
+export const NAV_LINKS = [
   { label: 'Schools', href: '#schools' },
   { label: 'Corporate', href: '#corporate' },
   { label: 'Products', href: '#products' },
   { label: 'How it Works', href: '#process' },
 ];
 
-function Header() {
+export function Header() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -428,7 +428,7 @@ function CTA() {
   );
 }
 
-function Footer() {
+export function Footer() {
   const currentYear = useMemo(() => new Date().getFullYear(), []);
 
   return (

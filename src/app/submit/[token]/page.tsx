@@ -428,7 +428,6 @@ export default function SubmitPage() {
     setUploadProgress(0)
     try {
       let photoUrl = ""
-      let photoPath = ""
       if (croppedPhoto) {
         try {
           setUploadProgress(10)
@@ -437,14 +436,12 @@ export default function SubmitPage() {
           const fd = new FormData()
           fd.append("file", new File([blob], `photo-${Date.now()}.jpg`, { type: "image/jpeg" }))
           fd.append("folder", `students/${config.schoolId}`)
-          fd.append("submitToken", token)
           setUploadProgress(30)
           const uploadRes = await fetch("/api/upload", { method: "POST", body: fd })
           const uploadData = await uploadRes.json()
           setUploadProgress(70)
           if (uploadRes.ok && uploadData.success) {
             photoUrl = uploadData.url
-            photoPath = uploadData.path || ""
           } else {
             console.error("Photo upload error:", uploadData.error)
           }
@@ -460,7 +457,7 @@ export default function SubmitPage() {
       const res = await fetch(`/api/submit/${token}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ formData, photoUrl, photoPath }),
+        body: JSON.stringify({ formData, photoUrl }),
       })
       setUploadProgress(95)
       const data = await res.json()

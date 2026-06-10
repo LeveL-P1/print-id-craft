@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
-import { prisma } from "@/lib/prisma"
+import { prisma, batchExecute } from "@/lib/prisma"
+import { storageUpload, storagePublicUrl } from "@/lib/storage"
+import * as XLSX from "xlsx"
+import QRCode from "qrcode"
 import { randomUUID } from "crypto"
-import { reportError } from "@/lib/observability"
-import { enqueueJob, kickJobWorker } from "@/lib/jobs/enqueue"
-import { MAX_IMPORT_ROWS, parseCsvRows, validateImportFile } from "@/lib/spreadsheet-safety"
-import { parseExcelBuffer } from "@/lib/excel"
 
 export const maxDuration = 60; // Vercel function timeout config
 
@@ -36,34 +35,36 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       return NextResponse.json({ error: "No file uploaded" }, { status: 400 })
     }
 
-    const fileValidation = validateImportFile(file)
-    if (!fileValidation.ok) {
-      return NextResponse.json({ error: fileValidation.error }, { status: 400 })
+    // Check file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      return NextResponse.json({ error: "File too large. Maximum 10MB." }, { status: 400 })
     }
 
     // Parse the Excel/CSV file
     const arrayBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
     
-    let rawRows: Record<string, string>[]
+    let workbook: XLSX.WorkBook
     try {
-      if (fileValidation.extension === "csv") {
-        rawRows = parseCsvRows(new TextDecoder("utf-8").decode(buffer))
-      } else {
-        rawRows = await parseExcelBuffer(buffer)
-      }
-    } catch (error: any) {
-      if (error?.message?.startsWith("Maximum ")) {
-        return NextResponse.json({ error: error.message }, { status: 400 })
-      }
-      return NextResponse.json({ error: "Invalid file format. Please upload an Excel (.xlsx) or CSV file." }, { status: 400 })
+      workbook = XLSX.read(buffer, { type: "buffer" })
+    } catch {
+      return NextResponse.json({ error: "Invalid file format. Please upload an Excel (.xlsx/.xls) or CSV file." }, { status: 400 })
     }
+
+    const sheetName = workbook.SheetNames[0]
+    if (!sheetName) {
+      return NextResponse.json({ error: "Empty file — no sheets found." }, { status: 400 })
+    }
+
+    const sheet = workbook.Sheets[sheetName]
+    const rawRows: Record<string, string>[] = XLSX.utils.sheet_to_json(sheet, { defval: "" })
+
     if (rawRows.length === 0) {
       return NextResponse.json({ error: "No data rows found in the spreadsheet." }, { status: 400 })
     }
 
-    if (rawRows.length > MAX_IMPORT_ROWS) {
-      return NextResponse.json({ error: `Maximum ${MAX_IMPORT_ROWS} students per import. Your file has ${rawRows.length} rows.` }, { status: 400 })
+    if (rawRows.length > 5000) {
+      return NextResponse.json({ error: "Maximum 5000 students per import. Your file has " + rawRows.length + " rows." }, { status: 400 })
     }
 
     // Field config from template
@@ -455,13 +456,6 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       }
     }
 
-    if (createdStudents.length === 0 && importErrors.length > 0) {
-      return NextResponse.json(
-        { error: "Internal server error", errors: importErrors.slice(0, 20) },
-        { status: 500 }
-      )
-    }
-
     // AUTO-SYNC: Update template fieldConfig to match Excel columns
     // This ensures the template fields reflect exactly what was imported from the Excel sheet
     if (createdStudents.length > 0 && excelHeaders.length > 0) {
@@ -508,21 +502,21 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       }
     }
 
-    let qrJobId: string | undefined
+    // Batch QR generation (concurrency of 10 to avoid Supabase rate limits/socket exhaustion)
     if (createdStudents.length > 0) {
-      const job = await enqueueJob({
-        type: "GENERATE_QR",
-        schoolId,
-        createdById: session.user.id,
-        payload: {
-          students: createdStudents.map((s) => ({
-            id: s.id,
-            serialNumber: s.serialNumber,
-          })),
-        },
-      })
-      qrJobId = job.id
-      await kickJobWorker(new URL(req.url).origin)
+      // run in background without awaiting, but batched internally
+      const qrsToGenerate = createdStudents.map(s => ({
+        id: s.id, serialNumber: s.serialNumber
+      }))
+      
+      const generateAllQrs = async () => {
+        await batchExecute(
+          qrsToGenerate,
+          (s) => generateQR(s.id, schoolId, s.serialNumber),
+          10
+        )
+      }
+      generateAllQrs().catch(console.error)
     }
 
     return NextResponse.json({
@@ -534,16 +528,29 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         students: createdStudents.slice(0, 50),
         errors: importErrors.slice(0, 20),
         classesCreated: classColumnHeader ? Array.from(new Set(validRows.map(r => r.className))).length : 0,
-        qrJobId,
       },
     })
   } catch (error: any) {
     console.error("Bulk import error:", error)
-    await reportError(error, {
-      type: "IMPORT_FAILED",
-      schoolId: params.id,
-      message: "Bulk student import failed",
-    })
     return NextResponse.json({ error: error?.message || "Internal Server Error" }, { status: 500 })
+  }
+}
+
+async function generateQR(studentId: string, schoolId: string, serialNumber: string) {
+  try {
+    const qrContent = JSON.stringify({ serial: serialNumber, school: schoolId, student: studentId })
+    const qrBuffer = await QRCode.toBuffer(qrContent, { width: 300, margin: 2 })
+    const qrPath = `students/${schoolId}/qr/${studentId}.png`
+    await storageUpload("student-photos", qrPath, qrBuffer, {
+      contentType: "image/png",
+      upsert: true,
+    })
+    const qrUrl = storagePublicUrl("student-photos", qrPath)
+    await prisma.student.update({
+      where: { id: studentId },
+      data: { qrCodeUrl: qrUrl },
+    })
+  } catch (err) {
+    console.error("QR generation error:", err)
   }
 }

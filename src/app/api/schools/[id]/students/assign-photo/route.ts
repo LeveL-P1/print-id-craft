@@ -58,7 +58,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     // Update student record
     await prisma.student.update({
       where: { id: student.id },
-      data: { photoUrl: publicUrl, photoPath: filePath },
+      data: { photoUrl: publicUrl },
     })
 
     const fd = student.formData as Record<string, string>
@@ -70,7 +70,6 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         studentName: fd?.fullName || fd?.["Full Name"] || fd?.["Student Name"] || "Unknown",
         serialNumber: student.serialNumber,
         photoUrl: publicUrl,
-        photoPath: filePath,
       },
     })
   } catch (error: any) {

@@ -12,31 +12,11 @@ type DashboardData = {
   recentSchools: any[]
 }
 
-type OpsEvent = {
-  id: string
-  type: string
-  severity: string
-  message: string
-  createdAt: string
-}
-
-type OpsJob = {
-  id: string
-  type: string
-  status: string
-  error?: string | null
-  createdAt: string
-  updatedAt: string
-}
-
 export default function ManufacturerDashboard() {
   const router = useRouter()
   const [data, setData] = useState<DashboardData | null>(null)
   const [statsLoaded, setStatsLoaded] = useState(false)
   const [schoolsLoaded, setSchoolsLoaded] = useState(false)
-  const [health, setHealth] = useState<{ status: string; db: string; storage: string } | null>(null)
-  const [events, setEvents] = useState<OpsEvent[]>([])
-  const [jobs, setJobs] = useState<OpsJob[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -97,23 +77,6 @@ export default function ManufacturerDashboard() {
         setSchoolsLoaded(true)
       })
       .catch(() => setSchoolsLoaded(true))
-
-    return () => { cancelled = true }
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-
-    Promise.all([
-      fetch("/api/health", { cache: "no-store" }).then((res) => res.json()).catch(() => null),
-      fetch("/api/admin/events?limit=5", { cache: "no-store" }).then((res) => res.ok ? res.json() : null).catch(() => null),
-      fetch("/api/admin/jobs?limit=5", { cache: "no-store" }).then((res) => res.ok ? res.json() : null).catch(() => null),
-    ]).then(([healthJson, eventsJson, jobsJson]) => {
-      if (cancelled) return
-      if (healthJson) setHealth({ status: healthJson.status, db: healthJson.db, storage: healthJson.storage })
-      if (eventsJson?.success) setEvents(eventsJson.data || [])
-      if (jobsJson?.success) setJobs(jobsJson.data || [])
-    })
 
     return () => { cancelled = true }
   }, [])
@@ -193,12 +156,6 @@ export default function ManufacturerDashboard() {
     },
   ]
 
-  const healthColor = health?.status === "ok" ? "#16a34a" : health?.status === "degraded" ? "#d97706" : "#dc2626"
-  const formatTime = (value: string) => {
-    const time = new Date(value).getTime()
-    return Number.isFinite(time) ? new Date(value).toLocaleString() : "-"
-  }
-
   return (
     <>
       <div className="page-header dashboard-header">
@@ -239,74 +196,6 @@ export default function ManufacturerDashboard() {
               </div>
             </div>
           ))}
-        </div>
-
-        {/* Operations */}
-        <div className="dashboard-section">
-          <div className="dashboard-section-header">
-            <h2>Operations</h2>
-            <span className="status-badge" style={{ background: `${healthColor}18`, color: healthColor }}>
-              {health?.status || "checking"}
-            </span>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
-            <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", textTransform: "uppercase", marginBottom: 12 }}>Readiness</div>
-              <div style={{ display: "grid", gap: 10 }}>
-                {[
-                  ["Database", health?.db || "checking"],
-                  ["Storage", health?.storage || "checking"],
-                ].map(([label, value]) => (
-                  <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-                    <span style={{ fontSize: 13, color: "#475569" }}>{label}</span>
-                    <span className="status-badge" style={{ background: value === "connected" ? "#dcfce7" : "#fee2e2", color: value === "connected" ? "#16a34a" : "#dc2626" }}>
-                      {value}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", textTransform: "uppercase", marginBottom: 12 }}>Recent Events</div>
-              {events.length > 0 ? (
-                <div style={{ display: "grid", gap: 10 }}>
-                  {events.map((event) => (
-                    <div key={event.id} style={{ borderBottom: "1px solid #f1f5f9", paddingBottom: 8 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{event.type}</span>
-                        <span style={{ fontSize: 11, color: event.severity === "ERROR" ? "#dc2626" : "#d97706", fontWeight: 700 }}>{event.severity}</span>
-                      </div>
-                      <div style={{ fontSize: 12, color: "#64748b", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{event.message}</div>
-                      <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>{formatTime(event.createdAt)}</div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ fontSize: 13, color: "#16a34a" }}>No recent backend failure events.</div>
-              )}
-            </div>
-
-            <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", textTransform: "uppercase", marginBottom: 12 }}>Recent Jobs</div>
-              {jobs.length > 0 ? (
-                <div style={{ display: "grid", gap: 10 }}>
-                  {jobs.map((job) => (
-                    <div key={job.id} style={{ borderBottom: "1px solid #f1f5f9", paddingBottom: 8 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{job.type}</span>
-                        <span style={{ fontSize: 11, color: job.status === "FAILED" ? "#dc2626" : job.status === "COMPLETED" ? "#16a34a" : "#2563eb", fontWeight: 700 }}>{job.status}</span>
-                      </div>
-                      <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>{formatTime(job.updatedAt || job.createdAt)}</div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ fontSize: 13, color: "#64748b" }}>No jobs recorded yet.</div>
-              )}
-            </div>
-          </div>
         </div>
 
         {/* Recent Schools */}

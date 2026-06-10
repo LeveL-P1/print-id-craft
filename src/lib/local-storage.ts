@@ -85,21 +85,6 @@ export async function localDelete(
   }
 }
 
-export async function localDownload(
-  bucket: string,
-  filePath: string
-): Promise<{ data: Buffer | null; error: any }> {
-  try {
-    const fullPath = path.join(UPLOAD_ROOT, bucket, filePath)
-    if (!fs.existsSync(fullPath)) {
-      return { data: null, error: { message: "File not found" } }
-    }
-    return { data: fs.readFileSync(fullPath), error: null }
-  } catch (e: any) {
-    return { data: null, error: { message: e.message } }
-  }
-}
-
 /**
  * Get the public URL for a file in local storage.
  * Returns a path relative to the app root that Next.js can serve statically.
