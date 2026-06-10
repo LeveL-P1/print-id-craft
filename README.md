@@ -23,7 +23,16 @@ SENTRY_DSN=
 NEXT_PUBLIC_SENTRY_DSN=
 ```
 
-`CRON_SECRET` is required for the Vercel cleanup cron. Vercel sends it as `Authorization: Bearer <CRON_SECRET>`.
+`CRON_SECRET` secures manual maintenance and job-worker calls (`Authorization: Bearer ...`). Optional on Vercel Hobby; required if you enable crons on Pro (see `vercel.pro.example.json`).
+
+## Vercel Hobby (free) deploy
+
+`vercel.json` intentionally has **no `crons` block** — scheduled crons and 300s function duration require **Vercel Pro**.
+
+On Hobby:
+
+- Background jobs still run when you enqueue work (archive export, QR after import, print batch) via an immediate worker kick.
+- Run maintenance manually (see Maintenance below) or upgrade to Pro and copy settings from `vercel.pro.example.json`.
 
 ## Commands
 
@@ -96,11 +105,13 @@ Archive guardrails:
 
 ## Maintenance
 
-Vercel cron calls:
+On **Vercel Pro**, you can add the cron from `vercel.pro.example.json` to call:
 
 ```text
 GET /api/maintenance/cleanup
 ```
+
+On **Vercel Hobby**, call the same endpoint manually (no scheduled cron):
 
 This deletes expired rate-limit rows. It requires `CRON_SECRET` in production.
 It also prunes old `SystemEvent` and completed/failed `Job` records. Retention
@@ -136,7 +147,7 @@ Manufacturer session required.
 The manufacturer dashboard also includes a compact Operations panel showing
 readiness, recent backend events, and recent jobs.
 
-`Job` records track background work: archive exports, QR generation after import, and print batch PDF generation. A worker runs via Vercel cron (`/api/jobs/process` every 2 minutes) and can be kicked immediately after enqueue.
+`Job` records track background work: archive exports, QR generation after import, and print batch PDF generation. On Hobby, the worker runs when jobs are enqueued (not on a schedule). On Pro, add the job cron from `vercel.pro.example.json`.
 
 Poll job status: `GET /api/jobs/{jobId}`. Download completed archive: `GET /api/jobs/{jobId}/download`.
 
