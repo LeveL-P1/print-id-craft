@@ -4,6 +4,7 @@ import { useState, Suspense } from "react"
 import { signIn, signOut, getSession } from "next-auth/react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
+import Image from "next/image"
 
 function LoginForm() {
   const router = useRouter()
@@ -73,7 +74,9 @@ function LoginForm() {
       <div className="login-left" style={{ animationDelay: '0.1s' }}>
         <div className="login-left-content">
           <div className="login-logo">
-            <div className="login-logo-icon">W</div>
+            <div className="login-logo-icon" style={{ position: "relative" as const, overflow: "hidden", background: "white", border: "1px solid rgba(255,255,255,0.15)" }}>
+              <Image src="/wisemelon-logo.png" alt="WiseMelon" fill sizes="44px" style={{ objectFit: "cover", padding: "3px" }} />
+            </div>
             <span className="login-logo-text">WiseMelon</span>
           </div>
 

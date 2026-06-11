@@ -3,6 +3,7 @@ import { usePathname } from "next/navigation"
 import { useSession, signOut } from "next-auth/react"
 import Link from "next/link"
 import { ReactNode, useState } from "react"
+import Image from "next/image"
 
 const navItems = [
   {
@@ -43,7 +44,9 @@ export default function ManufacturerLayout({ children }: { children: ReactNode }
       <aside className={`app-sidebar ${mobileOpen ? 'sidebar-open' : ''}`}>
         <div className="sidebar-header">
           <div className="sidebar-brand">
-            <div className="sidebar-brand-icon">W</div>
+            <div className="sidebar-brand-icon" style={{ position: "relative" as const, overflow: "hidden", background: "white", border: "1px solid var(--gray-200)" }}>
+              <Image src="/wisemelon-logo.png" alt="WiseMelon" fill sizes="36px" style={{ objectFit: "cover", padding: "2px" }} />
+            </div>
             <span className="sidebar-brand-text">WiseMelon</span>
           </div>
         </div>
