@@ -16,9 +16,42 @@ const poppins = Poppins({
 })
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://wisemelon.vercel.app"),
   title: "WiseMelon — Multi-School ID Card Management & Print Portal",
   description:
     "Professional ID card printing SaaS for manufacturers. Manage multiple schools, collect student data via smart links, design ID card templates, and generate print-ready PDFs with guaranteed front-back matching.",
+  icons: {
+    icon: [
+      { url: "/favicon.ico" },
+      { url: "/icon.png", type: "image/png" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: "/apple-touch-icon.png",
+  },
+  openGraph: {
+    title: "WiseMelon — Multi-School ID Card Management & Print Portal",
+    description:
+      "Professional ID card printing SaaS for manufacturers. Manage multiple schools, collect student data via smart links, design ID card templates, and generate print-ready PDFs with guaranteed front-back matching.",
+    url: "https://wisemelon.vercel.app",
+    siteName: "WiseMelon",
+    images: [
+      {
+        url: "/opengraph-image.png",
+        width: 1000,
+        height: 1000,
+        alt: "WiseMelon Ventures Logo",
+      },
+    ],
+    locale: "en_US",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "WiseMelon — Multi-School ID Card Management & Print Portal",
+    description:
+      "Professional ID card printing SaaS for manufacturers. Manage multiple schools, collect student data via smart links, design ID card templates, and generate print-ready PDFs with guaranteed front-back matching.",
+    images: ["/opengraph-image.png"],
+  },
 }
 
 export const viewport = {

@@ -39,7 +39,7 @@ function Header() {
       <div className="mx-auto flex max-w-7xl items-center justify-between px-5 md:px-8">
         <Link href="/" className="group flex items-center gap-3">
           <div className="relative h-11 w-11 overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-[#0B1F3A]/10 transition-transform group-hover:scale-105">
-            <Image src="/wisemelon-logo-original.png" alt="WiseMelon Ventures Logo" fill sizes="44px" className="object-cover p-1" />
+            <Image src="/wisemelon-logo.png" alt="WiseMelon Ventures Logo" fill sizes="44px" className="object-cover p-1" />
           </div>
           <div className="flex flex-col">
             <span className="font-serif text-lg font-bold leading-tight text-[#0B1F3A]">WiseMelon</span>
@@ -439,7 +439,7 @@ function Footer() {
           <div className="lg:col-span-4">
             <Link href="/" className="flex items-center gap-3 mb-6">
               <div className="relative h-10 w-10 overflow-hidden rounded-lg bg-white ring-1 ring-gray-200">
-                <Image src="/wisemelon-logo-original.png" alt="Logo" fill className="object-cover p-1" />
+                <Image src="/wisemelon-logo.png" alt="Logo" fill className="object-cover p-1" />
               </div>
               <span className="font-serif text-xl font-bold text-[#0B1F3A]">WiseMelon</span>
             </Link>
