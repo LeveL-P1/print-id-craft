@@ -1209,16 +1209,19 @@ export default function JpgTemplateMapper({
           }}
         >
           {/* ── Professional Canvas Toolbar ── */}
-          <div style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "8px 12px",
-            background: "linear-gradient(135deg, #1e293b, #0f172a)",
-            borderBottom: "1px solid #334155",
-            flexWrap: "wrap",
-            fontSize: 11,
-          }}>
+          <div
+            className="mapper-toolbar"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "8px 12px",
+              background: "linear-gradient(135deg, #1e293b, #0f172a)",
+              borderBottom: "1px solid #334155",
+              flexWrap: "wrap",
+              fontSize: 11,
+            }}
+          >
             {/* Undo / Redo */}
             <div style={{ display: "flex", gap: 2, marginRight: 6 }}>
               <button

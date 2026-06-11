@@ -1846,3 +1846,12 @@ html {
     }
   }
 }
+
+/* --- Responsive template card padding on mobile --- */
+@media (max-width: 768px) {
+  .responsive-template-card {
+    padding: 14px !important;
+    border-radius: 12px !important;
+  }
+}
+

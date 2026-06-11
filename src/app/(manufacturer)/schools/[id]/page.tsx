@@ -75,6 +75,17 @@ type SchoolTemplateSummary = {
   templateImageUrl: string | null
   hasBackSide: boolean
   _count?: { classes: number }
+  fieldMappings?: any
+  fieldConfig?: any
+  photoBgColor?: string
+  cardWidthMm?: number
+  cardHeightMm?: number
+  printDpi?: number
+  orientation?: "PORTRAIT" | "LANDSCAPE"
+  backTemplateImageUrl?: string | null
+  backFieldMappings?: any
+  cardSizeLocked?: boolean
+  printConfig?: any
 }
 
 type StudentData = {
@@ -3149,90 +3160,177 @@ export default function SchoolDetailPage() {
 
         {/* TEMPLATE TAB */}
         {tab === "template" && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {/* JPG Template Mapper — Main Feature */}
-            <div style={{ background: 'white', borderRadius: 16, border: '1px solid #e2e8f0', padding: 24 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-                <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>🖼️</div>
-                <div>
-                  <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>JPG Template Mapper</h3>
-                  <p style={{ fontSize: 13, color: '#94a3b8' }}>Upload the school's pre-designed ID card image and map student fields onto it</p>
-                </div>
-              </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 30 }}>
+            {schoolTemplates.length > 0 ? (
+              schoolTemplates.map((template, idx) => (
+                <div key={template.id} className="responsive-template-card" style={{ background: 'white', borderRadius: 16, border: '1px solid #e2e8f0', padding: 24 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+                    <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>🖼️</div>
+                    <div>
+                      <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>
+                        {template.name || `Template ${idx + 1}`}
+                      </h3>
+                      <p style={{ fontSize: 13, color: '#94a3b8' }}>Upload the school's pre-designed ID card image and map student fields onto it</p>
+                    </div>
+                  </div>
 
-              <JpgTemplateMapper
-                schoolId={schoolId}
-                templateImageUrl={templateData?.templateImageUrl || null}
-                fieldMappings={(templateData?.fieldMappings as any) || []}
-                fieldConfig={(templateData?.fieldConfig as any[]) || []}
-                initialPhotoBgColor={(templateData as any)?.photoBgColor || "#FFFFFF"}
-                initialCardSettings={templateData ? {
-                  cardSizePreset: "custom",
-                  cardWidth: (templateData as any).cardWidthMm || 85.6,
-                  cardHeight: (templateData as any).cardHeightMm || 53.98,
-                  cardOrientation: (templateData as any).orientation === "LANDSCAPE" ? "landscape" : "portrait",
-                  printSides: (templateData as any).hasBackSide ? "both" : "front",
-                  cardDpi: (templateData as any).printDpi || 300,
-                  bleedMargin: 1,
-                  backImageUrl: (templateData as any).backTemplateImageUrl || null,
-                  backMappings: (templateData as any).backFieldMappings || [],
-                  cardSizeLocked: (templateData as any).cardSizeLocked || false,
-                  fixedBranch: (templateData.printConfig as any)?.fixedBranch || "",
-                } : undefined}
-                previewStudent={students[0] ? {
-                  formData: students[0].formData as Record<string, string>,
-                  photoUrl: students[0].photoUrl || null,
-                } : null}
-                onSave={async (templateImageUrl, fieldMappings, photoBgColor, cardSettings) => {
-                  try {
-                    const res = await fetch(`/api/schools/${schoolId}/template`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        templateImageUrl,
-                        fieldMappings,
-                        photoBgColor,
-                        ...(cardSettings ? {
-                          cardWidthMm: cardSettings.cardWidth,
-                          cardHeightMm: cardSettings.cardHeight,
-                          printDpi: cardSettings.cardDpi,
-                          orientation: cardSettings.cardOrientation === "landscape" ? "LANDSCAPE" : "PORTRAIT",
-                          hasBackSide: cardSettings.printSides === "both",
-                          backTemplateImageUrl: cardSettings.backImageUrl,
-                          backFieldMappings: cardSettings.backMappings,
-                          cardSizeLocked: cardSettings.cardSizeLocked,
-                          printConfig: {
-                            fixedBranch: cardSettings.fixedBranch || "",
-                          },
-                        } : {}),
-                      }),
-                    })
-                    const data = await res.json()
-                    if (data.success) {
-                      toast.success('Template saved successfully!')
-                      fetchTemplate()
-                    } else {
+                  <JpgTemplateMapper
+                    schoolId={schoolId}
+                    templateImageUrl={template.templateImageUrl || null}
+                    fieldMappings={(template.fieldMappings as any) || []}
+                    fieldConfig={(template.fieldConfig as any[]) || []}
+                    initialPhotoBgColor={template.photoBgColor || "#FFFFFF"}
+                    initialCardSettings={template ? {
+                      cardSizePreset: "custom",
+                      cardWidth: template.cardWidthMm || 85.6,
+                      cardHeight: template.cardHeightMm || 53.98,
+                      cardOrientation: template.orientation === "LANDSCAPE" ? "landscape" : "portrait",
+                      printSides: template.hasBackSide ? "both" : "front",
+                      cardDpi: template.printDpi || 300,
+                      bleedMargin: 1,
+                      backImageUrl: template.backTemplateImageUrl || null,
+                      backMappings: template.backFieldMappings || [],
+                      cardSizeLocked: template.cardSizeLocked || false,
+                      fixedBranch: (template.printConfig as any)?.fixedBranch || "",
+                    } : undefined}
+                    previewStudent={students[0] ? {
+                      formData: students[0].formData as Record<string, string>,
+                      photoUrl: students[0].photoUrl || null,
+                    } : null}
+                    onSave={async (templateImageUrl, fieldMappings, photoBgColor, cardSettings) => {
+                      try {
+                        const res = await fetch(`/api/schools/${schoolId}/templates/${template.id}`, {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            name: template.name,
+                            templateImageUrl,
+                            fieldMappings,
+                            photoBgColor,
+                            ...(cardSettings ? {
+                              cardWidthMm: cardSettings.cardWidth,
+                              cardHeightMm: cardSettings.cardHeight,
+                              printDpi: cardSettings.cardDpi,
+                              orientation: cardSettings.cardOrientation === "landscape" ? "LANDSCAPE" : "PORTRAIT",
+                              hasBackSide: cardSettings.printSides === "both",
+                              backTemplateImageUrl: cardSettings.backImageUrl,
+                              backFieldMappings: cardSettings.backMappings,
+                              cardSizeLocked: cardSettings.cardSizeLocked,
+                              printConfig: {
+                                fixedBranch: cardSettings.fixedBranch || "",
+                              },
+                            } : {}),
+                          }),
+                        })
+                        const data = await res.json()
+                        if (data.success) {
+                          toast.success(`${template.name || 'Template'} saved successfully!`)
+                          fetchTemplate()
+                          fetchSchoolTemplates()
+                        } else {
+                          toast.error(`Failed to save ${template.name || 'template'}`)
+                        }
+                      } catch (err) {
+                        toast.error(`Failed to save ${template.name || 'template'}`)
+                      }
+                    }}
+                    onUploadImage={async (file) => {
+                      const fd = new FormData()
+                      fd.append('file', file)
+                      fd.append('folder', `templates`)
+                      const res = await fetch('/api/upload', { method: 'POST', body: fd })
+                      const data = await res.json()
+                      if (!res.ok || !data.success) {
+                        throw new Error(data.error || data.detail || 'Upload failed')
+                      }
+                      return data.url
+                    }}
+                  />
+                </div>
+              ))
+            ) : (
+              <div className="responsive-template-card" style={{ background: 'white', borderRadius: 16, border: '1px solid #e2e8f0', padding: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+                  <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>🖼️</div>
+                  <div>
+                    <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>JPG Template Mapper</h3>
+                    <p style={{ fontSize: 13, color: '#94a3b8' }}>Upload the school's pre-designed ID card image and map student fields onto it</p>
+                  </div>
+                </div>
+
+                <JpgTemplateMapper
+                  schoolId={schoolId}
+                  templateImageUrl={templateData?.templateImageUrl || null}
+                  fieldMappings={(templateData?.fieldMappings as any) || []}
+                  fieldConfig={(templateData?.fieldConfig as any[]) || []}
+                  initialPhotoBgColor={(templateData as any)?.photoBgColor || "#FFFFFF"}
+                  initialCardSettings={templateData ? {
+                    cardSizePreset: "custom",
+                    cardWidth: (templateData as any).cardWidthMm || 85.6,
+                    cardHeight: (templateData as any).cardHeightMm || 53.98,
+                    cardOrientation: (templateData as any).orientation === "LANDSCAPE" ? "landscape" : "portrait",
+                    printSides: (templateData as any).hasBackSide ? "both" : "front",
+                    cardDpi: (templateData as any).printDpi || 300,
+                    bleedMargin: 1,
+                    backImageUrl: (templateData as any).backTemplateImageUrl || null,
+                    backMappings: (templateData as any).backFieldMappings || [],
+                    cardSizeLocked: (templateData as any).cardSizeLocked || false,
+                    fixedBranch: (templateData.printConfig as any)?.fixedBranch || "",
+                  } : undefined}
+                  previewStudent={students[0] ? {
+                    formData: students[0].formData as Record<string, string>,
+                    photoUrl: students[0].photoUrl || null,
+                  } : null}
+                  onSave={async (templateImageUrl, fieldMappings, photoBgColor, cardSettings) => {
+                    try {
+                      const res = await fetch(`/api/schools/${schoolId}/template`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          templateImageUrl,
+                          fieldMappings,
+                          photoBgColor,
+                          ...(cardSettings ? {
+                            cardWidthMm: cardSettings.cardWidth,
+                            cardHeightMm: cardSettings.cardHeight,
+                            printDpi: cardSettings.cardDpi,
+                            orientation: cardSettings.cardOrientation === "landscape" ? "LANDSCAPE" : "PORTRAIT",
+                            hasBackSide: cardSettings.printSides === "both",
+                            backTemplateImageUrl: cardSettings.backImageUrl,
+                            backFieldMappings: cardSettings.backMappings,
+                            cardSizeLocked: cardSettings.cardSizeLocked,
+                            printConfig: {
+                              fixedBranch: cardSettings.fixedBranch || "",
+                            },
+                          } : {}),
+                        }),
+                      })
+                      const data = await res.json()
+                      if (data.success) {
+                        toast.success('Template saved successfully!')
+                        fetchTemplate()
+                        fetchSchoolTemplates()
+                      } else {
+                        toast.error('Failed to save template')
+                      }
+                    } catch (err) {
                       toast.error('Failed to save template')
                     }
-                  } catch (err) {
-                    toast.error('Failed to save template')
-                  }
-                }}
-                onUploadImage={async (file) => {
-                  const fd = new FormData()
-                  fd.append('file', file)
-                  fd.append('folder', `templates`)
-                  const res = await fetch('/api/upload', { method: 'POST', body: fd })
-                  const data = await res.json()
-                  if (!res.ok || !data.success) {
-                    throw new Error(data.error || data.detail || 'Upload failed')
-                  }
-                  return data.url
-                }}
-              />
-            </div>
-
-
+                  }}
+                  onUploadImage={async (file) => {
+                    const fd = new FormData()
+                    fd.append('file', file)
+                    fd.append('folder', `templates`)
+                    const res = await fetch('/api/upload', { method: 'POST', body: fd })
+                    const data = await res.json()
+                    if (!res.ok || !data.success) {
+                      throw new Error(data.error || data.detail || 'Upload failed')
+                    }
+                    return data.url
+                  }}
+                />
+              </div>
+            )}
           </div>
         )}
 

@@ -25,13 +25,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     const templates = await prisma.template.findMany({
       where: { schoolId: params.id },
       orderBy: { createdAt: "asc" },
-      select: {
-        id: true,
-        name: true,
-        templateImageUrl: true,
-        hasBackSide: true,
-        createdAt: true,
-        updatedAt: true,
+      include: {
         _count: { select: { classes: true } },
       },
     })
