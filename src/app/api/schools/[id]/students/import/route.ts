@@ -76,6 +76,14 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
     // Field config from template
     const fieldConfig = (defaultTemplate?.fieldConfig || []) as Array<{ key: string; label: string; type: string; required: boolean }>
+    const isImportColumn = (header: string) => {
+      const normalized = header.trim().toLowerCase()
+      return !!normalized &&
+        !normalized.startsWith("__empty") &&
+        normalized !== "empty" &&
+        normalized !== "undefined" &&
+        normalized !== "null"
+    }
 
     // Build a label→key mapping for flexible column matching.
     // IMPORTANT: Apply generic aliases FIRST, then template fieldConfig LAST so
@@ -176,7 +184,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     }
 
     // Map Excel columns to our field keys
-    const excelHeaders = rawRows.length > 0 ? Object.keys(rawRows[0]) : []
+    const excelHeaders = rawRows.length > 0 ? Object.keys(rawRows[0]).filter(isImportColumn) : []
     const columnMap: Record<string, string> = {} // excelHeader → fieldKey
     for (const header of excelHeaders) {
       const normalized = header.toLowerCase().trim()
@@ -291,7 +299,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       for (const [header, value] of Object.entries(raw)) {
         if (!columnMap[header]) {
           const key = header.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_]/g, "")
-          if (key && String(value).trim()) {
+          if (isImportColumn(header) && key && String(value).trim()) {
             studentFormData[key] = String(value).trim()
           }
         }
@@ -453,7 +461,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
           .filter(h => {
             const n = h.toLowerCase().trim()
             // Skip serial/row number columns and photo URL columns
-            return n !== "photo url" && n !== "photourl"
+            return isImportColumn(h) && n !== "photo url" && n !== "photourl"
           })
           .map(h => {
             const n = h.toLowerCase().trim()

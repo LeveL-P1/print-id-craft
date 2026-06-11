@@ -6,7 +6,7 @@ import { z } from "zod"
 import crypto from "crypto"
 
 export const dynamic = "force-dynamic"
-export const maxDuration = 10
+export const maxDuration = 30
 
 const classSchema = z.object({
   name: z.string().min(1, "Class name is required"),

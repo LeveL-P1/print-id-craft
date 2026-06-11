@@ -275,38 +275,54 @@ export default function SchoolDetailPage() {
     }
   }
 
-  const fetchClasses = async () => {
-    try {
-      const res = await fetch(`/api/schools/${schoolId}/classes`)
-      const data = await res.json()
-      if (data.success) {
-        setClasses(data.data)
-        setClassesLoadError(false)
-      } else {
-        setClassesLoadError(true)
-        toast.error('Failed to load classes. Try refreshing the page.')
+  const fetchClasses = async (showToast = true) => {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const res = await fetch(`/api/schools/${schoolId}/classes`, { cache: 'no-store' })
+        const data = await res.json()
+        if (data.success) {
+          setClasses(data.data)
+          setClassesLoadError(false)
+          return
+        }
+        throw new Error(data.error || `HTTP ${res.status}`)
+      } catch (err) {
+        console.error(`Failed to load classes attempt ${attempt}`, err)
+        if (attempt === 2) {
+          setClassesLoadError(true)
+          if (showToast) toast.error('Failed to load classes. Student data can still load.')
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, 600))
+        }
       }
-    } catch (err) {
-      console.error(err)
-      setClassesLoadError(true)
-      toast.error('Failed to load classes. Try refreshing the page.')
     }
   }
 
-  const fetchStudents = async (page = 1) => {
+  const fetchStudents = async (
+    page = 1,
+    overrides?: { status?: string; classId?: string; search?: string }
+  ) => {
     try {
       const params = new URLSearchParams({ page: String(page), limit: "50" })
-      if (statusFilter) params.set("status", statusFilter)
-      if (classFilter) params.set("classId", classFilter)
-      if (searchQuery) params.set("search", searchQuery)
-      const res = await fetch(`/api/schools/${schoolId}/students?${params}`)
+      const status = overrides?.status ?? statusFilter
+      const classId = overrides?.classId ?? classFilter
+      const search = overrides?.search ?? searchQuery
+      if (status) params.set("status", status)
+      if (classId) params.set("classId", classId)
+      if (search) params.set("search", search)
+      const res = await fetch(`/api/schools/${schoolId}/students?${params}`, { cache: 'no-store' })
       const data = await res.json()
       if (data.success) {
         setStudents(data.data)
         setStudentTotal(data.pagination.total)
         setStudentPage(data.pagination.page)
+      } else {
+        toast.error(data.error || "Failed to load students")
       }
-    } catch (err) { console.error(err) }
+    } catch (err) {
+      console.error(err)
+      toast.error("Failed to load students")
+    }
   }
 
   const fetchBatches = async () => {
@@ -329,10 +345,18 @@ export default function SchoolDetailPage() {
   }
 
   useEffect(() => {
+    setStatusFilter("")
+    setClassFilter("")
+    setSearchQuery("")
+    setSearchInput("")
+    setStudentPage(1)
+    setStudents([])
+    setStudentTotal(0)
+    filtersInitialized.current = false
     // Load only essential data first (school info, classes, template) for fast initial render
-    Promise.all([fetchSchool(), fetchClasses(), fetchTemplate(), fetchSchoolTemplates()]).finally(() => setLoading(false))
+    Promise.all([fetchSchool(), fetchClasses(false), fetchTemplate(), fetchSchoolTemplates()]).finally(() => setLoading(false))
     // Defer heavier data fetches slightly to avoid blocking initial render
-    setTimeout(() => { fetchStudents() }, 100)
+    setTimeout(() => { fetchStudents(1, { status: "", classId: "", search: "" }) }, 100)
     // Always fetch flags on load so house-based flag images persist across refreshes
     fetchFlags()
   }, [schoolId])
@@ -2204,7 +2228,16 @@ export default function SchoolDetailPage() {
                 const rawFC = (templateData?.fieldConfig || []) as Array<{ key: string; label: string }>
                 for (const f of rawFC) { if (f.key && f.label) fcLabelMap[f.key] = f.label }
 
-                const SKIP_KEYS = new Set(["class", "classSection", "photoUrl"])
+                const SKIP_KEYS = new Set(["class", "classSection", "photoUrl", "photoPath"])
+                const isUsableDataKey = (key: string, value?: unknown) => {
+                  const normalized = key.trim().toLowerCase()
+                  if (!normalized) return false
+                  if (SKIP_KEYS.has(key)) return false
+                  if (normalized.startsWith("__empty")) return false
+                  if (normalized === "empty" || normalized === "undefined" || normalized === "null") return false
+                  if (value !== undefined && String(value).trim() === "") return false
+                  return true
+                }
                 const keyToLabel: Record<string, string> = {}
                 const keySet = new Set<string>()
                 const allKeys: string[] = []
@@ -2212,7 +2245,7 @@ export default function SchoolDetailPage() {
                   const fd = s.formData as any
                   if (fd && typeof fd === "object") {
                     for (const k of Object.keys(fd)) {
-                      if (!keySet.has(k) && !SKIP_KEYS.has(k)) {
+                      if (!keySet.has(k) && isUsableDataKey(k, fd[k])) {
                         keySet.add(k); allKeys.push(k)
                         keyToLabel[k] = fcLabelMap[k] || DEFAULT_KEY_LABELS[k] || k
                       }
@@ -2227,11 +2260,11 @@ export default function SchoolDetailPage() {
                   // No students yet — fall back to fieldConfig or fieldMappings for column skeleton
                   const rawFM = (templateData?.fieldMappings || []) as Array<{ fieldKey: string; label: string; type: string }>
                   if (rawFC.length > 0) {
-                    const visible = rawFC.filter(f => !SKIP_KEYS.has(f.key))
+                    const visible = rawFC.filter(f => isUsableDataKey(f.key))
                     dataColumns = visible.map(f => f.key)
                     for (const f of visible) keyToLabel[f.key] = f.label
                   } else {
-                    const visible = rawFM.filter(m => m.type !== "photo" && !SKIP_KEYS.has(m.fieldKey))
+                    const visible = rawFM.filter(m => m.type !== "photo" && isUsableDataKey(m.fieldKey))
                     dataColumns = visible.map(m => m.fieldKey)
                     for (const m of visible) keyToLabel[m.fieldKey] = m.label
                   }
@@ -2313,7 +2346,7 @@ export default function SchoolDetailPage() {
                           </td>
                           {hasDynamicColumns ? (
                             dataColumns.map(k => {
-                              const val = (fd?.[k] !== undefined && String(fd[k]).trim() !== "") ? String(fd[k]) : ""
+                              const val = resolveCell(k)
                               const isPhotoIdCol = k === "photoId"
                               const isNumCol = k === "srNo" || k === "rollNo" || k === "grNo"
                               return (
