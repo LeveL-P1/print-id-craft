@@ -84,6 +84,7 @@ export default function PhotoBgProcessor({
   const [bgQualityIssue, setBgQualityIssue] = useState<string>("")
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const autoConfirmedRef = useRef(false)
+  const autoSkippedRef = useRef(false)
 
   // Verify the photo URL is valid on mount & ensure we have a displayable data URL
   useEffect(() => {
@@ -157,6 +158,7 @@ export default function PhotoBgProcessor({
         setProgress(30 + pct * 0.6)
         setProgressMsg(msg)
       })
+      if (autoSkippedRef.current) return
 
       setProgress(95)
       setProgressMsg("Almost done…")
@@ -436,6 +438,20 @@ export default function PhotoBgProcessor({
       onProcessed(processedUrl)
     }
   }, [autoConfirm, processedUrl, processing, onProcessed])
+
+  useEffect(() => {
+    if (!autoConfirm || !processing || autoSkippedRef.current) return
+
+    const timer = window.setTimeout(() => {
+      if (autoSkippedRef.current || autoConfirmedRef.current) return
+      autoSkippedRef.current = true
+      setProgressMsg("Continuing with original photo...")
+      setProcessing(false)
+      onSkip()
+    }, 8000)
+
+    return () => window.clearTimeout(timer)
+  }, [autoConfirm, processing, onSkip])
 
   const displayUrl = photoDataUrl || photoUrl
 

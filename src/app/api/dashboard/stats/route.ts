@@ -19,16 +19,12 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const safe = async (fn: () => Promise<number>) => {
-      try { return await fn() } catch { return 0 }
-    }
-
-    // Run all counts in parallel — single round-trip on Prisma
-    const [totalSchools, totalStudents, totalClasses, totalBatches] = await Promise.all([
-      safe(() => prisma.school.count()),
-      safe(() => prisma.student.count()),
-      safe(() => prisma.class.count()),
-      safe(() => prisma.printBatch.count()),
+    // Keep dashboard counts in one transaction so DB failures are not rendered as zero data.
+    const [totalSchools, totalStudents, totalClasses, totalBatches] = await prisma.$transaction([
+      prisma.school.count(),
+      prisma.student.count(),
+      prisma.class.count(),
+      prisma.printBatch.count(),
     ])
 
     const res = NextResponse.json({

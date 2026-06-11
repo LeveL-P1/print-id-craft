@@ -4,12 +4,18 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
-let dbUrl = process.env.DATABASE_URL;
+let dbUrl = process.env.DATABASE_URL
+if (dbUrl?.includes("pooler.supabase.com")) {
+  dbUrl = dbUrl.replace(":5432/", ":6543/")
+}
 if (dbUrl && process.env.NODE_ENV === "production" && !dbUrl.includes("pgbouncer=true")) {
-  dbUrl += (dbUrl.includes("?") ? "&" : "?") + "pgbouncer=true&connection_limit=5&statement_cache_size=0&pool_timeout=15";
+  dbUrl += (dbUrl.includes("?") ? "&" : "?") + "pgbouncer=true&connection_limit=1&statement_cache_size=0&pool_timeout=30";
 } else if (dbUrl && dbUrl.includes("connection_limit=")) {
-  // Supabase Pro plan supports larger pool — use 5 per function for fast responses
-  dbUrl = dbUrl.replace(/connection_limit=\d+/, "connection_limit=5");
+  // Keep serverless instances from exhausting the Supabase pooler.
+  dbUrl = dbUrl.replace(/connection_limit=\d+/, "connection_limit=1");
+  dbUrl = dbUrl.includes("pool_timeout=")
+    ? dbUrl.replace(/pool_timeout=\d+/, "pool_timeout=30")
+    : `${dbUrl}&pool_timeout=30`;
 }
 
 export const prisma =

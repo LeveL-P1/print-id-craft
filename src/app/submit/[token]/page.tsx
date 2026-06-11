@@ -9,7 +9,6 @@ import {
   resolveFieldValue,
   type FieldRole,
 } from "@/lib/field-resolver"
-import { preloadBgRemovalModel } from "@/lib/photo-background"
 
 const JpgCardPreview = dynamic(() => import("@/components/JpgCardPreview"), { ssr: false })
 const PhotoBgProcessor = dynamic(() => import("@/components/PhotoBgProcessor"), { ssr: false })
@@ -430,13 +429,6 @@ export default function SubmitPage() {
       })
       .catch(() => { setErrorMsg("Failed to load form"); setStep("error") })
   }, [token])
-
-  // Preload the free background-removal model while parents fill the form.
-  useEffect(() => {
-    if (step === "form" || step === "photo" || step === "bgprocess") {
-      preloadBgRemovalModel()
-    }
-  }, [step])
 
   useEffect(() => {
     if (!config || step === "loading" || step === "error" || step === "success") return

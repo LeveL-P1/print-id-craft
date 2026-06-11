@@ -56,23 +56,26 @@ export async function durableRateLimit(
   const resetAt = new Date(now.getTime() + windowMs)
 
   try {
-    const rows = await prisma.$queryRaw<Array<{ count: number; resetAt: Date }>>`
-      INSERT INTO "RateLimit" ("key", "count", "resetAt", "updatedAt")
-      VALUES (${identifier}, 1, ${resetAt}, ${now})
-      ON CONFLICT ("key") DO UPDATE SET
-        "count" = CASE
-          WHEN "RateLimit"."resetAt" < ${now} THEN 1
-          ELSE "RateLimit"."count" + 1
-        END,
-        "resetAt" = CASE
-          WHEN "RateLimit"."resetAt" < ${now} THEN ${resetAt}
-          ELSE "RateLimit"."resetAt"
-        END,
-        "updatedAt" = ${now}
-      RETURNING "count", "resetAt"
-    `
+    const entry = await prisma.$transaction(async (tx) => {
+      const current = await tx.rateLimit.findUnique({
+        where: { key: identifier },
+      })
 
-    const count = rows[0]?.count ?? maxRequests + 1
+      if (!current || current.resetAt < now) {
+        return tx.rateLimit.upsert({
+          where: { key: identifier },
+          create: { key: identifier, count: 1, resetAt },
+          update: { count: 1, resetAt },
+        })
+      }
+
+      return tx.rateLimit.update({
+        where: { key: identifier },
+        data: { count: { increment: 1 } },
+      })
+    })
+
+    const count = entry.count
     return {
       success: count <= maxRequests,
       remaining: Math.max(maxRequests - count, 0),

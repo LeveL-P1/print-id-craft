@@ -35,11 +35,7 @@ export async function GET(req: Request) {
       ]
     }
 
-    const safeCount = async (fn: () => Promise<number>): Promise<number> => {
-      try { return await fn() } catch (e) { console.error("Stats query failed:", e); return 0 }
-    }
-
-    const [schools, total, globalStats] = await Promise.all([
+    const [schools, total, totalSchools, totalStudents, totalClasses, totalBatches] = await prisma.$transaction([
       prisma.school.findMany({
         where,
         select: {
@@ -57,13 +53,11 @@ export async function GET(req: Request) {
         take: limit,
       }),
       prisma.school.count({ where }),
-      // DB-level aggregation for global stats — each wrapped individually
-      Promise.all([
-        safeCount(() => prisma.school.count()),
-        safeCount(() => prisma.student.count()),
-        safeCount(() => prisma.class.count()),
-        safeCount(() => prisma.printBatch.count()),
-      ]),
+      // DB-level aggregation for global stats.
+      prisma.school.count(),
+      prisma.student.count(),
+      prisma.class.count(),
+      prisma.printBatch.count(),
     ])
 
     const response = NextResponse.json({
@@ -73,10 +67,10 @@ export async function GET(req: Request) {
         template: templates[0] || null,
       })),
       stats: {
-        totalSchools: globalStats[0],
-        totalStudents: globalStats[1],
-        totalClasses: globalStats[2],
-        totalBatches: globalStats[3],
+        totalSchools,
+        totalStudents,
+        totalClasses,
+        totalBatches,
       },
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
     })

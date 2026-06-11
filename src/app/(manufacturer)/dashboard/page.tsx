@@ -37,6 +37,7 @@ export default function ManufacturerDashboard() {
   const [health, setHealth] = useState<{ status: string; db: string; storage: string } | null>(null)
   const [events, setEvents] = useState<OpsEvent[]>([])
   const [jobs, setJobs] = useState<OpsJob[]>([])
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -58,7 +59,8 @@ export default function ManufacturerDashboard() {
     fetch("/api/dashboard/stats", { cache: "no-store" })
       .then(async (res) => {
         if (res.status === 401) { signOut({ callbackUrl: "/login?mode=admin" }); return null }
-        return res.ok ? res.json() : null
+        if (!res.ok) throw new Error("Dashboard stats failed")
+        return res.json()
       })
       .then((json) => {
         if (cancelled || !json?.success) return
@@ -72,13 +74,17 @@ export default function ManufacturerDashboard() {
         }))
         setStatsLoaded(true)
       })
-      .catch(() => setStatsLoaded(true))
+      .catch(() => {
+        setLoadError("Dashboard data could not be loaded. Please try again in a moment.")
+        setStatsLoaded(true)
+      })
 
     // ── Fetch recent schools (slower: includes per-school counts) ──
     fetch("/api/schools?limit=5", { cache: "no-store" })
       .then(async (res) => {
         if (res.status === 401) return null
-        return res.ok ? res.json() : null
+        if (!res.ok) throw new Error("Schools failed")
+        return res.json()
       })
       .then((json) => {
         if (cancelled || !json?.success) return
@@ -96,7 +102,10 @@ export default function ManufacturerDashboard() {
         })
         setSchoolsLoaded(true)
       })
-      .catch(() => setSchoolsLoaded(true))
+      .catch(() => {
+        setLoadError("Dashboard data could not be loaded. Please try again in a moment.")
+        setSchoolsLoaded(true)
+      })
 
     return () => { cancelled = true }
   }, [])
@@ -136,6 +145,28 @@ export default function ManufacturerDashboard() {
                 <div className="skeleton-line" style={{ width: 60, height: 32 }} />
               </div>
             ))}
+          </div>
+        </div>
+      </>
+    )
+  }
+
+  if (loadError && !data) {
+    return (
+      <>
+        <div className="page-header dashboard-header">
+          <div className="dashboard-header-text">
+            <h1>Dashboard</h1>
+            <p>Welcome back! Here&apos;s your overview.</p>
+          </div>
+        </div>
+        <div className="page-body">
+          <div className="empty-state" style={{ background: "white", borderRadius: 16, border: "2px dashed #fecaca" }}>
+            <h3>Data could not be loaded</h3>
+            <p>{loadError}</p>
+            <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={() => window.location.reload()}>
+              Retry
+            </button>
           </div>
         </div>
       </>
