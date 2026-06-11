@@ -8,6 +8,7 @@ const updateClassSchema = z.object({
   isActive: z.boolean().optional(),
   expiresAt: z.string().optional().nullable(),
   name: z.string().min(1).optional(),
+  templateId: z.string().nullable().optional(),
 })
 
 export async function PUT(
@@ -22,6 +23,15 @@ export async function PUT(
 
     const body = await req.json()
     const validated = updateClassSchema.parse(body)
+
+    if (validated.templateId) {
+      const tpl = await prisma.template.findFirst({
+        where: { id: validated.templateId, schoolId: params.id },
+      })
+      if (!tpl) {
+        return NextResponse.json({ error: "Template not found for this school" }, { status: 400 })
+      }
+    }
 
     const cls = await prisma.class.update({
       where: { id: params.cid, schoolId: params.id },

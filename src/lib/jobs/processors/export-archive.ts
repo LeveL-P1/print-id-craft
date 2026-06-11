@@ -79,7 +79,7 @@ export async function processExportArchive(
           name: true,
           address: true,
           contactEmail: true,
-          template: true,
+          templates: { orderBy: { createdAt: "asc" as const }, take: 1 },
           classes: { select: { id: true, name: true } },
         },
   })
@@ -263,7 +263,7 @@ export async function processExportArchive(
           address: school.address,
           contactEmail: "contactEmail" in school ? school.contactEmail : undefined,
           classes: "classes" in school ? school.classes : undefined,
-          template: "template" in school ? school.template : undefined,
+          template: "templates" in school ? (school.templates as any[])?.[0] : undefined,
         },
         null,
         2

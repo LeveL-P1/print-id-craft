@@ -242,6 +242,13 @@ describe("resolveFieldValue", () => {
       expect(getFieldRole("mob_father", "Father Mobile")).toBe("mobile")
     })
 
+    it("detects parent (no.) fields as mobile", () => {
+      expect(getFieldRole("mother", "Mother (No.)")).toBe("mobile")
+      expect(getFieldRole("father", "Father (No.)")).toBe("mobile")
+      expect(getFieldRole("mob_father", "Mob.- Father")).toBe("mobile")
+      expect(getFieldRole("mother_mobile", "Mother's Mobile No.")).toBe("mobile")
+    })
+
     it("uses explicit role from template", () => {
       expect(getFieldRole("custom_key", "Custom", "address")).toBe("address")
     })

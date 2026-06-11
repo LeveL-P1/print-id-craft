@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma"
 import { z } from "zod"
 import { migrateTemplateToPt } from "@/lib/font-size-units"
 import { inferFieldRole } from "@/lib/field-resolver"
+import { getDefaultTemplate, getTemplateByIdForSchool } from "@/lib/template-resolver"
 
 const templateSchema = z.object({
   frontLayout: z.any().optional(),
@@ -73,9 +74,10 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const template = await prisma.template.findUnique({
-      where: { schoolId: params.id },
-    })
+    const { searchParams } = new URL(req.url)
+    const templateId = searchParams.get("templateId")
+
+    const template = await getTemplateByIdForSchool(params.id, templateId)
 
     // One-shot legacy → pt font-size migration. Idempotent: gated by
     // `printConfig.fontSizeUnit === "pt"`. After the first GET on a
@@ -86,7 +88,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       if (migrated && data) {
         try {
           outTemplate = await prisma.template.update({
-            where: { schoolId: params.id },
+            where: { id: template.id },
             data: {
               frontLayout: (data as any).frontLayout,
               backLayout: (data as any).backLayout,
@@ -123,6 +125,9 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
+    const { searchParams } = new URL(req.url)
+    const templateId = searchParams.get("templateId")
+
     const body = await req.json()
     const validated = templateSchema.parse(body)
 
@@ -147,14 +152,10 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       delete updateData.fieldConfig
     }
 
+    const existing = await getTemplateByIdForSchool(params.id, templateId)
+
     // When the card size is locked, prevent accidental overwrite of dimensions
     // unless the request explicitly unlocks (cardSizeLocked === false).
-    const existing = await prisma.template.findUnique({ where: { schoolId: params.id }, select: { cardSizeLocked: true, printConfig: true } })
-
-    // Merge incoming printConfig with existing to preserve fontSizeUnit flag.
-    // Without this, savePrintConfig (paper/position settings) would wipe the
-    // "fontSizeUnit: pt" marker, causing migrateTemplateToPt to re-run on
-    // the next GET and shrink every font size by ×0.4.
     if (updateData.printConfig && typeof updateData.printConfig === "object") {
       const existingPc = (existing?.printConfig as Record<string, any>) || {}
       updateData.printConfig = { ...existingPc, ...updateData.printConfig }
@@ -169,24 +170,32 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       delete updateData.orientation
     }
 
-    const template = await prisma.template.upsert({
-      where: { schoolId: params.id },
-      update: updateData,
-      create: {
-        schoolId: params.id,
-        frontLayout: validated.frontLayout || [],
-        backLayout: validated.backLayout || [],
-        fieldConfig: fieldConfig || [],
-        cardWidthMm: validated.cardWidthMm || 85.6,
-        cardHeightMm: validated.cardHeightMm || 54.0,
-        printDpi: validated.printDpi || 300,
-        orientation: validated.orientation || "PORTRAIT",
-        templateImageUrl: validated.templateImageUrl,
-        fieldMappings: validated.fieldMappings || [],
-        photoBgColor: validated.photoBgColor || "#FFFFFF",
-        cardSizeLocked: validated.cardSizeLocked ?? false,
-      },
-    })
+    let template
+    if (existing) {
+      template = await prisma.template.update({
+        where: { id: existing.id },
+        data: updateData,
+      })
+    } else {
+      template = await prisma.template.create({
+        data: {
+          schoolId: params.id,
+          name: "Default Template",
+          frontLayout: validated.frontLayout || [],
+          backLayout: validated.backLayout || [],
+          fieldConfig: fieldConfig || [],
+          cardWidthMm: validated.cardWidthMm || 85.6,
+          cardHeightMm: validated.cardHeightMm || 54.0,
+          printDpi: validated.printDpi || 300,
+          orientation: validated.orientation || "PORTRAIT",
+          templateImageUrl: validated.templateImageUrl,
+          fieldMappings: validated.fieldMappings || [],
+          photoBgColor: validated.photoBgColor || "#FFFFFF",
+          cardSizeLocked: validated.cardSizeLocked ?? false,
+          printConfig: updateData.printConfig,
+        },
+      })
+    }
 
     return NextResponse.json({ success: true, data: template })
   } catch (error) {

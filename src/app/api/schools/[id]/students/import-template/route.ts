@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { buildExcelBuffer, columnWidthsFromRows } from "@/lib/excel"
+import { getDefaultTemplate } from "@/lib/template-resolver"
 
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
@@ -17,7 +18,6 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     const school = await prisma.school.findUnique({
       where: { id: params.id },
       include: {
-        template: { select: { fieldConfig: true } },
         classes: { select: { id: true, name: true } },
       },
     })
@@ -26,7 +26,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ error: "School not found" }, { status: 404 })
     }
 
-    const fieldConfig = (school.template?.fieldConfig || []) as Array<{
+    const defaultTemplate = await getDefaultTemplate(params.id)
+    const fieldConfig = (defaultTemplate?.fieldConfig || []) as Array<{
       key: string
       label: string
       type: string

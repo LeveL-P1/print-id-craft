@@ -50,7 +50,7 @@ export async function GET(req: Request) {
           logoUrl: true,
           createdAt: true,
           _count: { select: { classes: true, students: true, batches: true } },
-          template: { select: { id: true } },
+          templates: { take: 1, select: { id: true } },
         },
         orderBy: { createdAt: "desc" },
         skip: (page - 1) * limit,
@@ -68,7 +68,10 @@ export async function GET(req: Request) {
 
     const response = NextResponse.json({
       success: true,
-      data: schools,
+      data: schools.map(({ templates, ...school }) => ({
+        ...school,
+        template: templates[0] || null,
+      })),
       stats: {
         totalSchools: globalStats[0],
         totalStudents: globalStats[1],
@@ -111,6 +114,7 @@ export async function POST(req: Request) {
       await tx.template.create({
         data: {
           schoolId: school.id,
+          name: "Default Template",
           frontLayout: [],
           backLayout: [],
           fieldConfig: [],

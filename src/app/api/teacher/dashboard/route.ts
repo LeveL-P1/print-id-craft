@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { getDefaultTemplate } from "@/lib/template-resolver"
 import { withStudentPhotoUrl } from "@/lib/student-photo-url"
 
 export const dynamic = "force-dynamic"
@@ -100,9 +101,7 @@ export async function GET(req: NextRequest) {
         _count: { status: true },
       }), []),
       // Include template meta for card preview in modal
-      safeQuery(() => prisma.template.findUnique({
-        where: { schoolId: schoolId as string }
-      }), null)
+      safeQuery(() => getDefaultTemplate(schoolId as string), null)
     ])
 
     // Build stats from groupBy result

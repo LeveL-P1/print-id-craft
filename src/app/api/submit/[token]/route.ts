@@ -3,17 +3,14 @@ import { prisma } from "@/lib/prisma"
 import { buildFormFields, checkSubmissionStatus, type FormField } from "@/lib/submit-fields"
 import { migrateTemplateToPt } from "@/lib/font-size-units"
 import { getFieldRole, inferFieldRole, resolveFieldValue, sortFieldsByRole } from "@/lib/field-resolver"
+import { getTemplateForClass } from "@/lib/template-resolver"
 
 export async function GET(req: Request, { params }: { params: { token: string } }) {
   try {
     const cls = await prisma.class.findUnique({
       where: { linkToken: params.token },
       include: {
-        school: {
-          include: {
-            template: true,
-          },
-        },
+        school: true,
       },
     })
 
@@ -63,13 +60,13 @@ export async function GET(req: Request, { params }: { params: { token: string } 
     // One-shot legacy → pt font-size migration. Same logic as the
     // admin template endpoint so the public preview, the admin
     // preview, and the printed batch all share the same fontSize unit.
-    let template = cls.school.template
+    let template = await getTemplateForClass(cls.id)
     if (template) {
       const { migrated, data } = migrateTemplateToPt(template as any)
       if (migrated && data) {
         try {
           template = await prisma.template.update({
-            where: { schoolId: cls.school.id },
+            where: { id: template.id },
             data: {
               frontLayout: (data as any).frontLayout,
               backLayout: (data as any).backLayout,
@@ -206,6 +203,8 @@ export async function GET(req: Request, { params }: { params: { token: string } 
         photoBgColor: template?.photoBgColor || "#FFFFFF",
         // Available house/flag colours for dropdown in public form
         flagColors,
+        // Fixed branch option
+        fixedBranch: (template?.printConfig as any)?.fixedBranch || "",
       },
     })
   } catch (error) {

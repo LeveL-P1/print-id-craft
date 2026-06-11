@@ -62,9 +62,19 @@ type ClassData = {
   linkToken: string
   isActive: boolean
   expiresAt: string | null
+  templateId: string | null
+  template: { id: string; name: string; templateImageUrl: string | null } | null
   _count: { students: number }
   teachers: { id: string; name: string; email: string; isMainTeacher: boolean }[]
   createdAt: string
+}
+
+type SchoolTemplateSummary = {
+  id: string
+  name: string
+  templateImageUrl: string | null
+  hasBackSide: boolean
+  _count?: { classes: number }
 }
 
 type StudentData = {
@@ -138,6 +148,17 @@ export default function SchoolDetailPage() {
   const [editingExpiryFor, setEditingExpiryFor] = useState<string | null>(null)
   const [editingExpiryValue, setEditingExpiryValue] = useState<string>("")
 
+  // Per-class template management
+  const [schoolTemplates, setSchoolTemplates] = useState<SchoolTemplateSummary[]>([])
+  const [classTemplateEditor, setClassTemplateEditor] = useState<{
+    classId: string
+    className: string
+    templateId: string
+    templateData: any
+  } | null>(null)
+  const [classTemplateEditorLoading, setClassTemplateEditorLoading] = useState(false)
+  const [assigningTemplateFor, setAssigningTemplateFor] = useState<string | null>(null)
+
   // Batch generation
   const [generatingBatch, setGeneratingBatch] = useState(false)
 
@@ -210,6 +231,14 @@ export default function SchoolDetailPage() {
     } catch (err) { console.error(err) }
   }
 
+  const fetchSchoolTemplates = async () => {
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/templates`, { cache: 'no-store' })
+      const data = await res.json()
+      if (data.success) setSchoolTemplates(data.data || [])
+    } catch (err) { console.error(err) }
+  }
+
   const fetchClasses = async () => {
     try {
       const res = await fetch(`/api/schools/${schoolId}/classes`)
@@ -255,7 +284,7 @@ export default function SchoolDetailPage() {
 
   useEffect(() => {
     // Load only essential data first (school info, classes, template) for fast initial render
-    Promise.all([fetchSchool(), fetchClasses(), fetchTemplate()]).finally(() => setLoading(false))
+    Promise.all([fetchSchool(), fetchClasses(), fetchTemplate(), fetchSchoolTemplates()]).finally(() => setLoading(false))
     // Defer heavier data fetches slightly to avoid blocking initial render
     setTimeout(() => { fetchStudents() }, 100)
     // Always fetch flags on load so house-based flag images persist across refreshes
@@ -400,6 +429,86 @@ export default function SchoolDetailPage() {
     toast.success("Class deleted")
     fetchClasses()
     fetchSchool()
+  }
+
+  const getEffectiveTemplateId = (cls: ClassData) => {
+    if (cls.templateId) return cls.templateId
+    return schoolTemplates[0]?.id || null
+  }
+
+  const getEffectiveTemplateLabel = (cls: ClassData) => {
+    const tid = getEffectiveTemplateId(cls)
+    const tpl = schoolTemplates.find(t => t.id === tid) || cls.template
+    if (!tpl) return "No template"
+    return cls.templateId ? tpl.name : `${tpl.name} (default)`
+  }
+
+  const handleAssignClassTemplate = async (classId: string, templateId: string) => {
+    setAssigningTemplateFor(classId)
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/classes/${classId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ templateId: templateId || null }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        toast.success("Template assigned to class")
+        fetchClasses()
+      } else {
+        toast.error(data.error || "Failed to assign template")
+      }
+    } catch {
+      toast.error("Failed to assign template")
+    } finally {
+      setAssigningTemplateFor(null)
+    }
+  }
+
+  const openClassTemplateEditor = async (cls: ClassData, createNew = false) => {
+    setClassTemplateEditorLoading(true)
+    try {
+      let templateId = cls.templateId || schoolTemplates[0]?.id || null
+
+      if (createNew) {
+        const createRes = await fetch(`/api/schools/${schoolId}/templates`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: `${cls.name} Template`, classId: cls.id }),
+        })
+        const createData = await createRes.json()
+        if (!createRes.ok || !createData.success) {
+          toast.error(createData.error || "Failed to create template")
+          return
+        }
+        templateId = createData.data.id
+        await fetchSchoolTemplates()
+        await fetchClasses()
+      }
+
+      if (!templateId) {
+        toast.error("No template available. Create one first.")
+        return
+      }
+
+      const tplRes = await fetch(`/api/schools/${schoolId}/templates/${templateId}`, { cache: 'no-store' })
+      const tplData = await tplRes.json()
+      if (!tplRes.ok || !tplData.success) {
+        toast.error("Failed to load template")
+        return
+      }
+
+      setClassTemplateEditor({
+        classId: cls.id,
+        className: cls.name,
+        templateId,
+        templateData: tplData.data,
+      })
+    } catch {
+      toast.error("Failed to open template editor")
+    } finally {
+      setClassTemplateEditorLoading(false)
+    }
   }
 
   const copyLink = (token: string) => {
@@ -1634,6 +1743,7 @@ export default function SchoolDetailPage() {
                 <thead>
                   <tr>
                     <th>Class Name</th>
+                    <th>Template</th>
                     <th>Approval Teacher</th>
                     <th>Students</th>
                     <th>Status</th>
@@ -1647,6 +1757,57 @@ export default function SchoolDetailPage() {
                     return (
                     <tr key={cls.id}>
                       <td style={{ fontWeight: 600 }}>{cls.name}</td>
+                      <td style={{ minWidth: 220 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <select
+                            value={getEffectiveTemplateId(cls) || ""}
+                            onChange={(e) => handleAssignClassTemplate(cls.id, e.target.value)}
+                            disabled={assigningTemplateFor === cls.id || schoolTemplates.length === 0}
+                            style={{
+                              width: '100%',
+                              fontSize: 12,
+                              padding: '6px 8px',
+                              border: '1px solid #cbd5e1',
+                              borderRadius: 8,
+                              background: 'white',
+                            }}
+                          >
+                            {schoolTemplates.length === 0 ? (
+                              <option value="">No templates yet</option>
+                            ) : (
+                              schoolTemplates.map(t => (
+                                <option key={t.id} value={t.id}>{t.name}</option>
+                              ))
+                            )}
+                          </select>
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              className="btn btn-outline"
+                              onClick={() => openClassTemplateEditor(cls, false)}
+                              disabled={classTemplateEditorLoading || !getEffectiveTemplateId(cls)}
+                              style={{ fontSize: 11, padding: '4px 8px' }}
+                            >
+                              ✏️ Edit Template
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-outline"
+                              onClick={() => openClassTemplateEditor(cls, true)}
+                              disabled={classTemplateEditorLoading}
+                              style={{ fontSize: 11, padding: '4px 8px', color: '#6366f1', borderColor: '#c7d2fe' }}
+                            >
+                              ➕ New Template
+                            </button>
+                          </div>
+                          <div style={{ fontSize: 10, color: '#94a3b8' }}>
+                            {getEffectiveTemplateLabel(cls)}
+                            {cls.template?.templateImageUrl || schoolTemplates.find(t => t.id === getEffectiveTemplateId(cls))?.templateImageUrl
+                              ? " · JPG ready"
+                              : " · Not configured"}
+                          </div>
+                        </div>
+                      </td>
                       <td>
                         {classTeacher ? (
                           <div style={{ fontSize: 12 }}>
@@ -1741,11 +1902,133 @@ export default function SchoolDetailPage() {
                   )})
                   }
                   {classes.length === 0 && (
-                    <tr><td colSpan={6} style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>No classes created yet. Add one above.</td></tr>
+                    <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>No classes created yet. Add one above.</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
+
+            {classTemplateEditor && (
+              <div style={{
+                position: 'fixed',
+                inset: 0,
+                background: 'rgba(15, 23, 42, 0.55)',
+                zIndex: 1000,
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'center',
+                padding: '24px 16px',
+                overflowY: 'auto',
+              }}>
+                <div style={{
+                  width: '100%',
+                  maxWidth: 1200,
+                  background: 'white',
+                  borderRadius: 16,
+                  border: '1px solid #e2e8f0',
+                  padding: 24,
+                  marginTop: 12,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+                    <div>
+                      <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>
+                        Template for {classTemplateEditor.className}
+                      </h3>
+                      <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
+                        Same JPG Template Mapper as the Template tab — upload and map fields for this class.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-outline"
+                      onClick={() => setClassTemplateEditor(null)}
+                      style={{ fontSize: 13, padding: '8px 14px' }}
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <JpgTemplateMapper
+                    schoolId={schoolId}
+                    templateImageUrl={classTemplateEditor.templateData?.templateImageUrl || null}
+                    fieldMappings={(classTemplateEditor.templateData?.fieldMappings as any) || []}
+                    fieldConfig={(classTemplateEditor.templateData?.fieldConfig as any[]) || []}
+                    initialPhotoBgColor={classTemplateEditor.templateData?.photoBgColor || "#FFFFFF"}
+                    initialCardSettings={classTemplateEditor.templateData ? {
+                      cardSizePreset: "custom",
+                      cardWidth: classTemplateEditor.templateData.cardWidthMm || 85.6,
+                      cardHeight: classTemplateEditor.templateData.cardHeightMm || 53.98,
+                      cardOrientation: classTemplateEditor.templateData.orientation === "LANDSCAPE" ? "landscape" : "portrait",
+                      printSides: classTemplateEditor.templateData.hasBackSide ? "both" : "front",
+                      cardDpi: classTemplateEditor.templateData.printDpi || 300,
+                      bleedMargin: 1,
+                      backImageUrl: classTemplateEditor.templateData.backTemplateImageUrl || null,
+                      backMappings: classTemplateEditor.templateData.backFieldMappings || [],
+                      cardSizeLocked: classTemplateEditor.templateData.cardSizeLocked || false,
+                      fixedBranch: (classTemplateEditor.templateData.printConfig as any)?.fixedBranch || "",
+                    } : undefined}
+                    previewStudent={students.find(s => s.classId === classTemplateEditor.classId) ? {
+                      formData: students.find(s => s.classId === classTemplateEditor.classId)!.formData as Record<string, string>,
+                      photoUrl: students.find(s => s.classId === classTemplateEditor.classId)!.photoUrl || null,
+                    } : students[0] ? {
+                      formData: students[0].formData as Record<string, string>,
+                      photoUrl: students[0].photoUrl || null,
+                    } : null}
+                    onSave={async (templateImageUrl, fieldMappings, photoBgColor, cardSettings) => {
+                      try {
+                        const res = await fetch(`/api/schools/${schoolId}/templates/${classTemplateEditor.templateId}`, {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            templateImageUrl,
+                            fieldMappings,
+                            photoBgColor,
+                            ...(cardSettings ? {
+                              cardWidthMm: cardSettings.cardWidth,
+                              cardHeightMm: cardSettings.cardHeight,
+                              printDpi: cardSettings.cardDpi,
+                              orientation: cardSettings.cardOrientation === "landscape" ? "LANDSCAPE" : "PORTRAIT",
+                              hasBackSide: cardSettings.printSides === "both",
+                              backTemplateImageUrl: cardSettings.backImageUrl,
+                              backFieldMappings: cardSettings.backMappings,
+                              cardSizeLocked: cardSettings.cardSizeLocked,
+                              printConfig: {
+                                fixedBranch: cardSettings.fixedBranch || "",
+                              },
+                            } : {}),
+                          }),
+                        })
+                        const data = await res.json()
+                        if (data.success) {
+                          toast.success(`Template saved for ${classTemplateEditor.className}!`)
+                          setClassTemplateEditor(prev => prev ? { ...prev, templateData: data.data } : prev)
+                          fetchSchoolTemplates()
+                          fetchClasses()
+                          if (classTemplateEditor.classId) {
+                            await handleAssignClassTemplate(classTemplateEditor.classId, classTemplateEditor.templateId)
+                          }
+                        } else {
+                          toast.error('Failed to save template')
+                        }
+                      } catch {
+                        toast.error('Failed to save template')
+                      }
+                    }}
+                    onUploadImage={async (file) => {
+                      const fd = new FormData()
+                      fd.append('file', file)
+                      fd.append('folder', `templates`)
+                      const res = await fetch('/api/upload', { method: 'POST', body: fd })
+                      const data = await res.json()
+                      if (!res.ok || !data.success) {
+                        throw new Error(data.error || data.detail || 'Upload failed')
+                      }
+                      return data.url
+                    }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -2894,6 +3177,7 @@ export default function SchoolDetailPage() {
                   backImageUrl: (templateData as any).backTemplateImageUrl || null,
                   backMappings: (templateData as any).backFieldMappings || [],
                   cardSizeLocked: (templateData as any).cardSizeLocked || false,
+                  fixedBranch: (templateData.printConfig as any)?.fixedBranch || "",
                 } : undefined}
                 previewStudent={students[0] ? {
                   formData: students[0].formData as Record<string, string>,
@@ -2917,6 +3201,9 @@ export default function SchoolDetailPage() {
                           backTemplateImageUrl: cardSettings.backImageUrl,
                           backFieldMappings: cardSettings.backMappings,
                           cardSizeLocked: cardSettings.cardSizeLocked,
+                          printConfig: {
+                            fixedBranch: cardSettings.fixedBranch || "",
+                          },
                         } : {}),
                       }),
                     })

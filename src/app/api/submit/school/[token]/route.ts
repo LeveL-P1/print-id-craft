@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { buildFormFields, type FormField } from "@/lib/submit-fields"
 import { migrateTemplateToPt } from "@/lib/font-size-units"
+import { getDefaultTemplate } from "@/lib/template-resolver"
 
 /**
  * Public GET — resolves a school-wide registration token to the school
@@ -14,7 +15,6 @@ export async function GET(req: Request, { params }: { params: { token: string } 
     const school = await prisma.school.findUnique({
       where: { linkToken: params.token },
       include: {
-        template: true,
         classes: {
           where: { isActive: true },
           orderBy: { name: "asc" },
@@ -36,13 +36,13 @@ export async function GET(req: Request, { params }: { params: { token: string } 
     }
 
     // One-shot legacy → pt font-size migration (idempotent — see lib/font-size-units.ts).
-    let template = school.template
+    let template = await getDefaultTemplate(school.id)
     if (template) {
       const { migrated, data } = migrateTemplateToPt(template as any)
       if (migrated && data) {
         try {
           template = await prisma.template.update({
-            where: { schoolId: school.id },
+            where: { id: template.id },
             data: {
               frontLayout: (data as any).frontLayout,
               backLayout: (data as any).backLayout,

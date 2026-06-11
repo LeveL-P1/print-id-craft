@@ -973,7 +973,6 @@ export default function TeacherDashboard() {
                   <p style={{ fontSize: 13, color: '#94a3b8' }}>Upload your school's ID card design and place form fields correctly</p>
                 </div>
               </div>
-
               <JpgTemplateMapper
                 schoolId={getSchoolId()}
                 templateImageUrl={templateData?.templateImageUrl || null}
@@ -991,6 +990,7 @@ export default function TeacherDashboard() {
                   backImageUrl: (templateData as any).backTemplateImageUrl || null,
                   backMappings: (templateData as any).backFieldMappings || [],
                   cardSizeLocked: (templateData as any).cardSizeLocked || false,
+                  fixedBranch: (templateData.printConfig as any)?.fixedBranch || "",
                 } : undefined}
                 onSave={async (templateImageUrl, fieldMappings, photoBgColor, cardSettings) => {
                   try {
@@ -1010,6 +1010,9 @@ export default function TeacherDashboard() {
                           backTemplateImageUrl: cardSettings.backImageUrl,
                           backFieldMappings: cardSettings.backMappings,
                           cardSizeLocked: cardSettings.cardSizeLocked,
+                          printConfig: {
+                            fixedBranch: cardSettings.fixedBranch || "",
+                          },
                         } : {}),
                       }),
                     })

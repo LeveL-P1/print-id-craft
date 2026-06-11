@@ -17,12 +17,13 @@ describe('POST /api/schools/[id]/students/import', () => {
       id: 's1',
       name: 'Test School',
       classes: [{ id: 'c1', name: 'Class 1' }],
-      template: { fieldConfig: [] }
     })
+    ;(prisma.template.findFirst as any).mockResolvedValue({ fieldConfig: [] })
     ;(prisma.student.findFirst as any).mockResolvedValue(null)
     ;(prisma.student.count as any).mockResolvedValue(0)
     ;(prisma.student.createMany as any).mockResolvedValue({ count: 0 })
-    ;(prisma.template.upsert as any).mockResolvedValue({})
+    ;(prisma.template.update as any).mockResolvedValue({})
+    ;(prisma.template.create as any).mockResolvedValue({})
   })
 
   function createMockFormData(csvString?: string, noFile: boolean = false) {

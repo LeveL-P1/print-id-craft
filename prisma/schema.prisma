@@ -44,7 +44,7 @@ model School {
   linkExpiresAt DateTime?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
-  template     Template?
+  templates    Template[]
   students     Student[]
   classes      Class[]
   teachers     User[]
@@ -55,26 +55,31 @@ model School {
 }
 
 model Class {
-  id        String   @id @default(cuid())
-  name      String
-  schoolId  String
-  school    School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  linkToken String   @unique @default(cuid())
-  isActive  Boolean  @default(true)
-  expiresAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  students  Student[]
-  teachers  User[]
+  id         String    @id @default(cuid())
+  name       String
+  schoolId   String
+  school     School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  templateId String?
+  template   Template? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  linkToken  String    @unique @default(cuid())
+  isActive   Boolean   @default(true)
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  students   Student[]
+  teachers   User[]
 
   @@index([schoolId])
   @@index([schoolId, name])
+  @@index([templateId])
 }
 
 model Template {
   id                   String      @id @default(cuid())
-  schoolId             String      @unique
+  schoolId             String
   school               School      @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  name                 String      @default("Default Template")
+  classes              Class[]
   frontLayout          Json        @default("[]")
   backLayout           Json        @default("[]")
   cardWidthMm          Float       @default(85.6)
@@ -92,6 +97,8 @@ model Template {
   printConfig          Json?
   createdAt            DateTime    @default(now())
   updatedAt            DateTime    @updatedAt
+
+  @@index([schoolId])
 }
 
 enum Orientation {

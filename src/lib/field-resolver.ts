@@ -133,7 +133,10 @@ export function getFieldRole(
   if (
     k === "mob_father" || k === "mother_phone" || k === "fatherphone" ||
     k === "motherphone" || /\b(mobile|phone|contact|whatsapp|tel)\b/.test(hay) ||
-    (k.includes("mob") && !k.includes("mother") && !/\bfather\b/.test(l))
+    (k.includes("mob") && !k.includes("mother") && !/\bfather\b/.test(l)) ||
+    /\b(mother|father)\s*\(no\.?\)/.test(l) ||
+    /\bmob\.?-\s*father\b/.test(l) ||
+    l.includes("mother's mobile") || l.includes("father's mobile") || l.includes("mothers mobile") || l.includes("fathers mobile")
   ) {
     if (!/\b(father|mother)\s*name\b/.test(hay) && !/\bname\b/.test(l)) {
       return "mobile"

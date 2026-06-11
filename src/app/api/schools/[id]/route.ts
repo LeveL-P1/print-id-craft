@@ -24,7 +24,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         _count: {
           select: { classes: true, students: true, batches: true },
         },
-        template: { select: { id: true, fieldConfig: true } },
+        templates: { take: 1, select: { id: true, fieldConfig: true } },
         teachers: {
           select: { id: true, email: true, name: true, role: true, isMainTeacher: true },
           where: { role: 'TEACHER' }
@@ -36,7 +36,14 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ error: "School not found" }, { status: 404 })
     }
 
-    const response = NextResponse.json({ success: true, data: school })
+    const { templates, ...rest } = school
+    const response = NextResponse.json({
+      success: true,
+      data: {
+        ...rest,
+        template: templates[0] || null,
+      },
+    })
     response.headers.set("Cache-Control", "private, s-maxage=5, stale-while-revalidate=30")
     return response
   } catch (error) {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { getDefaultTemplate } from "@/lib/template-resolver"
 import { z } from "zod"
 
 const reorderSchema = z.object({
@@ -25,8 +26,13 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     const body = await req.json()
     const validated = reorderSchema.parse(body)
 
+    const template = await getDefaultTemplate(params.id)
+    if (!template) {
+      return NextResponse.json({ success: false, error: "No template found" }, { status: 404 })
+    }
+
     await prisma.template.update({
-      where: { schoolId: params.id },
+      where: { id: template.id },
       data: { fieldConfig: validated.fields },
     })
 

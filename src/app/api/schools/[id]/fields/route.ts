@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { getDefaultTemplate } from "@/lib/template-resolver"
 import { z } from "zod"
 
 // Fields are stored as JSON in Template.fieldConfig
@@ -21,11 +22,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
     }
 
-    const template = await prisma.template.findUnique({
-      where: { schoolId: params.id },
-      select: { fieldConfig: true },
-    })
-
+    const template = await getDefaultTemplate(params.id)
     const fields = (template?.fieldConfig || []) as any[]
     return NextResponse.json({ success: true, data: fields, error: null })
   } catch (error) {
@@ -43,16 +40,16 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const body = await req.json()
     const validated = fieldSchema.parse(body)
 
-    const template = await prisma.template.findUnique({
-      where: { schoolId: params.id },
-      select: { fieldConfig: true },
-    })
-
+    const template = await getDefaultTemplate(params.id)
     const fields = (template?.fieldConfig || []) as any[]
     fields.push(validated)
 
+    if (!template) {
+      return NextResponse.json({ success: false, error: "No template found" }, { status: 404 })
+    }
+
     await prisma.template.update({
-      where: { schoolId: params.id },
+      where: { id: template.id },
       data: { fieldConfig: fields },
     })
 

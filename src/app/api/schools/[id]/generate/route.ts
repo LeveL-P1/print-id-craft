@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { studentPhotoUrl } from "@/lib/student-photo-url"
+import { getDefaultTemplate, getTemplateForClass } from "@/lib/template-resolver"
 
 export const maxDuration = 60; // Vercel function timeout config
 
@@ -27,14 +28,15 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     const classId = searchParams.get("classId")
     const statusFilter = searchParams.get("status") || "APPROVED"
 
-    // Get template
-    const template = await prisma.template.findUnique({
-      where: { schoolId: params.id },
-    })
+    const template = classId
+      ? await getTemplateForClass(classId)
+      : await getDefaultTemplate(params.id)
 
     if (!template?.templateImageUrl || !template?.fieldMappings) {
       return NextResponse.json(
-        { error: "No JPG template configured. Please upload and map a template first." },
+        { error: classId
+            ? "No JPG template configured for this class. Please assign and map a template first."
+            : "No JPG template configured. Please upload and map a template first." },
         { status: 400 }
       )
     }

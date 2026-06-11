@@ -22,7 +22,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
     const school = await prisma.school.findUnique({
       where: { id: schoolId },
-      select: { id: true, template: { select: { fieldConfig: true } } },
+      select: { id: true },
     })
     if (!school) {
       return NextResponse.json({ error: "School not found" }, { status: 404 })

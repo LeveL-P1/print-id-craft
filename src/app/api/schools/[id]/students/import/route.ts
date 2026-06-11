@@ -10,6 +10,7 @@ import { MAX_IMPORT_ROWS, parseCsvRows, validateImportFile } from "@/lib/spreads
 import { parseExcelBuffer } from "@/lib/excel"
 import { allocateStudentSerials } from "@/lib/student-serial"
 import { buildStudentIndexData } from "@/lib/student-index"
+import { getDefaultTemplate } from "@/lib/template-resolver"
 
 export const maxDuration = 300; // Vercel Pro function timeout config
 
@@ -27,11 +28,13 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     // Verify school + get template field config
     const school = await prisma.school.findUnique({
       where: { id: schoolId },
-      include: { template: { select: { fieldConfig: true } }, classes: { select: { id: true, name: true } } },
+      include: { classes: { select: { id: true, name: true } } },
     })
     if (!school) {
       return NextResponse.json({ error: "School not found" }, { status: 404 })
     }
+
+    const defaultTemplate = await getDefaultTemplate(schoolId)
 
     const formData = await req.formData()
     const file = formData.get("file") as File | null
@@ -72,7 +75,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     }
 
     // Field config from template
-    const fieldConfig = (school.template?.fieldConfig || []) as Array<{ key: string; label: string; type: string; required: boolean }>
+    const fieldConfig = (defaultTemplate?.fieldConfig || []) as Array<{ key: string; label: string; type: string; required: boolean }>
 
     // Build a label→key mapping for flexible column matching.
     // IMPORTANT: Apply generic aliases FIRST, then template fieldConfig LAST so
@@ -469,22 +472,27 @@ export async function POST(req: Request, { params }: { params: { id: string } })
             }
           })
 
-        await prisma.template.upsert({
-          where: { schoolId },
-          update: { fieldConfig: newFieldConfig },
-          create: {
-            schoolId,
-            frontLayout: [],
-            backLayout: [],
-            fieldConfig: newFieldConfig,
-            cardWidthMm: 85.6,
-            cardHeightMm: 54.0,
-            printDpi: 300,
-            orientation: "PORTRAIT",
-            fieldMappings: [],
-            photoBgColor: "#FFFFFF",
-          },
-        })
+        if (defaultTemplate) {
+          await prisma.template.update({
+            where: { id: defaultTemplate.id },
+            data: { fieldConfig: newFieldConfig },
+          })
+        } else {
+          await prisma.template.create({
+            data: {
+              schoolId,
+              frontLayout: [],
+              backLayout: [],
+              fieldConfig: newFieldConfig,
+              cardWidthMm: 85.6,
+              cardHeightMm: 54.0,
+              printDpi: 300,
+              orientation: "PORTRAIT",
+              fieldMappings: [],
+              photoBgColor: "#FFFFFF",
+            },
+          })
+        }
       } catch (err: any) {
         console.error("Failed to auto-sync template fieldConfig:", err?.message)
       }

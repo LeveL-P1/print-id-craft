@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma"
+import { getDefaultTemplate } from "@/lib/template-resolver"
 import { storageUpload } from "@/lib/storage"
 import { reportError } from "@/lib/observability"
 import type { GeneratePrintBatchPayload } from "../types"
@@ -175,7 +176,7 @@ export async function processGeneratePrintBatch(schoolId: string, payload: Gener
     upsert: true,
   })
 
-  const template = await prisma.template.findUnique({ where: { schoolId } })
+  const template = await getDefaultTemplate(schoolId)
   const bleedMm = 3
   const mmToPoints = 2.8346
   const cardWidthMm = template?.cardWidthMm || 85.6

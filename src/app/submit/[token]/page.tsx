@@ -40,6 +40,7 @@ type FormConfig = {
   // Available house/flag colours (from other students in this school) — used to
   // render the House Flag input as a dropdown so parents don't misspell.
   flagColors?: string[]
+  fixedBranch?: string
 }
 
 const fieldRole = (field: FieldConfig): FieldRole =>
@@ -63,6 +64,17 @@ const formatSubmittedDate = (iso: string) => {
 // "McDonald" survive editing.
 const titleCaseWords = (s: string): string =>
   s.replace(/(^|\s)([a-zA-Z])/g, (_m, sp, ch) => sp + ch.toUpperCase())
+
+const getCleanLabel = (label: string): string => {
+  const l = (label || "").toLowerCase().trim()
+  if (l === "mother (no.)" || l === "mother no." || l === "mother no" || l === "motherphone" || l === "mother phone") {
+    return "Mother's Mobile No."
+  }
+  if (l === "mob.- father" || l === "father (no.)" || l === "father no." || l === "father no" || l === "fatherphone" || l === "father phone") {
+    return "Father's Mobile No."
+  }
+  return label
+}
 
 // Strip the +91 prefix (with optional spaces / 0 / hyphens) so we can show
 // only the local 10-digit portion in the input while storing the full
@@ -399,6 +411,17 @@ export default function SubmitPage() {
           if (data.data.className) {
             setFormData(prev => ({ ...prev, class: data.data.className }))
           }
+          // Auto-populate fixed branch if configured
+          if (data.data.fixedBranch) {
+            const branchField = data.data.fieldConfig.find((f: any) => getFieldRole(f.key, f.label, f.role) === "branch")
+            setFormData(prev => {
+              const updated: Record<string, string> = { ...prev, branch: data.data.fixedBranch }
+              if (branchField) {
+                updated[branchField.key] = data.data.fixedBranch
+              }
+              return updated
+            })
+          }
           setStep("form")
         } else {
           setErrorMsg(data.error || "Invalid link")
@@ -435,7 +458,7 @@ export default function SubmitPage() {
         const value = (formData[f.key] || "").trim()
         const role = fieldRole(f)
         if (f.required && !value) {
-          setAlertMsg(`Please fill in ${f.label}.`)
+          setAlertMsg(`Please fill in ${getCleanLabel(f.label)}.`)
           return
         }
         if (role === "address" && f.required) {
@@ -846,8 +869,9 @@ export default function SubmitPage() {
                 {/* Field Details */}
                 <div style={{ padding: 16 }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                    {config?.fieldConfig.filter(f => f.key !== "class").map((field, idx) => (
-                      formData[field.key] && (
+                    {config?.fieldConfig.filter(f => f.key !== "class").map((field, idx) => {
+                      if (fieldRole(field) === "branch" && config.fixedBranch) return null
+                      return formData[field.key] && (
                         <div 
                           key={field.key} 
                           style={{ 
@@ -858,11 +882,11 @@ export default function SubmitPage() {
                             borderBottom: idx < (config?.fieldConfig.filter(f => f.key !== "class").length || 0) - 1 ? '1px solid #e2e8f0' : 'none',
                           }}
                         >
-                          <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 500, flexShrink: 0 }}>{field.label}</span>
+                          <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 500, flexShrink: 0 }}>{getCleanLabel(field.label)}</span>
                           <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', textAlign: 'right', marginLeft: 12, wordBreak: 'break-word' }}>{formData[field.key]}</span>
                         </div>
                       )
-                    ))}
+                    })}
                     {/* Class (auto-filled) */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '10px 0' }}>
                       <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 500 }}>Class</span>
@@ -1040,7 +1064,7 @@ export default function SubmitPage() {
                     return (
                       <div key={field.key} className="form-group">
                         <label>
-                          {field.label}
+                          {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
                         </label>
                         <div style={{
@@ -1084,7 +1108,7 @@ export default function SubmitPage() {
                     return (
                       <div key={field.key} className="form-group">
                         <label>
-                          {field.label}
+                          {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
                         </label>
                         <textarea
@@ -1114,7 +1138,7 @@ export default function SubmitPage() {
                       return (
                         <div key={field.key} className="form-group">
                           <label>
-                            {field.label}
+                            {getCleanLabel(field.label)}
                             {field.required && <span style={{ color: '#ef4444' }}> *</span>}
                           </label>
                           <select
@@ -1135,7 +1159,7 @@ export default function SubmitPage() {
                     return (
                       <div key={field.key} className="form-group">
                         <label>
-                          {field.label}
+                          {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
                         </label>
                         <input
@@ -1154,7 +1178,7 @@ export default function SubmitPage() {
                     return (
                       <div key={field.key} className="form-group">
                         <label>
-                          {field.label}
+                          {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
                         </label>
                         <input
@@ -1169,10 +1193,11 @@ export default function SubmitPage() {
 
                   // ── Branch ──
                   if (role === "branch") {
+                    if (config?.fixedBranch) return null
                     return (
                       <div key={field.key} className="form-group">
                         <label>
-                          {field.label}
+                          {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
                         </label>
                         <input
@@ -1191,7 +1216,7 @@ export default function SubmitPage() {
                     return (
                       <div key={field.key} className="form-group">
                         <label>
-                          {field.label}
+                          {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
                         </label>
                         <select
@@ -1217,7 +1242,7 @@ export default function SubmitPage() {
                     return (
                       <div key={field.key} className="form-group">
                         <label>
-                          {field.label}
+                          {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
                         </label>
                         <input
@@ -1249,7 +1274,7 @@ export default function SubmitPage() {
                     return (
                       <div key={field.key} className="form-group">
                         <label>
-                          {field.label}
+                          {getCleanLabel(field.label)}
                           {showOrderHint && (
                             <span style={{
                               marginLeft: 8, fontSize: 11, fontWeight: 500,
@@ -1283,7 +1308,7 @@ export default function SubmitPage() {
                   return (
                     <div key={field.key} className="form-group">
                       <label>
-                        {field.label}
+                        {getCleanLabel(field.label)}
                         {field.required && <span style={{ color: '#ef4444' }}> *</span>}
                       </label>
                       {field.type === "select" && field.key === "bloodGroup" ? (
@@ -1309,7 +1334,7 @@ export default function SubmitPage() {
                           required={field.required}
                           value={value}
                           onChange={e => handleFieldChange(field.key, e.target.value)}
-                          placeholder={`Enter ${field.label.toLowerCase()}`}
+                          placeholder={`Enter ${getCleanLabel(field.label).toLowerCase()}`}
                         />
                       )}
                     </div>

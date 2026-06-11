@@ -39,6 +39,9 @@ vi.mock('@/lib/prisma', () => {
     },
     template: {
       upsert: vi.fn(),
+      findFirst: vi.fn(),
+      update: vi.fn(),
+      create: vi.fn(),
     },
     printBatch: {
       findFirst: vi.fn(),

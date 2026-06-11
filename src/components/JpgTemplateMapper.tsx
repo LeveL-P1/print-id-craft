@@ -76,6 +76,7 @@ type CardSettings = {
   backImageUrl?: string | null
   backMappings?: FieldMapping[]
   cardSizeLocked?: boolean
+  fixedBranch?: string
 }
 
 type JpgTemplateMapperProps = {
@@ -432,6 +433,7 @@ export default function JpgTemplateMapper({
   const [backMappings, setBackMappings] = useState<FieldMapping[]>(initialCardSettings?.backMappings || [])
   const [activeCardSide, setActiveCardSide] = useState<"front" | "back">("front")
   const [cardSizeLocked, setCardSizeLocked] = useState(initialCardSettings?.cardSizeLocked || false)
+  const [fixedBranch, setFixedBranch] = useState(initialCardSettings?.fixedBranch || "")
 
   // String-based intermediates for width/height inputs so user can type freely
   const [cardWidthStr, setCardWidthStr] = useState(String(initialCardSettings?.cardWidth || 85.6))
@@ -805,6 +807,7 @@ export default function JpgTemplateMapper({
         backImageUrl,
         backMappings,
         cardSizeLocked,
+        fixedBranch,
       }
       await onSave(imageUrl, mappings, photoBgColor, settings)
     } finally {
@@ -2166,6 +2169,31 @@ export default function JpgTemplateMapper({
                   </div>
                 </div>
               </div>
+
+              {/* Fixed Branch (Optional) */}
+              <div style={{ marginTop: 12 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: "#3b82f6", marginBottom: 4, display: "block" }}>
+                  Fixed Branch (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={fixedBranch}
+                  onChange={(e) => setFixedBranch(e.target.value)}
+                  placeholder="e.g. Bibvewadi Branch"
+                  style={{
+                    width: "100%",
+                    height: 34,
+                    padding: "0 8px",
+                    border: "1.5px solid #bfdbfe",
+                    borderRadius: 8,
+                    fontSize: 12,
+                    background: "white",
+                  }}
+                />
+                <div style={{ fontSize: 9, color: "#6b7280", marginTop: 3, lineHeight: 1.35 }}>
+                  If set, the branch will be pre-filled/fixed for this template, and the student registration form will hide the branch field.
+                </div>
+              </div>
             </div>
           )}
 
@@ -3387,11 +3415,11 @@ export default function JpgTemplateMapper({
                 { key: "class", label: "Class-Section" },
                 { key: "branch", label: "Branch" },
                 { key: "rollNo", label: "Roll No. / NO" },
-                { key: "father", label: "Father (No.)" },
-                { key: "mother", label: "Mother (No.)" },
+                { key: "father", label: "Father's Mobile No." },
+                { key: "mother", label: "Mother's Mobile No." },
                 { key: "fatherName", label: "Father's Name" },
                 { key: "motherName", label: "Mother's Name" },
-                { key: "mob_father", label: "Mob.- Father" },
+                { key: "mob_father", label: "Father's Mobile No." },
                 { key: "phone", label: "Phone" },
                 { key: "address", label: "Address" },
                 { key: "addressWithLabel", label: "Address:", prefix: true },
