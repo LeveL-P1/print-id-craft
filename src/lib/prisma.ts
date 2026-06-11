@@ -6,7 +6,10 @@ const globalForPrisma = globalThis as unknown as {
 
 let dbUrl = process.env.DATABASE_URL;
 if (dbUrl && process.env.NODE_ENV === "production" && !dbUrl.includes("pgbouncer=true")) {
-  dbUrl += (dbUrl.includes("?") ? "&" : "?") + "pgbouncer=true&connection_limit=10&statement_cache_size=0";
+  dbUrl += (dbUrl.includes("?") ? "&" : "?") + "pgbouncer=true&connection_limit=3&statement_cache_size=0&pool_timeout=10";
+} else if (dbUrl && dbUrl.includes("connection_limit=")) {
+  // Ensure existing connection_limit is not too high for Supabase free tier
+  dbUrl = dbUrl.replace(/connection_limit=\d+/, "connection_limit=3");
 }
 
 export const prisma =
