@@ -3394,8 +3394,8 @@ export default function JpgTemplateMapper({
                 { key: "mob_father", label: "Mob.- Father" },
                 { key: "phone", label: "Phone" },
                 { key: "address", label: "Address" },
-                { key: "addressWithLabel", label: "Address:" },
-                { key: "addWithLabel", label: "ADD:" },
+                { key: "addressWithLabel", label: "Address:", prefix: true },
+                { key: "addWithLabel", label: "ADD:", prefix: true },
                 { key: "dateOfBirth", label: "Date of Birth" },
                 { key: "bloodGroup", label: "Blood Group" },
                 { key: "admissionNo", label: "Admission No." },
@@ -3407,13 +3407,15 @@ export default function JpgTemplateMapper({
                   <button
                     key={f.key}
                     onClick={() => addFieldMapping(f.key, f.label)}
+                    title={f.prefix ? `${f.label} will be added before the student address` : undefined}
                     style={{
                       padding: "6px 12px",
-                      border: "1px solid #e2e8f0",
+                      border: f.prefix ? "1px solid #fecaca" : "1px solid #e2e8f0",
                       borderRadius: 6,
-                      background: "white",
-                      color: "#334155",
+                      background: f.prefix ? "#fff1f2" : "white",
+                      color: f.prefix ? "#b91c1c" : "#334155",
                       fontSize: 12,
+                      fontWeight: f.prefix ? 700 : 400,
                       cursor: "pointer",
                       transition: "all 0.15s",
                       display: "flex",
@@ -3421,15 +3423,15 @@ export default function JpgTemplateMapper({
                       gap: 4,
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.background = "#f8fafc"
-                      e.currentTarget.style.borderColor = "#3b82f6"
+                      e.currentTarget.style.background = f.prefix ? "#ffe4e6" : "#f8fafc"
+                      e.currentTarget.style.borderColor = f.prefix ? "#f87171" : "#3b82f6"
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.background = "white"
-                      e.currentTarget.style.borderColor = "#e2e8f0"
+                      e.currentTarget.style.background = f.prefix ? "#fff1f2" : "white"
+                      e.currentTarget.style.borderColor = f.prefix ? "#fecaca" : "#e2e8f0"
                     }}
                   >
-                    <span style={{ color: "#3b82f6" }}>+</span> {f.label}
+                    <span style={{ color: f.prefix ? "#dc2626" : "#3b82f6" }}>+</span> {f.label}
                   </button>
                 ))}
             </div>
