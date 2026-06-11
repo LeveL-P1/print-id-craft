@@ -47,9 +47,14 @@ input, select, textarea { font-family: inherit; }
 }
 
 /* GPU ACCELERATION & PERFORMANCE */
-.page-body > div { 
+.page-body > div:not(.template-tab-list) { 
   content-visibility: auto;
   contain-intrinsic-size: auto 500px;
+}
+
+.template-tab-list {
+  content-visibility: visible;
+  contain: none;
 }
 
 /* Smooth GPU-accelerated modals */
@@ -1847,11 +1852,90 @@ html {
   }
 }
 
-/* --- Responsive template card padding on mobile --- */
+/* --- Template mapper layout (canvas + sidebar) --- */
+.mapper-root {
+  width: 100%;
+}
+
+.mapper-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  gap: 12px;
+  align-items: start;
+}
+
+.mapper-canvas {
+  position: sticky;
+  top: 12px;
+  align-self: start;
+  min-width: 0;
+}
+
+.mapper-sidebar {
+  align-self: start;
+  max-height: calc(100vh - 120px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+  scrollbar-gutter: stable;
+}
+
+.mapper-sidebar > div {
+  flex-shrink: 0;
+}
+
+.responsive-template-card {
+  overflow: hidden;
+}
+
+.responsive-template-card:last-child {
+  margin-bottom: 0;
+}
+
+.template-tab-list {
+  gap: 12px !important;
+}
+
+@media (max-width: 1024px) {
+  .mapper-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .mapper-canvas {
+    position: static;
+    top: auto;
+  }
+
+  .mapper-sidebar {
+    max-height: none;
+    overflow-y: visible;
+    padding-right: 0;
+  }
+}
+
 @media (max-width: 768px) {
   .responsive-template-card {
-    padding: 14px !important;
+    padding: 12px !important;
     border-radius: 12px !important;
+  }
+
+  .mapper-root .mapper-toolbar {
+    font-size: 10px !important;
+    padding: 6px 8px !important;
+  }
+
+  .mapper-root .mapper-toolbar button {
+    width: 26px !important;
+    height: 26px !important;
+    font-size: 12px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .responsive-template-card {
+    padding: 10px !important;
+    border-radius: 10px !important;
   }
 }
 

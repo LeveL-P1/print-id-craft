@@ -3183,7 +3183,7 @@ export default function SchoolDetailPage() {
 
         {/* TEMPLATE TAB */}
         {tab === "template" && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          <div className="template-tab-list" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {/* Template tab header with count + add button */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
               <div>
@@ -3208,8 +3208,8 @@ export default function SchoolDetailPage() {
 
             {/* Render all templates */}
             {schoolTemplates.map((template, idx) => (
-              <div key={template.id} className="responsive-template-card" style={{ background: 'white', borderRadius: 16, border: '1px solid #e2e8f0', padding: 24 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+              <div key={template.id} className="responsive-template-card" style={{ background: 'white', borderRadius: 16, border: '1px solid #e2e8f0', padding: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
                   <div style={{
                     width: 44, height: 44, borderRadius: 12,
                     background: idx === 0 ? 'linear-gradient(135deg, #3b82f6, #1d4ed8)' : idx === 1 ? 'linear-gradient(135deg, #8b5cf6, #6d28d9)' : 'linear-gradient(135deg, #f59e0b, #d97706)',

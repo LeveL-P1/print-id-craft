@@ -1040,24 +1040,7 @@ export default function JpgTemplateMapper({
   // MAIN MAPPER UI — image loaded, map fields
   // ---------------------------------------------------------------
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      {/* ── Responsive overrides for mobile ── */}
-      <style>{`
-        @media (max-width: 900px) {
-          .mapper-sidebar {
-            max-width: 100% !important;
-            min-width: 0 !important;
-          }
-          .mapper-layout {
-            flex-direction: column !important;
-            gap: 12px !important;
-          }
-        }
-        @media (max-width: 640px) {
-          .mapper-toolbar { font-size: 10px !important; padding: 6px 8px !important; }
-          .mapper-toolbar button { width: 26px !important; height: 26px !important; font-size: 12px !important; }
-        }
-      `}</style>
+    <div className="mapper-root" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {/* Top Bar */}
       <div
         style={{
@@ -1188,19 +1171,11 @@ export default function JpgTemplateMapper({
         </div>
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 20,
-          alignItems: "flex-start",
-        }}
-        className="mapper-layout"
-      >
+      <div className="mapper-layout">
         {/* Left: Image Canvas */}
         <div
+          className="mapper-canvas"
           style={{
-            flex: "1 1 min(100%, 600px)",
             background: "#0f172a",
             borderRadius: 16,
             padding: 0,
@@ -1847,7 +1822,7 @@ export default function JpgTemplateMapper({
         {/* Right: Sidebar */}
         <div
           className="mapper-sidebar"
-          style={{ flex: "1 1 320px", maxWidth: 340, minWidth: 280, display: "flex", flexDirection: "column", gap: 16 }}
+          style={{ display: "flex", flexDirection: "column", gap: 10 }}
         >
 
           {/* Card Settings Panel */}
