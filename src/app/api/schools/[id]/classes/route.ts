@@ -5,10 +5,21 @@ import { prisma } from "@/lib/prisma"
 import { z } from "zod"
 import crypto from "crypto"
 
+export const dynamic = "force-dynamic"
+export const maxDuration = 10
+
 const classSchema = z.object({
   name: z.string().min(1, "Class name is required"),
   expiresAt: z.string().optional().nullable(),
 })
+
+function parsePagination(req: Request) {
+  const url = new URL(req.url)
+  const page = Math.max(1, Number(url.searchParams.get("page") || 1))
+  const requestedLimit = Number(url.searchParams.get("limit") || 100)
+  const limit = Math.min(Math.max(1, Number.isFinite(requestedLimit) ? requestedLimit : 100), 100)
+  return { page, limit, skip: (page - 1) * limit }
+}
 
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
@@ -20,22 +31,82 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const classes = await prisma.class.findMany({
+    const { page, limit, skip } = parsePagination(req)
+
+    const baseClasses = await prisma.class.findMany({
       where: { schoolId: params.id },
-      include: {
+      select: {
+        id: true,
+        name: true,
+        linkToken: true,
+        isActive: true,
+        expiresAt: true,
+        templateId: true,
+        createdAt: true,
         _count: { select: { students: true } },
-        template: {
-          select: { id: true, name: true, templateImageUrl: true },
-        },
-        teachers: {
-          where: { role: "TEACHER" },
-          select: { id: true, name: true, email: true, isMainTeacher: true },
-        },
       },
       orderBy: { createdAt: "desc" },
+      skip,
+      take: limit,
     })
 
-    return NextResponse.json({ success: true, data: classes })
+    const classIds = baseClasses.map((entry) => entry.id)
+    const templateIds = Array.from(new Set(baseClasses.map((entry) => entry.templateId).filter(Boolean))) as string[]
+
+    const [templatesResult, teachersResult, totalResult] = await Promise.allSettled([
+      templateIds.length
+        ? prisma.template.findMany({
+            where: { id: { in: templateIds }, schoolId: params.id },
+            select: { id: true, name: true, templateImageUrl: true },
+          })
+        : Promise.resolve([]),
+      classIds.length
+        ? prisma.user.findMany({
+            where: { classId: { in: classIds }, role: "TEACHER" },
+            select: { id: true, classId: true, name: true, email: true, isMainTeacher: true },
+          })
+        : Promise.resolve([]),
+      prisma.class.count({ where: { schoolId: params.id } }),
+    ])
+
+    const templatesById = new Map(
+      templatesResult.status === "fulfilled"
+        ? templatesResult.value.map((template) => [template.id, template])
+        : []
+    )
+    const teachersByClassId = new Map<string, Array<{ id: string; name: string; email: string; isMainTeacher: boolean }>>()
+    if (teachersResult.status === "fulfilled") {
+      for (const teacher of teachersResult.value) {
+        if (!teacher.classId) continue
+        const current = teachersByClassId.get(teacher.classId) || []
+        current.push({
+          id: teacher.id,
+          name: teacher.name,
+          email: teacher.email,
+          isMainTeacher: teacher.isMainTeacher,
+        })
+        teachersByClassId.set(teacher.classId, current)
+      }
+    }
+
+    const classes = baseClasses.map((entry) => ({
+      ...entry,
+      template: entry.templateId ? templatesById.get(entry.templateId) || null : null,
+      teachers: teachersByClassId.get(entry.id) || [],
+    }))
+
+    const response = NextResponse.json({
+      success: true,
+      data: classes,
+      pagination: {
+        page,
+        limit,
+        total: totalResult.status === "fulfilled" ? totalResult.value : classes.length,
+      },
+      partial: templatesResult.status === "rejected" || teachersResult.status === "rejected",
+    })
+    response.headers.set("Cache-Control", "private, max-age=10, stale-while-revalidate=30")
+    return response
   } catch (error) {
     console.error(`GET /api/schools/${params.id}/classes error:`, error)
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 })

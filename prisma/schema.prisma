@@ -72,6 +72,7 @@ model Class {
 
   @@index([schoolId])
   @@index([schoolId, name])
+  @@index([schoolId, createdAt])
   @@index([templateId])
 }
 
@@ -100,6 +101,7 @@ model Template {
   updatedAt            DateTime    @updatedAt
 
   @@index([schoolId])
+  @@index([schoolId, createdAt])
 }
 
 enum Orientation {
