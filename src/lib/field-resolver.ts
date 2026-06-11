@@ -273,6 +273,34 @@ export function resolveFieldValue(fd: Record<string, string>, fieldKey: string):
   return ""
 }
 
+const PREFIXED_ADDRESS_FIELDS: Record<string, string> = {
+  addresswithlabel: "Address:",
+  addresslabel: "Address:",
+  addressprefix: "Address:",
+  prefixedaddress: "Address:",
+  addwithlabel: "ADD:",
+  addlabel: "ADD:",
+  addprefix: "ADD:",
+  prefixedadd: "ADD:",
+}
+
+export function isPrefixedAddressField(fieldKey: string): boolean {
+  return Boolean(PREFIXED_ADDRESS_FIELDS[normalizeKey(fieldKey)])
+}
+
+/**
+ * Resolves the value that should be printed on a card. Most fields return the
+ * raw resolved value. Special display-only placeholders can add fixed prefixes
+ * while still pulling the underlying student data from the canonical field.
+ */
+export function resolveDisplayFieldValue(fd: Record<string, string>, fieldKey: string): string {
+  const prefix = PREFIXED_ADDRESS_FIELDS[normalizeKey(fieldKey)]
+  if (!prefix) return resolveFieldValue(fd, fieldKey)
+
+  const address = resolveFieldValue(fd, "address")
+  return address ? `${prefix} ${address}` : ""
+}
+
 /**
  * Formats a date string according to the user's chosen format.
  * Parses DD/MM/YYYY, YYYY-MM-DD, and DD-MM-YYYY inputs.

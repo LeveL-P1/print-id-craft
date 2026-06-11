@@ -6,7 +6,7 @@ import {
   type IdSizeConfig, type FontConfig, type PhotoSizeConfig,
   type PhotoBorderConfig, type WrapTextConfig,
 } from "./IDMakerDialogs"
-import { resolveFieldValue, formatDateValue } from "@/lib/field-resolver"
+import { resolveDisplayFieldValue, formatDateValue, isPrefixedAddressField } from "@/lib/field-resolver"
 
 const BG_COLOR_PRESETS = [
   // Neutrals
@@ -151,6 +151,8 @@ const SAMPLE_DATA: Record<string, string> = {
   dateOfBirth: "15/08/2022",
   bloodGroup: "B+",
   address: "Flat No. 503, A-Wing, Sai Shilp Society, Pune",
+  addressWithLabel: "Address: Flat No. 503, A-Wing, Sai Shilp Society, Pune",
+  addWithLabel: "ADD: Flat No. 503, A-Wing, Sai Shilp Society, Pune",
   admissionNo: "ADM-2025-001",
   photoId: "BB25035",
   serialNumber: "PLAY-B1-0001",
@@ -517,6 +519,14 @@ export default function JpgTemplateMapper({
 
   // Convert label → unique key: "Mob.- Father -" → "mob_father"
   const labelToKey = (label: string): string => {
+    const normalizedLabel = label.toLowerCase().replace(/[^a-z0-9]/g, "")
+    if (["address", "addressprefix", "addresswithlabel", "addresslabel"].includes(normalizedLabel)) {
+      return "addressWithLabel"
+    }
+    if (["add", "addprefix", "addwithlabel", "addlabel"].includes(normalizedLabel)) {
+      return "addWithLabel"
+    }
+
     return label
       .toLowerCase()
       .replace(/[^a-z0-9\s]/g, "")
@@ -534,6 +544,7 @@ export default function JpgTemplateMapper({
 
     pushToHistory(mappings)
     const isDateField = fieldKey === "dateOfBirth" || fieldKey.toLowerCase().includes("date")
+    const isPrefixedAddress = isPrefixedAddressField(fieldKey)
     const newMapping: FieldMapping = {
       id: `field-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       fieldKey,
@@ -541,8 +552,8 @@ export default function JpgTemplateMapper({
       type,
       x: type === "photo" ? 5 : type === "flag" ? 75 : 40,
       y: type === "photo" ? 25 : type === "flag" ? 5 : 30 + mappings.filter((m) => m.type === "text").length * 6,
-      width: type === "photo" ? 18 : type === "flag" ? 12 : 30,
-      height: type === "photo" ? 32 : type === "flag" ? 18 : 4.5,
+      width: type === "photo" ? 18 : type === "flag" ? 12 : isPrefixedAddress ? 55 : 30,
+      height: type === "photo" ? 32 : type === "flag" ? 18 : isPrefixedAddress ? 8 : 4.5,
       fontSize: 14,
       fontColor: "#000000",
       fontWeight: fieldKey === "name" || fieldKey === "fullName" ? "bold" : "normal",
@@ -550,9 +561,9 @@ export default function JpgTemplateMapper({
       textAlign: "left",
       fontStyle: "normal",
       textDecoration: "none",
-      textWrap: "nowrap",
+      textWrap: isPrefixedAddress ? "multiline" : "nowrap",
       letterSpacing: 0,
-      lineHeight: 1.2,
+      lineHeight: isPrefixedAddress ? 1 : 1.2,
       textTransform: "none",
       dateFormat: isDateField ? "DD/MM/YYYY" : undefined,
       photoBorderWidth: type === "photo" ? 0 : undefined,
@@ -1594,7 +1605,7 @@ export default function JpgTemplateMapper({
               let sampleValue = ""
               if (m.type !== "photo" && m.type !== "flag") {
                 const realValue = previewStudent?.formData
-                  ? resolveFieldValue(previewStudent.formData, m.fieldKey)
+                  ? resolveDisplayFieldValue(previewStudent.formData, m.fieldKey)
                   : ""
                 sampleValue = realValue || SAMPLE_DATA[m.fieldKey] || m.label
               }
@@ -3383,6 +3394,8 @@ export default function JpgTemplateMapper({
                 { key: "mob_father", label: "Mob.- Father" },
                 { key: "phone", label: "Phone" },
                 { key: "address", label: "Address" },
+                { key: "addressWithLabel", label: "Address:" },
+                { key: "addWithLabel", label: "ADD:" },
                 { key: "dateOfBirth", label: "Date of Birth" },
                 { key: "bloodGroup", label: "Blood Group" },
                 { key: "admissionNo", label: "Admission No." },

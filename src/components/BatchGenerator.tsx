@@ -1,7 +1,12 @@
 "use client"
 import { useState, useCallback, useEffect } from "react"
 import { toast } from "sonner"
-import { normalizeKey, resolveFieldValue, FIELD_GROUPS, formatDateValue } from "@/lib/field-resolver"
+import {
+  normalizeKey,
+  resolveDisplayFieldValue,
+  FIELD_GROUPS,
+  formatDateValue,
+} from "@/lib/field-resolver"
 import { PrintDialog, type PrintConfig } from "./IDMakerDialogs"
 import { generateDirectPdf } from "@/lib/pdf-layout"
 
@@ -56,7 +61,7 @@ type BatchGeneratorProps = {
   classes: { id: string; name: string; _count: { students: number } }[]
 }
 
-// normalizeKey, FIELD_GROUPS, resolveFieldValue imported from @/lib/field-resolver
+// normalizeKey, FIELD_GROUPS, resolveDisplayFieldValue imported from @/lib/field-resolver
 
 // ─── Bounded LRU caches (scale-safe for 2000+ students) ───
 // Template images (rarely change) — kept across runs.
@@ -404,7 +409,7 @@ async function renderIdCard(
       }
     } else {
       const pId = field.fieldKey === "photoId" ? "photoid" : field.fieldKey
-      const val = resolveFieldValue(student.formData, pId) || 
+      const val = resolveDisplayFieldValue(student.formData, pId) || 
                   (field.fieldKey === "class" ? student.className : 
                    field.fieldKey === "serialNumber" ? student.serialNumber : "")
       
@@ -545,7 +550,7 @@ async function renderIdCardSvg(
       }
     } else {
       const pId = field.fieldKey === "photoId" ? "photoid" : field.fieldKey
-      const val = resolveFieldValue(student.formData, pId) ||
+      const val = resolveDisplayFieldValue(student.formData, pId) ||
                   (field.fieldKey === "class" ? student.className :
                    field.fieldKey === "serialNumber" ? student.serialNumber : "")
       const value = String(val || "").trim()

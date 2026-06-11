@@ -1,6 +1,10 @@
 "use client"
 import { useRef, useEffect, useState, useCallback, memo } from "react"
-import { resolveFieldValue as resolveFieldValueShared, formatDateValue } from "@/lib/field-resolver"
+import {
+  resolveDisplayFieldValue as resolveDisplayFieldValueShared,
+  resolveFieldValue as resolveFieldValueShared,
+  formatDateValue,
+} from "@/lib/field-resolver"
 
 type FieldMapping = {
   id: string
@@ -140,6 +144,10 @@ const FIELD_GROUPS: Record<string, string[]> = {
 // (including "mobile" → "phone"/"fatherphone") stay in sync across the app.
 export function resolveFieldValue(fd: Record<string, string>, fieldKey: string): string {
   return resolveFieldValueShared(fd, fieldKey)
+}
+
+function resolveCardFieldValue(fd: Record<string, string>, fieldKey: string): string {
+  return resolveDisplayFieldValueShared(fd, fieldKey)
 }
 
 /**
@@ -389,7 +397,7 @@ export default function JpgCardPreview({
           }
         } else {
           // Apply dateFormat + textTransform before rendering (matches mapper preview).
-          let value = resolveFieldValue(formData, field.fieldKey)
+          let value = resolveCardFieldValue(formData, field.fieldKey)
           if (field.dateFormat && value) value = formatDateValue(value, field.dateFormat)
           const transform = field.textTransform || "none"
           if (transform === "uppercase") value = value.toUpperCase()
@@ -584,7 +592,7 @@ export async function generateJpgCard(
         ctx.drawImage(flagImg, 0, 0, flagImg.naturalWidth, flagImg.naturalHeight, fx, fy, fw, fh)
       } catch {}
     } else if (field.type === "text") {
-      const value = resolveFieldValue(formData, field.fieldKey)
+      const value = resolveCardFieldValue(formData, field.fieldKey)
       if (value) {
         const padding = 4 * outputScale
         const fontFamily = field.fontFamily || "Arial"

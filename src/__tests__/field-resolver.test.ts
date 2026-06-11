@@ -1,12 +1,14 @@
 import { describe, it, expect } from "vitest"
 import {
   normalizeKey,
+  resolveDisplayFieldValue,
   resolveFieldValue,
   FIELD_GROUPS,
   getFieldRole,
   computeDuplicateFingerprint,
   normalizeFormValue,
   sortFieldsByRole,
+  isPrefixedAddressField,
 } from "@/lib/field-resolver"
 import { extractIdentityFields } from "@/lib/submit-fields"
 
@@ -195,6 +197,35 @@ describe("resolveFieldValue", () => {
     })
     it("resolves 'contact_no' (custom field) from 'phone' fd key", () => {
       expect(resolveFieldValue({ phone: "8888888888" }, "contact_no")).toBe("8888888888")
+    })
+  })
+
+  describe("Prefixed address placeholders", () => {
+    it("prints an Address prefix while resolving the canonical address", () => {
+      expect(resolveDisplayFieldValue(
+        { address: "Flat 503, Pune" },
+        "addressWithLabel"
+      )).toBe("Address: Flat 503, Pune")
+    })
+
+    it("prints an ADD prefix while resolving imported Address columns", () => {
+      expect(resolveDisplayFieldValue(
+        { Address: "Sai Shilp Society" },
+        "addWithLabel"
+      )).toBe("ADD: Sai Shilp Society")
+    })
+
+    it("keeps raw address resolution unprefixed", () => {
+      expect(resolveDisplayFieldValue(
+        { address: "Flat 503, Pune" },
+        "address"
+      )).toBe("Flat 503, Pune")
+    })
+
+    it("identifies prefixed address field keys", () => {
+      expect(isPrefixedAddressField("Address:")).toBe(false)
+      expect(isPrefixedAddressField("addressWithLabel")).toBe(true)
+      expect(isPrefixedAddressField("add_prefix")).toBe(true)
     })
   })
 
