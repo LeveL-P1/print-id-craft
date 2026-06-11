@@ -138,6 +138,7 @@ export default function SchoolDetailPage() {
   useEffect(() => setMounted(true), [])
   const [school, setSchool] = useState<SchoolDetail | null>(null)
   const [classes, setClasses] = useState<ClassData[]>([])
+  const [classesLoadError, setClassesLoadError] = useState(false)
   const [students, setStudents] = useState<StudentData[]>([])
   const [batches, setBatches] = useState<BatchData[]>([])
   const [loading, setLoading] = useState(true)
@@ -277,8 +278,18 @@ export default function SchoolDetailPage() {
     try {
       const res = await fetch(`/api/schools/${schoolId}/classes`)
       const data = await res.json()
-      if (data.success) setClasses(data.data)
-    } catch (err) { console.error(err) }
+      if (data.success) {
+        setClasses(data.data)
+        setClassesLoadError(false)
+      } else {
+        setClassesLoadError(true)
+        toast.error('Failed to load classes. Try refreshing the page.')
+      }
+    } catch (err) {
+      console.error(err)
+      setClassesLoadError(true)
+      toast.error('Failed to load classes. Try refreshing the page.')
+    }
   }
 
   const fetchStudents = async (page = 1) => {
@@ -1936,7 +1947,18 @@ export default function SchoolDetailPage() {
                   )})
                   }
                   {classes.length === 0 && (
-                    <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>No classes created yet. Add one above.</td></tr>
+                    <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>
+                      {classesLoadError ? (
+                        <>
+                          Could not load classes (they may still exist in the database).{' '}
+                          <button type="button" className="btn btn-outline" style={{ fontSize: 12, padding: '4px 10px', marginLeft: 8 }} onClick={() => fetchClasses()}>
+                            Retry
+                          </button>
+                        </>
+                      ) : (
+                        'No classes created yet. Add one above.'
+                      )}
+                    </td></tr>
                   )}
                 </tbody>
               </table>
