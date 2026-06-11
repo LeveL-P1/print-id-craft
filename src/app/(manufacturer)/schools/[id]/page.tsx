@@ -146,6 +146,7 @@ export default function SchoolDetailPage() {
   const [studentTotal, setStudentTotal] = useState(0)
   const [statusFilter, setStatusFilter] = useState("")
   const [classFilter, setClassFilter] = useState("")
+  const [exportingFormat, setExportingFormat] = useState<"csv" | "excel" | "archive" | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [searchInput, setSearchInput] = useState("")
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1345,34 +1346,42 @@ export default function SchoolDetailPage() {
     const params = new URLSearchParams()
     if (classFilter) params.set("classId", classFilter)
     if (statusFilter) params.set("status", statusFilter)
+    setExportingFormat(format)
     if (format === "excel" || format === "archive") {
       try {
         if (format === "excel") params.set("format", "excel")
-        toast.message(format === "excel" ? "Preparing Excel export with photos…" : "Preparing archive export…")
+        const selectedClassName = classFilter ? classes.find((c) => c.id === classFilter)?.name : ""
+        const scopeLabel = selectedClassName ? `${selectedClassName} class` : "school"
+        toast.message(format === "excel" ? `Preparing ${scopeLabel} backup with named photos...` : "Preparing archive export...")
         const res = await fetch(`/api/schools/${schoolId}/export/archive?${params}`)
         const data = await res.json()
         if (!res.ok) {
           toast.error(data.error || "Export failed")
+          setExportingFormat(null)
           return
         }
         const jobId = data.data?.jobId
         if (!jobId) {
           toast.error("Export did not return a job id")
+          setExportingFormat(null)
           return
         }
         await pollExportJob(
           jobId,
           format === "excel"
-            ? "Excel package ready — unzip to view student details and photos"
+            ? "Backup ZIP ready — data and named photos downloaded"
             : "Archive ready — download started",
           data.data?.totalStudents
         )
       } catch {
         toast.error("Export failed")
+      } finally {
+        setExportingFormat(null)
       }
       return
     }
     window.open(`/api/schools/${schoolId}/export/${format}?${params}`, "_blank")
+    setExportingFormat(null)
   }
 
   // Logo Upload Handler
@@ -2123,6 +2132,16 @@ export default function SchoolDetailPage() {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
                 Download Template
               </a>
+              <button
+                className="btn btn-outline"
+                onClick={() => handleExport("excel")}
+                disabled={exportingFormat !== null || studentTotal === 0}
+                title={classFilter ? "Download this class data with photos named by student name" : "Download all filtered student data with photos named by student name"}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#0ea5e9', color: '#0369a1', fontSize: 13, opacity: exportingFormat !== null || studentTotal === 0 ? 0.6 : 1, cursor: exportingFormat !== null || studentTotal === 0 ? 'not-allowed' : 'pointer' }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 8v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8"/><path d="M3 8l9 6 9-6"/><path d="M21 8l-9-5-9 5"/><path d="M12 14v7"/></svg>
+                {exportingFormat === "excel" ? 'Preparing Backup...' : classFilter ? 'Download Class Backup' : 'Download Data + Photos'}
+              </button>
               {studentTotal > 0 && (
                 <button
                   className="btn btn-outline"
