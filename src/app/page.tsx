@@ -64,7 +64,9 @@ function Header() {
             Login
           </Link>
           <a
-            href="#contact"
+            href="https://wa.me/919881877607"
+            target="_blank"
+            rel="noopener noreferrer"
             className="rounded-lg bg-[#0B1F3A] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-[#0B1F3A]/90 hover:shadow-md"
           >
             Contact Sales
@@ -98,7 +100,9 @@ function Header() {
               Login
             </Link>
             <a
-              href="#contact"
+              href="https://wa.me/919881877607"
+              target="_blank"
+              rel="noopener noreferrer"
               onClick={() => setMobileOpen(false)}
               className="rounded-lg bg-[#0B1F3A] py-3 text-center text-sm font-semibold text-white"
             >
@@ -137,7 +141,9 @@ function Hero() {
             
             <div className="mt-10 flex flex-col sm:flex-row gap-4">
               <a
-                href="#contact"
+                href="https://wa.me/919881877607"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#0B1F3A] px-8 text-sm font-semibold text-white shadow-md transition-all hover:-translate-y-0.5 hover:shadow-lg"
               >
                 Contact Sales
@@ -416,7 +422,9 @@ function CTA() {
           </p>
           <div className="relative z-10 flex flex-col sm:flex-row justify-center gap-4">
             <a
-              href="#contact"
+              href="https://wa.me/919881877607"
+              target="_blank"
+              rel="noopener noreferrer"
               className="inline-flex h-14 items-center justify-center rounded-lg bg-[#F7C948] px-8 text-base font-bold text-[#0B1F3A] shadow-lg transition-transform hover:-translate-y-1"
             >
               Contact Sales Team
