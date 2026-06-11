@@ -9,10 +9,10 @@ import {
   resolveFieldValue,
   type FieldRole,
 } from "@/lib/field-resolver"
+import { preloadBgRemovalModel } from "@/lib/photo-background"
 
 const JpgCardPreview = dynamic(() => import("@/components/JpgCardPreview"), { ssr: false })
 const PhotoBgProcessor = dynamic(() => import("@/components/PhotoBgProcessor"), { ssr: false })
-const PhotoCropper = dynamic(() => import("@/components/PhotoCropper"), { ssr: false })
 
 type FieldConfig = { key: string; label: string; type: string; required: boolean; role?: string }
 type TemplateElement = { 
@@ -257,7 +257,7 @@ export default function SubmitPage() {
   const params = useParams()
   const token = params.token as string
 
-  const [step, setStep] = useState<"loading" | "error" | "form" | "photo" | "crop" | "bgprocess" | "review" | "success">("loading")
+  const [step, setStep] = useState<"loading" | "error" | "form" | "photo" | "bgprocess" | "review" | "success">("loading")
   const [errorMsg, setErrorMsg] = useState("")
   const [config, setConfig] = useState<FormConfig | null>(null)
   const [formData, setFormData] = useState<Record<string, string>>({})
@@ -430,6 +430,13 @@ export default function SubmitPage() {
       })
       .catch(() => { setErrorMsg("Failed to load form"); setStep("error") })
   }, [token])
+
+  // Preload the free background-removal model while parents fill the form.
+  useEffect(() => {
+    if (step === "form" || step === "photo" || step === "bgprocess") {
+      preloadBgRemovalModel()
+    }
+  }, [step])
 
   useEffect(() => {
     if (!config || step === "loading" || step === "error" || step === "success") return
@@ -966,12 +973,13 @@ export default function SubmitPage() {
           <p style={{ fontSize: 13, color: '#3b82f6', fontWeight: 600 }}>ID Registration — {config?.className}</p>
         </div>
 
-        {/* Step Indicators */}
+        {/* Step Indicators — background AI runs inside the Photo step */}
         <div style={{ display: 'flex', justifyContent: 'center', gap: 6, padding: '16px 20px', background: '#f8fafc', flexWrap: 'wrap' }}>
-          {["Details", "Photo", "Background", "Review"].map((s, i) => {
+          {["Details", "Photo", "Review"].map((s, i) => {
             const currentStep = step as string
-            const stepOrder = ["form", "photo", "bgprocess", "review"]
-            const currentIdx = stepOrder.indexOf(currentStep)
+            const stepOrder = ["form", "photo", "review"]
+            const visualIdx = currentStep === "bgprocess" ? 1 : stepOrder.indexOf(currentStep)
+            const currentIdx = visualIdx < 0 ? 0 : visualIdx
             const isActive = currentIdx === i
             const isDone = currentIdx > i
             return (
@@ -985,7 +993,7 @@ export default function SubmitPage() {
                   {isDone ? "✓" : i + 1}
                 </div>
                 <span style={{ fontSize: 11, fontWeight: 600, color: isActive ? '#0f172a' : '#94a3b8' }}>{s}</span>
-                {i < 3 && <div style={{ width: 16, height: 1, background: '#e2e8f0' }} />}
+                {i < 2 && <div style={{ width: 16, height: 1, background: '#e2e8f0' }} />}
               </div>
             )
           })}
@@ -1350,9 +1358,12 @@ export default function SubmitPage() {
           {/* PHOTO STEP */}
           {step === "photo" && (
             <div>
-              <p style={{ fontSize: 14, color: '#64748b', marginBottom: 16 }}>
-                Upload a passport-style photo. If your photo already has a plain
-                background like the sample below, no AI processing is needed.
+              <p style={{ fontSize: 15, color: '#0f172a', marginBottom: 8, fontWeight: 600, textAlign: 'center' }}>
+                Take one photo — we handle the rest
+              </p>
+              <p style={{ fontSize: 13, color: '#64748b', marginBottom: 16, textAlign: 'center', lineHeight: 1.6 }}>
+                Tap the camera button below. Stand against any plain wall.
+                We automatically crop, fix lighting, and set the same background colour for every student.
               </p>
 
               {/* Reference Sample + Instructions card */}
@@ -1367,52 +1378,32 @@ export default function SubmitPage() {
 
                   {/* Instructions */}
                   <div style={{ flex: '1 1 220px', minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#0c4a6e', marginBottom: 6 }}>
-                      📸 How to take the perfect ID photo
+                    <div style={{ fontSize: 14, fontWeight: 700, color: '#0c4a6e', marginBottom: 8 }}>
+                      3 simple steps
                     </div>
-                    <ul style={{
-                      margin: 0, paddingLeft: 18, fontSize: 12,
-                      color: '#0369a1', lineHeight: 1.7,
+                    <ol style={{
+                      margin: 0, paddingLeft: 20, fontSize: 13,
+                      color: '#0369a1', lineHeight: 2,
                     }}>
-                      <li><strong>Front-facing</strong> — look straight at the camera</li>
-                      <li><strong>Head &amp; shoulders only</strong> — passport style</li>
-                      <li>
-                        <strong>Plain solid background</strong> — best in your
-                        school&apos;s ID colour
-                        {config?.photoBgColor && (
-                          <>
-                            {": "}
-                            <span style={{
-                              display: 'inline-flex', alignItems: 'center', gap: 6,
-                              verticalAlign: 'middle',
-                            }}>
-                              <span style={{
-                                display: 'inline-block', width: 14, height: 14,
-                                borderRadius: 3, background: config.photoBgColor,
-                                border: '1px solid rgba(0,0,0,0.15)',
-                              }} />
-                              <code style={{ fontSize: 11, color: '#0c4a6e' }}>{config.photoBgColor.toUpperCase()}</code>
-                            </span>
-                          </>
-                        )}
-                      </li>
-                      <li><strong>School uniform</strong> with tie/blazer if applicable</li>
-                      <li><strong>Bright, even lighting</strong> — no shadows on face</li>
-                      <li><strong>Neutral expression</strong>, eyes open, no sunglasses/cap</li>
-                    </ul>
-                    <div style={{
-                      marginTop: 8, padding: '6px 10px', background: '#dcfce7',
-                      borderRadius: 6, fontSize: 11, color: '#166534', fontWeight: 600,
-                    }}>
-                      {config?.photoBgColor
-                        ? <>✅ Photo already against a <span style={{
-                            display: 'inline-block', width: 10, height: 10,
-                            borderRadius: 2, background: config.photoBgColor,
-                            border: '1px solid rgba(0,0,0,0.15)',
-                            verticalAlign: 'middle', margin: '0 2px',
-                          }} /> background? Skip AI &mdash; faster & sharper. Otherwise our AI re-colours it.</>
-                        : <>✅ If your photo already has a plain background, we skip AI and use it as-is.</>}
-                    </div>
+                      <li><strong>Stand straight</strong> — face the camera</li>
+                      <li><strong>Plain wall behind you</strong> — any single colour is fine</li>
+                      <li><strong>Tap Take Photo</strong> — wait a few seconds, done!</li>
+                    </ol>
+                    {config?.photoBgColor && (
+                      <div style={{
+                        marginTop: 10, padding: '8px 12px', background: '#fff',
+                        borderRadius: 8, fontSize: 12, color: '#0c4a6e',
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        border: '1px solid #bae6fd',
+                      }}>
+                        <span style={{
+                          width: 28, height: 28, borderRadius: 6, flexShrink: 0,
+                          background: config.photoBgColor,
+                          border: '1px solid rgba(0,0,0,0.12)',
+                        }} />
+                        <span>Every ID card will use this same background colour — you don&apos;t need to choose anything.</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1421,11 +1412,16 @@ export default function SubmitPage() {
                 <PhotoVerifier
                   onPhotoAccepted={(file, previewUrl, bgQualityGood) => {
                     setPhotoFile(file)
-                    // previewUrl is already a stable data URL from PhotoVerifier
                     setPhotoPreview(previewUrl)
                     setPhotoVerified(true)
-                    // If background is already clean, skip AI bg removal
-                    setBgSkippable(!!bgQualityGood)
+                    const skipAi = !!bgQualityGood
+                    setBgSkippable(skipAi)
+                    if (skipAi) {
+                      setCroppedPhoto(previewUrl)
+                      setStep("review")
+                    } else {
+                      setStep("bgprocess")
+                    }
                   }}
                   schoolBgColor={config?.photoBgColor}
                 />
@@ -1440,7 +1436,7 @@ export default function SubmitPage() {
                   }}>
                     {bgSkippable
                       ? "✅ Photo verified — background is already plain, no AI needed"
-                      : "✅ Photo verified — AI will clean up the background next"}
+                      : "✅ Photo verified — tap Continue or upload again to re-run background cleanup"}
                   </div>
                   <div style={{ borderRadius: 10, overflow: 'hidden', border: '2px solid #22c55e', maxWidth: 200, margin: '0 auto' }}>
                     <img src={photoPreview} alt="Preview" style={{ width: '100%', display: 'block' }} />
@@ -1451,68 +1447,45 @@ export default function SubmitPage() {
                 </div>
               )}
 
-              <div style={{ display: 'flex', gap: 12, marginTop: 24, flexWrap: 'wrap' }}>
-                <button className="btn btn-outline" style={{ flex: 1, minWidth: 120 }} onClick={() => setStep("form")}>← Back</button>
-                {photoPreview && (
+              {photoPreview && (
+                <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
                   <button
-                    className="btn btn-outline"
-                    style={{ flex: 1, minWidth: 120 }}
-                    onClick={() => setStep("crop")}
-                    title="Manually adjust the crop box"
+                    type="button"
+                    className="btn btn-outline btn-fluid"
+                    style={{ flex: 1, justifyContent: 'center' }}
+                    onClick={() => setStep("form")}
                   >
-                    ✂️ Adjust Crop
+                    ← Back
                   </button>
-                )}
-                <button className="btn btn-primary" style={{ flex: 1, minWidth: 140 }} disabled={!photoPreview} onClick={() => {
-                  if (bgSkippable) {
-                    // Photo already has clean background — skip AI processing
-                    setCroppedPhoto(photoPreview)
-                    setStep("review")
-                  } else {
-                    setStep("bgprocess")
-                  }
-                }}>
-                  {bgSkippable ? "Continue to Review →" : "Process Background →"}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* CROP STEP — manual crop adjustment after auto-crop. Optional;
-              parents can skip back to the previous step or accept the
-              cropped result. */}
-          {step === "crop" && photoPreview && (
-            <div>
-              <div style={{ fontSize: 14, color: '#64748b', marginBottom: 12, textAlign: 'center' }}>
-                Adjust the crop box to frame the face. The aspect ratio is locked to 3:4.
-              </div>
-              <PhotoCropper
-                photoUrl={photoPreview}
-                aspectRatio={3 / 4}
-                onCropped={(croppedUrl) => {
-                  // Replace photoPreview with the manually-cropped version
-                  // and rebuild the photoFile so the rest of the pipeline
-                  // (bg processing, upload) sees the new bytes.
-                  setPhotoPreview(croppedUrl)
-                  fetch(croppedUrl)
-                    .then(r => r.blob())
-                    .then(blob => {
-                      setPhotoFile(new File([blob], `cropped-${Date.now()}.jpg`, { type: "image/jpeg" }))
-                    })
-                    .catch(() => { /* non-fatal: photoFile stays as auto-cropped */ })
-                  // After a manual crop the bg-skippable hint is stale
-                  // (the cropped region's edges may differ). Reset to
-                  // false so we run AI bg cleanup unless the user opts out.
-                  setBgSkippable(false)
-                  setStep("photo")
-                }}
-                onCancel={() => setStep("photo")}
-              />
-              <div style={{ marginTop: 12 }}>
-                <button className="btn btn-outline" style={{ width: '100%', fontSize: 12 }} onClick={() => setStep("photo")}>
-                  ← Back without changes
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-fluid"
+                    style={{ flex: 1, justifyContent: 'center' }}
+                    onClick={() => {
+                      if (bgSkippable) {
+                        setCroppedPhoto(photoPreview)
+                        setStep("review")
+                      } else {
+                        setStep("bgprocess")
+                      }
+                    }}
+                  >
+                    {bgSkippable ? "Continue to Review" : "Apply School Background"}
+                  </button>
+                </div>
+              )}
+              {!photoPreview && (
+                <div style={{ marginTop: 24 }}>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-fluid"
+                    style={{ width: '100%', justifyContent: 'center' }}
+                    onClick={() => setStep("form")}
+                  >
+                    ← Back
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -1522,22 +1495,33 @@ export default function SubmitPage() {
               <PhotoBgProcessor
                 photoUrl={photoPreview}
                 defaultBgColor={config?.photoBgColor || "#FFFFFF"}
+                autoConfirm
                 onProcessed={(processedUrl) => {
-                  // Use the processed photo (bg removed + color applied)
                   setPhotoPreview(processedUrl)
                   setCroppedPhoto(processedUrl)
                   setStep("review")
                 }}
                 onSkip={() => {
-                  // Skip bg processing, go straight to review
                   setCroppedPhoto(photoPreview)
                   setStep("review")
                 }}
               />
 
               <div style={{ marginTop: 16 }}>
-                <button className="btn btn-outline" style={{ width: '100%', fontSize: 12 }} onClick={() => setStep("photo")}>
-                  ← Back to Photo Upload
+                <button
+                  type="button"
+                  className="btn btn-outline btn-fluid"
+                  style={{ width: '100%', justifyContent: 'center' }}
+                  onClick={() => {
+                    setPhotoPreview("")
+                    setPhotoFile(null)
+                    setCroppedPhoto("")
+                    setPhotoVerified(false)
+                    setBgSkippable(false)
+                    setStep("photo")
+                  }}
+                >
+                  ← Choose a different photo
                 </button>
               </div>
             </div>

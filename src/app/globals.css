@@ -794,6 +794,16 @@ input, select, textarea { font-family: inherit; }
 
 .btn:disabled { opacity: 0.6; cursor: default; }
 
+/* Form wizard actions — allow label wrap on narrow screens */
+.btn-fluid {
+  white-space: normal;
+  line-height: 1.35;
+  text-align: center;
+  min-height: 44px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
 .btn-primary {
   background: linear-gradient(135deg, var(--blue-500), var(--blue-600));
   color: white;

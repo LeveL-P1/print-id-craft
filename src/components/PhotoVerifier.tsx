@@ -1253,37 +1253,28 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         </div>
       )}
 
-      {/* Photo Requirements Card */}
+      {/* Simple guide — parents should not need to read technical rules */}
       <div style={{
-        marginBottom: 16, padding: 14, background: '#fef2f2',
-        borderRadius: 12, border: '1px solid #fecaca'
+        marginBottom: 16, padding: 14, background: '#f0fdf4',
+        borderRadius: 12, border: '1px solid #bbf7d0', textAlign: 'center',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            width: 52, height: 68, borderRadius: 6,
-            background: schoolBgColor || '#e0e7ff',
-            border: '2px solid #c7d2fe',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
-          }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="1.5">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-              <circle cx="12" cy="7" r="4" />
-            </svg>
-          </div>
-          <div style={{ flex: 1, fontSize: 12 }}>
-            <div style={{ fontWeight: 700, color: '#dc2626', marginBottom: 4 }}>🚨 Strict ID Photo Requirements</div>
-            <ul style={{ margin: 0, paddingLeft: 14, color: '#991b1b', lineHeight: 1.8 }}>
-              <li><strong>Front-facing only</strong> — look directly at the camera</li>
-              <li><strong>Head &amp; shoulders</strong> — passport-style portrait only</li>
-              <li><strong>One person</strong> — no group photos</li>
-              <li><strong>Face clearly visible</strong> — eyes, nose, mouth</li>
-              <li><strong>Not blurry</strong> — good lighting required</li>
-              <li><strong>No inappropriate content</strong> — will be auto-rejected</li>
-            </ul>
-            <div style={{ marginTop: 6, fontSize: 11, color: '#b91c1c', fontWeight: 600, fontStyle: 'italic' }}>
-              ⚠️ Photos not meeting these standards will be automatically rejected.
-            </div>
-          </div>
+        <div style={{
+          width: 48, height: 60, borderRadius: 6, margin: '0 auto 10px',
+          background: schoolBgColor || '#dbeafe',
+          border: '2px solid #86efac',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="1.5">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+            <circle cx="12" cy="7" r="4" />
+          </svg>
+        </div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#166534', marginBottom: 4 }}>
+          One student, one photo
+        </div>
+        <div style={{ fontSize: 12, color: '#15803d', lineHeight: 1.7 }}>
+          Look at the camera. Only the student should be in the photo.
+          <br />A plain wall behind you gives the best result.
         </div>
       </div>
 

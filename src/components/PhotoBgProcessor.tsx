@@ -1,20 +1,20 @@
 "use client"
 import { useState, useRef, useCallback, useEffect } from "react"
-
-const BG_COLOR_PRESETS = [
-  { id: "white", label: "White", hex: "#FFFFFF", textColor: "#333" },
-  { id: "light-blue", label: "Light Blue", hex: "#DBEAFE", textColor: "#333" },
-  { id: "sky-blue", label: "Sky Blue", hex: "#BAE6FD", textColor: "#333" },
-  { id: "light-grey", label: "Light Grey", hex: "#F1F5F9", textColor: "#333" },
-  { id: "maroon", label: "Maroon", hex: "#7F1D1D", textColor: "#fff" },
-  { id: "cream", label: "Cream", hex: "#FEF3C7", textColor: "#333" },
-] as const
+import {
+  downscaleBlob,
+  loadImageToCanvas,
+  recolorPlainBackgroundOnCanvas,
+  removeBackgroundWithBestModel,
+} from "@/lib/photo-background"
 
 type Props = {
   photoUrl: string
+  /** School-wide ID photo background — same for every student in this class. */
   defaultBgColor: string
   onProcessed: (processedDataUrl: string) => void
   onSkip: () => void
+  /** When true, apply the school background and continue without manual confirm. */
+  autoConfirm?: boolean
 }
 
 /**
@@ -65,58 +65,25 @@ async function urlToBlob(url: string): Promise<Blob> {
   })
 }
 
-/**
- * Downscale large images before background removal to dramatically reduce processing time.
- * Phone cameras produce 4000x3000px images; AI model only needs ~1024px max.
- */
-async function downscaleBlob(blob: Blob, maxDim = 1024): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.onload = () => {
-      const { naturalWidth: w, naturalHeight: h } = img
-      // If already small enough, return as-is
-      if (w <= maxDim && h <= maxDim) {
-        resolve(blob)
-        return
-      }
-      const scale = maxDim / Math.max(w, h)
-      const nw = Math.round(w * scale)
-      const nh = Math.round(h * scale)
-      const canvas = document.createElement("canvas")
-      canvas.width = nw
-      canvas.height = nh
-      const ctx = canvas.getContext("2d")
-      if (!ctx) { resolve(blob); return }
-      ctx.drawImage(img, 0, 0, nw, nh)
-      canvas.toBlob(
-        (result) => result ? resolve(result) : resolve(blob),
-        "image/jpeg",
-        0.90
-      )
-    }
-    img.onerror = () => resolve(blob) // fallback to original on error
-    img.src = URL.createObjectURL(blob)
-  })
-}
-
-export default function PhotoBgProcessor({ photoUrl, defaultBgColor, onProcessed, onSkip }: Props) {
+export default function PhotoBgProcessor({
+  photoUrl,
+  defaultBgColor,
+  onProcessed,
+  onSkip,
+  autoConfirm = false,
+}: Props) {
   const [processing, setProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
   const [progressMsg, setProgressMsg] = useState("")
-  const [selectedColor, setSelectedColor] = useState(defaultBgColor || "#FFFFFF")
+  const schoolBgColor = defaultBgColor || "#FFFFFF"
   const [removedBgUrl, setRemovedBgUrl] = useState<string | null>(null)
   const [processedUrl, setProcessedUrl] = useState<string | null>(null)
   const [error, setError] = useState("")
   const [photoLoaded, setPhotoLoaded] = useState(false)
   const [photoDataUrl, setPhotoDataUrl] = useState<string>("")
-  // Warning string set by applyBackground when the post-composite uniformity
-  // check detects that the AI left non-uniform / off-colour artefacts in the
-  // background region. Surfaced to the user so they know to retake the photo
-  // rather than ship a flawed ID card.
   const [bgQualityIssue, setBgQualityIssue] = useState<string>("")
   const canvasRef = useRef<HTMLCanvasElement>(null)
-
-  const activePreset = BG_COLOR_PRESETS.find(p => p.hex.toLowerCase() === selectedColor.toLowerCase())
+  const autoConfirmedRef = useRef(false)
 
   // Verify the photo URL is valid on mount & ensure we have a displayable data URL
   useEffect(() => {
@@ -160,51 +127,39 @@ export default function PhotoBgProcessor({ photoUrl, defaultBgColor, onProcessed
     }
 
     setProcessing(true)
-    setProgress(5)
-    setProgressMsg("Loading AI model...")
+    setProgress(10)
+    setProgressMsg("Preparing your photo…")
     setError("")
 
     try {
-      // Import the library — it bundles its own onnxruntime-web internally.
-      // Do NOT import onnxruntime-web directly as it causes version conflicts
-      // ("a_OrtGetInputOutputMetadata is not a function" error).
-      const { removeBackground: removeBg } = await import("@imgly/background-removal")
+      // Tier 2: plain wall with wrong colour — instant flood-fill (no AI).
+      const { canvas, ctx } = await loadImageToCanvas(sourceUrl)
+      const recolored = recolorPlainBackgroundOnCanvas(
+        ctx, canvas.width, canvas.height, schoolBgColor
+      )
+      if (recolored) {
+        setProgress(100)
+        setProgressMsg("Background updated!")
+        const resultUrl = canvas.toDataURL("image/jpeg", 0.95)
+        setProcessedUrl(resultUrl)
+        setProcessing(false)
+        return
+      }
 
-      setProgress(15)
-      setProgressMsg("Preparing image...")
+      // Tier 3: messy background — IMG.LY isnet_fp16 + WebGPU (free, best in-browser).
+      setProgress(20)
+      setProgressMsg("Cleaning background with AI…")
 
-      // Use our robust url-to-blob converter
       let blob = await urlToBlob(sourceUrl)
-      
-      // Downscale large images (phones send 4000px+, AI model only needs ~1024px)
-      // This alone reduces inference time by 3-4x
-      blob = await downscaleBlob(blob, 1024)
+      blob = await downscaleBlob(blob, 768)
 
-      setProgress(25)
-      setProgressMsg("Removing background...")
-
-      // Use quantized model (isnet_quint8, ~8MB) instead of full-precision (isnet, ~30MB).
-      // 3-4x faster inference with nearly identical quality for ID card photos.
-      // Enable Web Worker to avoid blocking the main thread.
-      const resultBlob = await removeBg(blob, {
-        device: "cpu",
-        model: "isnet_quint8",
-        proxyToWorker: true,
-        fetchArgs: { cache: "force-cache" as RequestCache },
-        progress: (key: string, current: number, total: number) => {
-          const pct = Math.round((current / total) * 100)
-          if (key.includes("fetch")) {
-            setProgress(25 + pct * 0.3)
-            setProgressMsg("Downloading AI model...")
-          } else if (key.includes("inference")) {
-            setProgress(55 + pct * 0.4)
-            setProgressMsg("Processing photo...")
-          }
-        },
+      const resultBlob = await removeBackgroundWithBestModel(blob, (msg, pct) => {
+        setProgress(30 + pct * 0.6)
+        setProgressMsg(msg)
       })
 
       setProgress(95)
-      setProgressMsg("Finalizing...")
+      setProgressMsg("Almost done…")
 
       const reader = new FileReader()
       reader.onload = () => {
@@ -212,16 +167,16 @@ export default function PhotoBgProcessor({ photoUrl, defaultBgColor, onProcessed
         setRemovedBgUrl(transparentUrl)
         setProgress(100)
         setProcessing(false)
-        applyBackground(transparentUrl, selectedColor)
+        applyBackground(transparentUrl, schoolBgColor)
       }
       reader.readAsDataURL(resultBlob)
     } catch (err: any) {
       console.error("Background removal failed:", err)
-      setError("Background removal failed. You can skip this step and use the original photo.")
+      setError("Could not clean the background. You can still continue with your photo.")
       setProcessing(false)
       setProgress(0)
     }
-  }, [photoUrl, photoDataUrl, selectedColor])
+  }, [photoUrl, photoDataUrl, schoolBgColor])
 
   const applyBackground = useCallback((transparentUrl: string, bgColor: string) => {
     const canvas = canvasRef.current
@@ -457,9 +412,9 @@ export default function PhotoBgProcessor({ photoUrl, defaultBgColor, onProcessed
 
   useEffect(() => {
     if (removedBgUrl) {
-      applyBackground(removedBgUrl, selectedColor)
+      applyBackground(removedBgUrl, schoolBgColor)
     }
-  }, [selectedColor, removedBgUrl, applyBackground])
+  }, [schoolBgColor, removedBgUrl, applyBackground])
 
   // Auto-start background removal on mount if photo is valid
   useEffect(() => {
@@ -475,7 +430,13 @@ export default function PhotoBgProcessor({ photoUrl, defaultBgColor, onProcessed
     }
   }
 
-  // Use the stable data URL for display
+  useEffect(() => {
+    if (autoConfirm && processedUrl && !processing && !autoConfirmedRef.current) {
+      autoConfirmedRef.current = true
+      onProcessed(processedUrl)
+    }
+  }, [autoConfirm, processedUrl, processing, onProcessed])
+
   const displayUrl = photoDataUrl || photoUrl
 
   return (
@@ -493,10 +454,24 @@ export default function PhotoBgProcessor({ photoUrl, defaultBgColor, onProcessed
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 14, color: 'white'
         }}>🎨</span>
-        Smart Background Processor
+        Preparing Your Photo
       </div>
       <p style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>
-        AI-powered background removal for a professional ID card photo
+        Please wait — we are making the background the same colour for every student
+        {schoolBgColor && (
+          <>
+            {" "}
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4, verticalAlign: 'middle',
+            }}>
+              <span style={{
+                display: 'inline-block', width: 12, height: 12, borderRadius: 3,
+                background: schoolBgColor, border: '1px solid rgba(0,0,0,0.12)',
+              }} />
+              <code style={{ fontSize: 11 }}>{schoolBgColor.toUpperCase()}</code>
+            </span>
+          </>
+        )}
       </p>
 
       {/* Original Photo Preview (always visible when not processing) */}
@@ -542,7 +517,7 @@ export default function PhotoBgProcessor({ photoUrl, defaultBgColor, onProcessed
             }} />
           </div>
           <div style={{ fontSize: 11, color: '#64748b', marginTop: 8 }}>
-            {progress < 55 ? "First-time model download (~30MB, cached after)" : `${Math.round(progress)}% complete`}
+            {progress < 40 ? "First time may take a little longer" : `${Math.round(progress)}%`}
           </div>
         </div>
       )}
@@ -583,8 +558,8 @@ export default function PhotoBgProcessor({ photoUrl, defaultBgColor, onProcessed
         </div>
       )}
 
-      {/* Result Preview */}
-      {!processing && processedUrl && (
+      {/* Result Preview — manual confirm only when autoConfirm is off */}
+      {!processing && processedUrl && !autoConfirm && (
         <>
           <div style={{
             display: 'flex', gap: 12, marginBottom: 16,
@@ -622,10 +597,6 @@ export default function PhotoBgProcessor({ photoUrl, defaultBgColor, onProcessed
             </div>
           </div>
 
-          {/* AI artefact warning — shown when the post-composite check found
-              non-uniform pixels in the supposedly-plain background region.
-              Surfaces the exact deviation percentage so the parent can
-              decide between accepting or retaking the photo. */}
           {bgQualityIssue && (
             <div style={{
               padding: '10px 14px', background: '#fffbeb',
@@ -641,66 +612,51 @@ export default function PhotoBgProcessor({ photoUrl, defaultBgColor, onProcessed
             </div>
           )}
 
-          {/* Background Color Selector */}
-          <div style={{
-            background: '#f8fafc', borderRadius: 12, padding: 14,
-            border: '1px solid #e2e8f0', marginBottom: 16
-          }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 10 }}>
-              Choose Background Color
-            </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-              {BG_COLOR_PRESETS.map(preset => (
-                <button
-                  key={preset.id}
-                  onClick={() => setSelectedColor(preset.hex)}
-                  style={{
-                    width: 44, height: 44, borderRadius: 10,
-                    background: preset.hex,
-                    border: selectedColor === preset.hex ? '3px solid #3b82f6' : '2px solid #d1d5db',
-                    cursor: 'pointer', position: 'relative',
-                    boxShadow: selectedColor === preset.hex ? '0 0 0 2px rgba(59,130,246,0.3)' : 'none',
-                    transition: 'all 0.15s',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}
-                  title={preset.label}
-                >
-                  {selectedColor === preset.hex && (
-                    <span style={{ fontSize: 16, color: preset.textColor }}>✓</span>
-                  )}
-                </button>
-              ))}
-            </div>
-            <div style={{ textAlign: 'center', fontSize: 11, color: '#94a3b8', marginTop: 8 }}>
-              {activePreset?.label || "Custom"} Background
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button
+              type="button"
               onClick={onSkip}
-              style={{
-                flex: 1, padding: '12px', fontSize: 13, fontWeight: 600,
-                background: '#f1f5f9', color: '#475569', border: 'none',
-                borderRadius: 10, cursor: 'pointer'
-              }}
+              className="btn btn-outline"
+              style={{ flex: '1 1 140px', justifyContent: 'center', whiteSpace: 'normal', lineHeight: 1.35, minHeight: 44 }}
             >
               Use Original Instead
             </button>
             <button
+              type="button"
               onClick={handleConfirm}
+              className="btn btn-primary"
               style={{
-                flex: 2, padding: '12px', fontSize: 13, fontWeight: 700,
+                flex: '2 1 180px', justifyContent: 'center',
                 background: 'linear-gradient(135deg, #22c55e, #16a34a)',
-                color: 'white', border: 'none', borderRadius: 10,
-                cursor: 'pointer', letterSpacing: '-0.01em'
+                whiteSpace: 'normal', lineHeight: 1.35, minHeight: 44, padding: '12px 16px',
               }}
             >
-              ✓ Use Processed Photo
+              Use Processed Photo
             </button>
           </div>
         </>
+      )}
+
+      {!processing && processedUrl && autoConfirm && (
+        <div style={{ textAlign: 'center', padding: '8px 0' }}>
+          <div className="login-spinner" style={{
+            width: 28, height: 28,
+            borderColor: 'rgba(34,197,94,0.2)', borderTopColor: '#22c55e',
+            margin: '0 auto 10px'
+          }} />
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#16a34a' }}>
+            Photo ready — continuing…
+          </div>
+          {bgQualityIssue && (
+            <div style={{
+              marginTop: 12, padding: '10px 14px', background: '#fffbeb',
+              border: '1px solid #fde68a', borderRadius: 10,
+              fontSize: 12, color: '#92400e', textAlign: 'left', lineHeight: 1.5,
+            }}>
+              <strong>Tip:</strong> {bgQualityIssue}
+            </div>
+          )}
+        </div>
       )}
     </div>
   )
