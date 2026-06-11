@@ -212,11 +212,6 @@ export async function processGeneratePrintBatch(schoolId: string, payload: Gener
     },
   })
 
-  await prisma.student.updateMany({
-    where: { id: { in: studentIds } },
-    data: { status: "PRINTED" },
-  })
-
   return { batchId, studentCount: students.length, manifestPath, frontPdfPath: frontPath, backPdfPath: backPath }
 }
 

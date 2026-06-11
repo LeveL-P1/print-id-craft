@@ -243,6 +243,11 @@ export function generatePdfFilename(schoolName: string): string {
   return `${schoolName.replace(/[^a-zA-Z0-9]/g, "_")}_IDCards_Print.pdf`
 }
 
+export function generatePdfChunkFilename(schoolName: string, suffix?: string): string {
+  const base = schoolName.replace(/[^a-zA-Z0-9]/g, "_")
+  return suffix ? `${base}_IDCards_Print_${suffix}.pdf` : `${base}_IDCards_Print.pdf`
+}
+
 /**
  * Determines PDF orientation from page dimensions.
  */
@@ -287,6 +292,8 @@ export type DirectPdfOptions = {
   gapMm?: number
   /** Add crop/cut marks (default true) */
   addCutMarks?: boolean
+  /** Optional filename suffix for chunked downloads, e.g. "001-100" */
+  filenameSuffix?: string
 }
 
 /**
@@ -305,6 +312,7 @@ export async function generateDirectPdf(opts: DirectPdfOptions): Promise<void> {
     hPitch: _hPitch, vPitch: _vPitch,
     marginMm = 3, gapMm = 1,
     addCutMarks = true,
+    filenameSuffix,
   } = opts
 
   const pageW = paperWidth
@@ -451,7 +459,7 @@ export async function generateDirectPdf(opts: DirectPdfOptions): Promise<void> {
   }
 
   // Download
-  const filename = generatePdfFilename(schoolName)
+  const filename = generatePdfChunkFilename(schoolName, filenameSuffix)
   const pdfBlob = doc.output("blob")
   const blobUrl = URL.createObjectURL(pdfBlob)
   const a = document.createElement("a")

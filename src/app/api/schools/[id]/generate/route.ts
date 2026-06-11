@@ -117,7 +117,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 /**
  * POST /api/schools/[id]/generate
  * 
- * Marks students as PRINTED after batch generation is complete.
+ * Explicitly marks students as PRINTED after physical print confirmation.
+ * Download/generation must not call this automatically.
  */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   try {
@@ -127,24 +128,35 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     }
 
     const body = await req.json()
-    const { studentIds } = body
+    const { action, confirmPrinted, studentIds } = body
 
+    if (action !== "markPrinted" || confirmPrinted !== true) {
+      return NextResponse.json(
+        { error: "Printed status requires explicit physical print confirmation" },
+        { status: 400 }
+      )
+    }
     if (!Array.isArray(studentIds) || studentIds.length === 0) {
       return NextResponse.json({ error: "No student IDs provided" }, { status: 400 })
     }
+    if (studentIds.length > 2000 || studentIds.some((id) => typeof id !== "string")) {
+      return NextResponse.json({ error: "Invalid student IDs" }, { status: 400 })
+    }
 
-    // Mark students as PRINTED
-    await prisma.student.updateMany({
+    const result = await prisma.student.updateMany({
       where: {
         id: { in: studentIds },
         schoolId: params.id,
+        status: { in: ["APPROVED", "SUBMITTED"] },
       },
       data: { status: "PRINTED" },
     })
 
     return NextResponse.json({
       success: true,
-      message: `${studentIds.length} students marked as PRINTED`,
+      printedCount: result.count,
+      requestedCount: studentIds.length,
+      message: `${result.count} students marked as PRINTED`,
     })
   } catch (error) {
     console.error("POST /api/schools/[id]/generate error:", error)

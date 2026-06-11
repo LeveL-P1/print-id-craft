@@ -1029,6 +1029,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
   const [selectedClassId, setSelectedClassId] = useState("")
   const [statusFilter, setStatusFilter] = useState("APPROVED")
   const [outputFormat, setOutputFormat] = useState<OutputFormat>("JPEG")
+  const [pdfChunkSize, setPdfChunkSize] = useState(100)
   const [generating, setGenerating] = useState(false)
   const [progress, setProgress] = useState({ current: 0, total: 0, status: "" })
   const [previewCards, setPreviewCards] = useState<{ serialNumber: string; frontDataUrl: string; backDataUrl?: string }[]>([])
@@ -1055,9 +1056,18 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
     // For PDF: keep raw rendered cards + studentIds so we can re-stage when user edits layout
     pdfCards?: { serialNumber: string; frontDataUrl: string; backDataUrl?: string }[]
     pdfStudentIds?: string[]
+    pdfChunkSize?: number
     save: () => Promise<void>
   }
+  type LastDownloadedPrintJob = {
+    studentIds: string[]
+    cardCount: number
+    format: OutputFormat
+    fileCount: number
+  }
   const [pendingSave, setPendingSave] = useState<PendingSave | null>(null)
+  const [lastDownloadedPrintJob, setLastDownloadedPrintJob] = useState<LastDownloadedPrintJob | null>(null)
+  const [markingPrinted, setMarkingPrinted] = useState(false)
   const [downloading, setDownloading] = useState(false)
   // Template's configured card size (single source of truth). Loaded on mount
   // so Print Setup, render canvas, and PDF placement all agree.
@@ -1131,11 +1141,73 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
     } catch { /* non-fatal */ }
   }
 
+  const getPdfFileCount = useCallback((cardCount: number, chunkSize = pdfChunkSize) => {
+    if (chunkSize <= 0 || chunkSize >= cardCount) return 1
+    return Math.ceil(cardCount / chunkSize)
+  }, [pdfChunkSize])
+
+  const downloadPdfInChunks = useCallback(async (
+    cards: { serialNumber: string; frontDataUrl: string; backDataUrl?: string }[],
+    layout: {
+      paperWidth: number
+      paperHeight: number
+      cardWidth: number
+      cardHeight: number
+      h1stPosition: number
+      v1stPosition: number
+      hPitch?: number
+      vPitch?: number
+    },
+    chunkSize = pdfChunkSize,
+  ) => {
+    const effectiveChunkSize = chunkSize > 0 ? chunkSize : cards.length
+    const totalFiles = getPdfFileCount(cards.length, effectiveChunkSize)
+
+    for (let start = 0; start < cards.length; start += effectiveChunkSize) {
+      const end = Math.min(start + effectiveChunkSize, cards.length)
+      const chunk = cards.slice(start, end)
+      const suffix = totalFiles > 1
+        ? `${String(start + 1).padStart(3, "0")}-${String(end).padStart(3, "0")}`
+        : undefined
+
+      setProgress({
+        current: end,
+        total: cards.length,
+        status: totalFiles > 1
+          ? `Downloading PDF ${Math.floor(start / effectiveChunkSize) + 1}/${totalFiles} (${start + 1}-${end})...`
+          : "Downloading PDF...",
+      })
+
+      await generateDirectPdf({
+        cards: chunk,
+        schoolName,
+        paperWidth: layout.paperWidth,
+        paperHeight: layout.paperHeight,
+        cardWidth: layout.cardWidth,
+        cardHeight: layout.cardHeight,
+        h1stPosition: layout.h1stPosition,
+        v1stPosition: layout.v1stPosition,
+        hPitch: layout.hPitch,
+        vPitch: layout.vPitch,
+        marginMm: 0,
+        gapMm: 0,
+        filenameSuffix: suffix,
+      })
+
+      if (totalFiles > 1 && end < cards.length) {
+        await new Promise((resolve) => setTimeout(resolve, 350))
+      }
+    }
+
+    return totalFiles
+  }, [getPdfFileCount, pdfChunkSize, schoolName])
+
   const handleGenerate = useCallback(async () => {
     setGenerating(true)
     setProgress({ current: 0, total: 0, status: "Preparing data..." })
     setPreviewCards([])
     setPendingSave(null)
+    setLastDownloadedPrintJob(null)
 
     try {
       const params = new URLSearchParams({ status: statusFilter })
@@ -1270,10 +1342,9 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
           totalPages,
           pdfCards: allCards,
           pdfStudentIds: studentIds,
+          pdfChunkSize,
           save: async () => {
-            await generateDirectPdf({
-              cards: allCards,
-              schoolName,
+            await downloadPdfInChunks(allCards, {
               paperWidth: printConfig.paperWidth,
               paperHeight: printConfig.paperHeight,
               cardWidth: cw,
@@ -1282,18 +1353,14 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
               v1stPosition: printConfig.v1stPosition,
               hPitch: printConfig.h2ndPosition > 0 ? printConfig.h2ndPosition : undefined,
               vPitch: printConfig.v2ndPosition > 0 ? printConfig.v2ndPosition : undefined,
-              marginMm: 0,
-              gapMm: 0,
-            })
-            // Mark as printed only after successful download
-            await fetch(`/api/schools/${schoolId}/generate`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ studentIds }),
-            })
+            }, pdfChunkSize)
           },
         })
-        setProgress({ current: totalCount, total: totalCount, status: `Ready! Verify layout below, then click Download. (${cols}×${rows} = ${cols*rows} per page · ${totalPages} pages)` })
+        setProgress({
+          current: totalCount,
+          total: totalCount,
+          status: `Ready! Verify layout below, then click Download. (${cols}×${rows} = ${cols*rows} per page · ${totalPages} pages · ${getPdfFileCount(allCards.length, pdfChunkSize)} PDF file(s))`,
+        })
 
       // ──── CDR (SVG) PATH ────
       } else if (outputFormat === "CDR") {
@@ -1371,7 +1438,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
         const cdrStudentIds = [...studentIds]
         setPendingSave({
           format: "CDR",
-          cardCount: svgCards.length,
+          cardCount: cdrStudentIds.length,
           pageW: printConfig.paperWidth,
           pageH: printConfig.paperHeight,
           cardW: cdrCw,
@@ -1380,13 +1447,9 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
           v1stPosition: printConfig.v1stPosition,
           hPitch: printConfig.h2ndPosition,
           vPitch: printConfig.v2ndPosition,
+          pdfStudentIds: cdrStudentIds,
           save: async () => {
             await downloadAsCdrZip(svgCards, `${schoolName}-${cdrClassName}-IDCards-CDR.zip`)
-            await fetch(`/api/schools/${schoolId}/generate`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ studentIds: cdrStudentIds }),
-            })
           },
         })
         setProgress({ current: totalCount, total: totalCount, status: `Ready! ${svgCards.length} SVG files staged. Verify size below, then click Download.` })
@@ -1496,11 +1559,6 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
             await saveBmpPagesToFolder(pages, (done, total) => {
               setProgress({ current: done, total, status: `Saving BMP page ${done}/${total}...` })
             })
-            await fetch(`/api/schools/${schoolId}/generate`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ studentIds: bmpStudentIds }),
-            })
           },
         })
         setProgress({ current: totalCount, total: totalCount, status: `Ready! ${bmpRendered.length} cards staged on ${bmpTotalPages} BMP page(s) (${bmpCols}×${bmpRows} per page). Verify layout below, then click Download.` })
@@ -1578,14 +1636,10 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
           v1stPosition: printConfig.v1stPosition,
           hPitch: printConfig.h2ndPosition,
           vPitch: printConfig.v2ndPosition,
+          pdfStudentIds: jpegStudentIds,
           save: async () => {
             setProgress({ current: totalCount, total: totalCount, status: "Creating ZIP file..." })
             await downloadAsZip(zipCards, `${schoolName}-${jpegClassName}-IDCards.zip`)
-            await fetch(`/api/schools/${schoolId}/generate`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ studentIds: jpegStudentIds }),
-            })
           },
         })
         setProgress({ current: totalCount, total: totalCount, status: `Ready! ${renderedCards.length} cards (${zipCards.length} images) staged. Verify size below, then click Download.` })
@@ -1598,15 +1652,30 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
       // Release student photo cache to prevent memory build-up across runs
       clearStudentImageCache()
     }
-  }, [schoolId, schoolName, selectedClassId, statusFilter, outputFormat, classes, printConfig])
+  }, [classes, downloadPdfInChunks, getPdfFileCount, outputFormat, pdfChunkSize, printConfig, schoolId, schoolName, selectedClassId, statusFilter])
 
   const handleConfirmDownload = useCallback(async () => {
     if (!pendingSave) return
     setDownloading(true)
     try {
       await pendingSave.save()
-      setProgress({ current: pendingSave.cardCount, total: pendingSave.cardCount, status: "Downloaded! ✅" })
-      toast.success(`${pendingSave.cardCount} cards downloaded as ${pendingSave.format}.`)
+      const fileCount = pendingSave.format === "PDF_PRINT"
+        ? getPdfFileCount(pendingSave.cardCount, pendingSave.pdfChunkSize ?? pdfChunkSize)
+        : 1
+      setProgress({
+        current: pendingSave.cardCount,
+        total: pendingSave.cardCount,
+        status: `Downloaded ${pendingSave.cardCount} card(s) in ${fileCount} file(s). Student status is unchanged until you confirm physical printing.`,
+      })
+      if (pendingSave.pdfStudentIds?.length) {
+        setLastDownloadedPrintJob({
+          studentIds: pendingSave.pdfStudentIds,
+          cardCount: pendingSave.cardCount,
+          format: pendingSave.format,
+          fileCount,
+        })
+      }
+      toast.success(`${pendingSave.cardCount} cards downloaded as ${pendingSave.format}. Status unchanged.`)
       setPendingSave(null)
     } catch (err: any) {
       console.error(err)
@@ -1614,12 +1683,50 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
     } finally {
       setDownloading(false)
     }
-  }, [pendingSave])
+  }, [getPdfFileCount, pdfChunkSize, pendingSave])
 
   const handleCancelDownload = useCallback(() => {
     setPendingSave(null)
     setProgress({ current: 0, total: 0, status: "" })
   }, [])
+
+  const handleConfirmPrinted = useCallback(async () => {
+    if (!lastDownloadedPrintJob || markingPrinted) return
+    const ok = window.confirm(
+      `Mark ${lastDownloadedPrintJob.cardCount} downloaded student(s) as PRINTED?\n\nOnly confirm this after the cards have physically printed correctly.`
+    )
+    if (!ok) return
+
+    setMarkingPrinted(true)
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "markPrinted",
+          confirmPrinted: true,
+          studentIds: lastDownloadedPrintJob.studentIds,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to mark printed")
+      }
+      const printedCount = data.printedCount ?? lastDownloadedPrintJob.cardCount
+      toast.success(`${printedCount} student(s) marked as PRINTED.`)
+      setLastDownloadedPrintJob(null)
+      setProgress({
+        current: lastDownloadedPrintJob.cardCount,
+        total: lastDownloadedPrintJob.cardCount,
+        status: `${printedCount} student(s) confirmed as physically printed.`,
+      })
+    } catch (err: any) {
+      console.error(err)
+      toast.error("Could not mark printed: " + (err?.message || "Unknown error"))
+    } finally {
+      setMarkingPrinted(false)
+    }
+  }, [lastDownloadedPrintJob, markingPrinted, schoolId])
 
   // Re-stage save (PDF or BMP) using already-rendered cards but a (possibly new) printConfig.
   // Called when the user clicks "Edit Layout" and confirms the dialog — avoids re-rendering.
@@ -1653,11 +1760,10 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
       totalPages,
       pdfCards: cards,
       pdfStudentIds: studentIds,
+      pdfChunkSize: pendingSave.pdfChunkSize,
       save: fmt === "PDF_PRINT"
         ? async () => {
-            await generateDirectPdf({
-              cards,
-              schoolName,
+            await downloadPdfInChunks(cards, {
               paperWidth: cfg.paperWidth,
               paperHeight: cfg.paperHeight,
               cardWidth: cw,
@@ -1666,14 +1772,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
               v1stPosition: cfg.v1stPosition,
               hPitch: cfg.h2ndPosition > 0 ? cfg.h2ndPosition : undefined,
               vPitch: cfg.v2ndPosition > 0 ? cfg.v2ndPosition : undefined,
-              marginMm: 0,
-              gapMm: 0,
-            })
-            await fetch(`/api/schools/${schoolId}/generate`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ studentIds }),
-            })
+            }, pendingSave.pdfChunkSize ?? pdfChunkSize)
           }
         : async () => {
             setProgress({ current: 0, total: totalPages, status: "Composing BMP pages..." })
@@ -1695,15 +1794,10 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
             await saveBmpPagesToFolder(pages, (done, total) => {
               setProgress({ current: done, total, status: `Saving BMP page ${done}/${total}...` })
             })
-            await fetch(`/api/schools/${schoolId}/generate`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ studentIds }),
-            })
           },
     })
     setProgress({ current: cards.length, total: cards.length, status: `Layout updated! (${cols}×${rows} = ${cols * rows} per page · ${totalPages} pages)` })
-  }, [pendingSave, schoolId, schoolName])
+  }, [downloadPdfInChunks, pdfChunkSize, pendingSave, schoolName])
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -1818,6 +1912,34 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
               <option value="BMP">🖼️ BMP (Combined Print Pages)</option>
             </select>
           </div>
+
+          {outputFormat === "PDF_PRINT" && (
+            <div style={{ flex: "1 1 160px" }}>
+              <label
+                style={{ fontSize: 12, fontWeight: 600, color: "#64748b", marginBottom: 6, display: "block" }}
+              >
+                PDF Chunk Size
+              </label>
+              <select
+                value={pdfChunkSize}
+                onChange={(e) => setPdfChunkSize(Number(e.target.value))}
+                style={{
+                  width: "100%",
+                  height: 42,
+                  padding: "0 12px",
+                  border: "1.5px solid #fecaca",
+                  borderRadius: 10,
+                  fontSize: 14,
+                  background: "#fff7ed",
+                }}
+              >
+                <option value={50}>50 students/file</option>
+                <option value={100}>100 students/file</option>
+                <option value={200}>200 students/file</option>
+                <option value={0}>All in one PDF</option>
+              </select>
+            </div>
+          )}
         </div>
 
         {/* CDR format info banner */}
@@ -1872,7 +1994,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
             <strong>📄 PDF Print — Best for Printing:</strong> Generates a high-quality PDF with
             multiple ID cards per page. You can choose page size (A4, Letter, etc.), customize
             card dimensions, add cut marks, and configure layout — all with <strong>zero quality loss</strong>.
-            Just like Canva&apos;s &ldquo;PDF Print&rdquo; option.
+            Downloads are split by chunk size, and status stays unchanged until you confirm printing.
           </div>
         )}
 
@@ -2251,6 +2373,50 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
         </div>
       )}
 
+      {lastDownloadedPrintJob && !pendingSave && (
+        <div
+          style={{
+            background: "linear-gradient(135deg, #ecfdf5, #dcfce7)",
+            border: "2px solid #22c55e",
+            borderRadius: 16,
+            padding: 18,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 14,
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <h4 style={{ fontSize: 15, fontWeight: 800, color: "#14532d", marginBottom: 4 }}>
+              Download complete. Status not changed.
+            </h4>
+            <p style={{ fontSize: 12, color: "#166534", lineHeight: 1.5 }}>
+              {lastDownloadedPrintJob.cardCount} student card(s) downloaded as {lastDownloadedPrintJob.format}
+              {lastDownloadedPrintJob.fileCount > 1 ? ` in ${lastDownloadedPrintJob.fileCount} files` : ""}.
+              Confirm printed only after the printer has physically printed these cards correctly.
+            </p>
+          </div>
+          <button
+            onClick={handleConfirmPrinted}
+            disabled={markingPrinted}
+            style={{
+              padding: "12px 18px",
+              borderRadius: 10,
+              border: "none",
+              background: markingPrinted ? "#94a3b8" : "linear-gradient(135deg, #15803d, #166534)",
+              color: "white",
+              fontSize: 14,
+              fontWeight: 800,
+              cursor: markingPrinted ? "not-allowed" : "pointer",
+              boxShadow: "0 2px 10px rgba(21,128,61,0.25)",
+            }}
+          >
+            {markingPrinted ? "Marking..." : `Mark ${lastDownloadedPrintJob.cardCount} as Printed`}
+          </button>
+        </div>
+      )}
+
       {/* Preview Grid */}
       {previewCards.length > 0 && (
         <div
@@ -2268,9 +2434,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
             {pdfPrintCards.length > 0 && !pendingSave && (
               <button
                 onClick={async () => {
-                  await generateDirectPdf({
-                    cards: pdfPrintCards,
-                    schoolName,
+                  const fileCount = await downloadPdfInChunks(pdfPrintCards, {
                     paperWidth: printConfig.paperWidth,
                     paperHeight: printConfig.paperHeight,
                     cardWidth: lastCardDims.w,
@@ -2279,8 +2443,11 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
                     v1stPosition: printConfig.v1stPosition,
                     hPitch: printConfig.h2ndPosition > 0 ? printConfig.h2ndPosition : undefined,
                     vPitch: printConfig.v2ndPosition > 0 ? printConfig.v2ndPosition : undefined,
-                    marginMm: 0,
-                    gapMm: 0,
+                  }, pdfChunkSize)
+                  setProgress({
+                    current: pdfPrintCards.length,
+                    total: pdfPrintCards.length,
+                    status: `Re-downloaded ${pdfPrintCards.length} card(s) in ${fileCount} PDF file(s). Status unchanged.`,
                   })
                 }}
                 style={{
