@@ -1,6 +1,7 @@
 {
   "buildCommand": "npm run build",
   "installCommand": "npm install --legacy-peer-deps",
+  "regions": ["hnd1"],
   "functions": {
     "src/app/api/jobs/process/route.ts": {
       "memory": 2048,
