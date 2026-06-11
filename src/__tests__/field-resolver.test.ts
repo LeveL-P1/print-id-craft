@@ -3,7 +3,12 @@ import {
   normalizeKey,
   resolveFieldValue,
   FIELD_GROUPS,
+  getFieldRole,
+  computeDuplicateFingerprint,
+  normalizeFormValue,
+  sortFieldsByRole,
 } from "@/lib/field-resolver"
+import { extractIdentityFields } from "@/lib/submit-fields"
 
 /* ══════════════════════════════════════════════════════════════
  * normalizeKey — key normalization
@@ -190,6 +195,73 @@ describe("resolveFieldValue", () => {
     })
     it("resolves 'contact_no' (custom field) from 'phone' fd key", () => {
       expect(resolveFieldValue({ phone: "8888888888" }, "contact_no")).toBe("8888888888")
+    })
+  })
+
+  describe("getFieldRole", () => {
+    it("maps address label to address role", () => {
+      expect(getFieldRole("Address", "Full Address")).toBe("address")
+    })
+
+    it("detects GR NO as rollno", () => {
+      expect(getFieldRole("GR NO", "GR NO")).toBe("rollno")
+    })
+
+    it("detects mob_father as mobile", () => {
+      expect(getFieldRole("mob_father", "Father Mobile")).toBe("mobile")
+    })
+
+    it("uses explicit role from template", () => {
+      expect(getFieldRole("custom_key", "Custom", "address")).toBe("address")
+    })
+  })
+
+  describe("computeDuplicateFingerprint", () => {
+    it("is deterministic", () => {
+      const fd = { name: "Test", father: "Parent" }
+      expect(computeDuplicateFingerprint(fd, "cls1")).toBe(
+        computeDuplicateFingerprint(fd, "cls1")
+      )
+    })
+
+    it("differs across classes", () => {
+      const fd = { name: "Amit", father: "Ravi", dob: "2014-01-01" }
+      expect(computeDuplicateFingerprint(fd, "class-1")).not.toBe(
+        computeDuplicateFingerprint(fd, "class-2")
+      )
+    })
+  })
+
+  describe("normalizeFormValue", () => {
+    it("strips case and punctuation", () => {
+      expect(normalizeFormValue("Darshan Choudhari")).toBe("darshanchoudhari")
+    })
+  })
+
+  describe("extractIdentityFields", () => {
+    it("resolves school-specific column names", () => {
+      const fd = {
+        "Student Name": "Neha Patel",
+        "Father Name": "Ramesh Patel",
+        "GR NO": "108",
+        dob: "2016-03-15",
+      }
+      const id = extractIdentityFields(fd)
+      expect(id.name).toBe("Neha Patel")
+      expect(id.father).toBe("Ramesh Patel")
+      expect(id.roll).toBe("108")
+      expect(id.dob).toBe("2016-03-15")
+    })
+  })
+
+  describe("sortFieldsByRole", () => {
+    it("orders name before address and mobile", () => {
+      const sorted = sortFieldsByRole([
+        { key: "MOBILE", label: "MOBILE", type: "tel", required: true },
+        { key: "Name", label: "Name", type: "text", required: true },
+        { key: "Address", label: "Address", type: "textarea", required: true },
+      ])
+      expect(sorted.map(f => f.key)).toEqual(["Name", "Address", "MOBILE"])
     })
   })
 

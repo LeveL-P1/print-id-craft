@@ -1,6 +1,6 @@
 import fitz
 import os
-out_dir = r"c:\Users\choud\Desktop\print-id-craft\print-id-craft\scripts\catalogue_pages"
+out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "catalogue_pages")
 os.makedirs(out_dir, exist_ok=True)
 doc = fitz.open(r"d:\Catlogue\PDF\Ready to Print.pdf")
 for i, page in enumerate(doc):

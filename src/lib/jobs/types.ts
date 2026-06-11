@@ -24,9 +24,13 @@ export type ImportStudentsPayload = {
   fileName: string
 }
 
+export type PlatformBackupPayload = {
+  includeStudents: boolean
+}
+
 export type EnqueueInput = {
   type: JobType
-  schoolId: string
+  schoolId?: string | null
   createdById?: string | null
   payload: Record<string, unknown>
 }

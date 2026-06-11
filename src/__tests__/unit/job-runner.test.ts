@@ -22,6 +22,16 @@ vi.mock("@/lib/jobs/processors/generate-print-batch", () => ({
   failPrintBatch: vi.fn(),
 }))
 
+vi.mock("@/lib/jobs/processors/export-platform-backup", () => ({
+  processExportPlatformBackup: vi.fn().mockResolvedValue({
+    fileName: "backup.json",
+    storagePath: "backups/platform/backup.json",
+    bytes: 1000,
+    includeStudents: true,
+    counts: { students: 1 },
+  }),
+}))
+
 describe("runPendingJobs", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -53,5 +63,26 @@ describe("runPendingJobs", () => {
     expect(processed).toHaveLength(1)
     expect(processed[0]).toMatchObject({ jobId: "job-1", status: "COMPLETED" })
     expect(prisma.job.update).toHaveBeenCalled()
+  })
+
+  it("claims and completes a platform backup job without schoolId", async () => {
+    const job = {
+      id: "job-backup",
+      type: "EXPORT_PLATFORM_BACKUP",
+      status: "PENDING",
+      schoolId: null,
+      payload: { includeStudents: true },
+      attempts: 0,
+    }
+
+    ;(prisma.job.findFirst as any).mockResolvedValueOnce(job)
+    ;(prisma.job.updateMany as any).mockResolvedValueOnce({ count: 1 })
+    ;(prisma.job.findUnique as any).mockResolvedValueOnce({ ...job, status: "RUNNING", attempts: 1 })
+    ;(prisma.job.update as any).mockResolvedValue({})
+
+    const processed = await runPendingJobs(1)
+
+    expect(processed).toHaveLength(1)
+    expect(processed[0]).toMatchObject({ jobId: "job-backup", status: "COMPLETED" })
   })
 })

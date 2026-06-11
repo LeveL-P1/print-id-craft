@@ -5,8 +5,8 @@ import io
 import os
 from PIL import Image
 
-SRC = r"d:\Catlogue\PDF\Ready to Print.pdf"
-OUT = r"c:\Users\choud\Desktop\print-id-craft\print-id-craft\public\wisemelon-catalogue.pdf"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT = os.path.join(ROOT, "public", "wisemelon-catalogue.pdf")
 
 src_doc = fitz.open(SRC)
 out_doc = fitz.open()

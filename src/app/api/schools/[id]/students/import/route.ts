@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { inferFieldRole } from "@/lib/field-resolver"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
@@ -479,11 +480,13 @@ export async function POST(req: Request, { params }: { params: { id: string } })
             if (mappedKey === "phone" || n.includes("mobile") || n.includes("phone") || n.includes("contact")) {
               formType = "tel"
             }
+            const role = inferFieldRole(mappedKey, h)
             return {
               key: mappedKey,
               label: h, // Keep original Excel column name as the label
               type: formType,
               required: mappedKey === "fullName",
+              ...(role ? { role } : {}),
             }
           })
 

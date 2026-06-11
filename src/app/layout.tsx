@@ -14,7 +14,7 @@ const poppins = Poppins({
 })
 
 export const metadata: Metadata = {
-  title: "Print ID Craft — Multi-School ID Card Management & Print Portal",
+  title: "WiseMelon — Multi-School ID Card Management & Print Portal",
   description:
     "Professional ID card printing SaaS for manufacturers. Manage multiple schools, collect student data via smart links, design ID card templates, and generate print-ready PDFs with guaranteed front-back matching.",
 }

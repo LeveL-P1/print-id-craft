@@ -12,12 +12,19 @@
  */
 
 import { prisma } from "@/lib/prisma"
+import {
+  computeDuplicateFingerprint,
+  normalizeFormValue,
+  resolveFieldValue,
+} from "@/lib/field-resolver"
 
 export type FormField = {
   key: string
   label: string
   type: string
   required: boolean
+  /** Semantic role for validation/sorting — set by manufacturer template or inferred */
+  role?: string
 }
 
 /** Keys that are auto-managed by the server and must never be asked
@@ -177,4 +184,158 @@ export async function computeAutoAssignedFields(
   }
 
   return out
+}
+
+export type DuplicateCheckResult =
+  | { isDuplicate: false }
+  | {
+      isDuplicate: true
+      kind: "roll" | "identity"
+      error: "DUPLICATE_ROLL" | "DUPLICATE_NAME"
+      message: string
+      existing: {
+        serialNumber: string
+        submittedAt: Date
+        studentName: string
+      }
+    }
+
+export type SubmissionStatusResult =
+  | { submitted: false }
+  | {
+      submitted: true
+      serialNumber: string
+      submittedAt: string
+      studentName: string
+    }
+
+export function extractIdentityFields(formData: Record<string, string>) {
+  return {
+    name: resolveFieldValue(formData, "name"),
+    father: resolveFieldValue(formData, "father"),
+    dob: resolveFieldValue(formData, "dateofbirth"),
+    roll: resolveFieldValue(formData, "rollno"),
+  }
+}
+
+function identityMatches(
+  fd: Record<string, string>,
+  name: string,
+  father: string,
+  dob: string,
+  requireDob: boolean
+): boolean {
+  const n = normalizeFormValue(resolveFieldValue(fd, "name"))
+  const f = normalizeFormValue(resolveFieldValue(fd, "father"))
+  const d = normalizeFormValue(resolveFieldValue(fd, "dateofbirth"))
+  if (!n || n !== normalizeFormValue(name)) return false
+  if (!f || f !== normalizeFormValue(father)) return false
+  if (requireDob && dob) return !!d && d === normalizeFormValue(dob)
+  return true
+}
+
+function toDuplicateResult(
+  kind: "roll" | "identity",
+  error: "DUPLICATE_ROLL" | "DUPLICATE_NAME",
+  message: string,
+  existing: { serialNumber: string; submittedAt: Date; formData: unknown },
+  fallbackName: string
+): DuplicateCheckResult {
+  const fd = (existing.formData as Record<string, string>) || {}
+  return {
+    isDuplicate: true,
+    kind,
+    error,
+    message,
+    existing: {
+      serialNumber: existing.serialNumber,
+      submittedAt: existing.submittedAt,
+      studentName: resolveFieldValue(fd, "name") || fallbackName,
+    },
+  }
+}
+
+export async function checkDuplicateSubmission(
+  classId: string,
+  formData: Record<string, string>
+): Promise<DuplicateCheckResult> {
+  const { name, father, dob, roll } = extractIdentityFields(formData)
+  const fingerprint = computeDuplicateFingerprint(formData, classId)
+
+  if (fingerprint) {
+    const byFingerprint = await prisma.student.findFirst({
+      where: {
+        classId,
+        duplicateFingerprint: fingerprint,
+        status: { not: "FLAGGED" },
+      },
+      select: { serialNumber: true, submittedAt: true, formData: true },
+    })
+    if (byFingerprint) {
+      return toDuplicateResult(
+        "identity",
+        "DUPLICATE_NAME",
+        "This student is already registered in this class. Contact the school for changes.",
+        byFingerprint,
+        name
+      )
+    }
+  }
+
+  if (roll) {
+    const normRoll = normalizeFormValue(roll)
+    const existingStudents = await prisma.student.findMany({
+      where: { classId, status: { not: "FLAGGED" } },
+      select: { formData: true, serialNumber: true, submittedAt: true },
+    })
+    for (const s of existingStudents) {
+      const fd = (s.formData as Record<string, string>) || {}
+      const existingRoll = normalizeFormValue(resolveFieldValue(fd, "rollno"))
+      if (existingRoll && existingRoll === normRoll) {
+        return toDuplicateResult(
+          "roll",
+          "DUPLICATE_ROLL",
+          "This roll number is already registered in this class.",
+          s,
+          name
+        )
+      }
+    }
+  }
+
+  if (name && father) {
+    const existingStudents = await prisma.student.findMany({
+      where: { classId, status: { not: "FLAGGED" } },
+      select: { formData: true, serialNumber: true, submittedAt: true },
+    })
+    const requireDob = !!dob
+    for (const s of existingStudents) {
+      const fd = (s.formData as Record<string, string>) || {}
+      if (identityMatches(fd, name, father, dob, requireDob)) {
+        return toDuplicateResult(
+          "identity",
+          "DUPLICATE_NAME",
+          "This student is already registered in this class. Contact the school for changes.",
+          s,
+          name
+        )
+      }
+    }
+  }
+
+  return { isDuplicate: false }
+}
+
+export async function checkSubmissionStatus(
+  classId: string,
+  formData: Record<string, string>
+): Promise<SubmissionStatusResult> {
+  const dup = await checkDuplicateSubmission(classId, formData)
+  if (!dup.isDuplicate) return { submitted: false }
+  return {
+    submitted: true,
+    serialNumber: dup.existing.serialNumber,
+    submittedAt: dup.existing.submittedAt.toISOString(),
+    studentName: dup.existing.studentName,
+  }
 }

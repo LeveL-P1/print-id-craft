@@ -94,6 +94,7 @@ export default withAuth(
           path.startsWith("/api/auth/") ||
           path.startsWith("/api/health") ||
           path.startsWith("/api/jobs/process") ||
+          path.startsWith("/api/admin/backup/scheduled") ||
           path === "/login"
         ) {
           return true

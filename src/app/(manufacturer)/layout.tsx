@@ -43,8 +43,8 @@ export default function ManufacturerLayout({ children }: { children: ReactNode }
       <aside className={`app-sidebar ${mobileOpen ? 'sidebar-open' : ''}`}>
         <div className="sidebar-header">
           <div className="sidebar-brand">
-            <div className="sidebar-brand-icon">P</div>
-            <span className="sidebar-brand-text">Print ID Craft</span>
+            <div className="sidebar-brand-icon">W</div>
+            <span className="sidebar-brand-text">WiseMelon</span>
           </div>
         </div>
 

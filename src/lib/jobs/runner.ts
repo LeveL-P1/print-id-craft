@@ -9,6 +9,8 @@ import type {
 } from "./types"
 import { processExportArchive } from "./processors/export-archive"
 import { processGenerateQr } from "./processors/generate-qr"
+import { processExportPlatformBackup } from "./processors/export-platform-backup"
+import type { PlatformBackupPayload } from "./types"
 import { failPrintBatch, processGeneratePrintBatch } from "./processors/generate-print-batch"
 
 async function claimNextJob(): Promise<Job | null> {
@@ -71,35 +73,47 @@ async function failJob(job: Job, error: unknown) {
 }
 
 async function executeJob(job: Job) {
-  const schoolId = job.schoolId
-  if (!schoolId) {
-    throw new Error("Job missing schoolId")
-  }
-
   switch (job.type) {
-    case "EXPORT_SCHOOL_ARCHIVE": {
-      const result = await processExportArchive(job.id, schoolId, job.payload as unknown as ExportArchivePayload)
+    case "EXPORT_PLATFORM_BACKUP": {
+      const result = await processExportPlatformBackup(
+        job.id,
+        (job.payload || {}) as unknown as PlatformBackupPayload
+      )
       await completeJob(job.id, result)
       return result
     }
-    case "GENERATE_QR": {
-      const result = await processGenerateQr(schoolId, job.payload as unknown as GenerateQrPayload)
-      await completeJob(job.id, result)
-      return result
-    }
-    case "GENERATE_PRINT_BATCH": {
-      const payload = job.payload as unknown as GeneratePrintBatchPayload
-      try {
-        const result = await processGeneratePrintBatch(schoolId, payload)
-        await completeJob(job.id, result)
-        return result
-      } catch (error) {
-        await failPrintBatch(payload.batchId, error)
-        throw error
+    default: {
+      const schoolId = job.schoolId
+      if (!schoolId) {
+        throw new Error("Job missing schoolId")
+      }
+
+      switch (job.type) {
+        case "EXPORT_SCHOOL_ARCHIVE": {
+          const result = await processExportArchive(job.id, schoolId, job.payload as unknown as ExportArchivePayload)
+          await completeJob(job.id, result)
+          return result
+        }
+        case "GENERATE_QR": {
+          const result = await processGenerateQr(schoolId, job.payload as unknown as GenerateQrPayload)
+          await completeJob(job.id, result)
+          return result
+        }
+        case "GENERATE_PRINT_BATCH": {
+          const payload = job.payload as unknown as GeneratePrintBatchPayload
+          try {
+            const result = await processGeneratePrintBatch(schoolId, payload)
+            await completeJob(job.id, result)
+            return result
+          } catch (error) {
+            await failPrintBatch(payload.batchId, error)
+            throw error
+          }
+        }
+        default:
+          throw new Error(`Unsupported job type: ${job.type}`)
       }
     }
-    default:
-      throw new Error(`Unsupported job type: ${job.type}`)
   }
 }
 

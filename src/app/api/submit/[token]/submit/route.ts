@@ -7,18 +7,22 @@ import QRCode from "qrcode"
 import { computeAutoAssignedFields } from "@/lib/submit-fields"
 import { getNextStudentSerial } from "@/lib/student-serial"
 import { reportError } from "@/lib/observability"
+import { checkDuplicateSubmission } from "@/lib/submit-fields"
+import { computeDuplicateFingerprint } from "@/lib/field-resolver"
 
-const submitSchema = z.object({
+const photoUrlRefine = (url: string) => {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
+  if (supabaseUrl && url.startsWith(supabaseUrl)) return true
+  if (url.includes("supabase.co/storage/")) return true
+  return false
+}
+
+const publicSubmitSchema = z.object({
   formData: z.record(z.string(), z.any()),
-  photoUrl: z.string().optional().default("").refine((url) => {
-    if (!url) return true // empty is OK
-    // Only allow expected Supabase storage URLs or empty string
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
-    if (supabaseUrl && url.startsWith(supabaseUrl)) return true
-    // Also allow common Supabase storage patterns
-    if (url.includes("supabase.co/storage/")) return true
-    return false
-  }, { message: "Invalid photo URL origin" }),
+  photoUrl: z
+    .string()
+    .min(1, "Photo is required. Please upload a student photo before submitting.")
+    .refine(photoUrlRefine, { message: "Invalid photo URL origin" }),
   photoPath: z.string().optional().default(""),
 })
 
@@ -47,54 +51,23 @@ export async function POST(req: Request, { params }: { params: { token: string }
     }
 
     const body = await req.json()
-    const validated = submitSchema.parse(body)
+    const validated = publicSubmitSchema.parse(body)
+    const formData = validated.formData as Record<string, string>
 
-    // Check for duplicate: same class + same rollNo
-    const rollNo = validated.formData.rollNo || validated.formData["Roll No."] || validated.formData["roll"]
-    if (rollNo) {
-      const existing = await prisma.student.findFirst({
-        where: {
-          classId: cls.id,
-          status: { not: "FLAGGED" },
-          OR: [
-            { formData: { path: ["rollNo"], equals: rollNo } },
-            { formData: { path: ["Roll No."], equals: rollNo } },
-            { formData: { path: ["roll"], equals: rollNo } },
-          ] as any
+    const duplicate = await checkDuplicateSubmission(cls.id, formData)
+    if (duplicate.isDuplicate) {
+      return NextResponse.json({
+        error: duplicate.error,
+        message: duplicate.message,
+        existing: {
+          serialNumber: duplicate.existing.serialNumber,
+          submittedAt: duplicate.existing.submittedAt.toISOString(),
+          studentName: duplicate.existing.studentName,
         },
-      })
-      if (existing) {
-        return NextResponse.json({ error: "A student with this Roll No. has already submitted in this class." }, { status: 409 })
-      }
+      }, { status: 409 })
     }
 
-    // Check for duplicate: same class + same student name (case-insensitive)
-    const NAME_KEYS = ["name", "fullName", "studentName", "Student Name", "student_name", "full_name", "Full Name"]
-    const studentName = NAME_KEYS.map(k => validated.formData[k]).find(v => v && String(v).trim()) || ""
-    if (studentName) {
-      const normalizedName = String(studentName).trim().toLowerCase().replace(/\s+/g, " ")
-      const existingStudents = await prisma.student.findMany({
-        where: {
-          classId: cls.id,
-          status: { not: "FLAGGED" },
-        },
-        select: { formData: true },
-      })
-      const nameMatch = existingStudents.some((s: any) => {
-        const fd = (s.formData as Record<string, string>) || {}
-        for (const k of NAME_KEYS) {
-          const v = (fd[k] || "").trim().toLowerCase().replace(/\s+/g, " ")
-          if (v && v === normalizedName) return true
-        }
-        return false
-      })
-      if (nameMatch) {
-        return NextResponse.json({
-          error: "DUPLICATE_NAME",
-          message: "Details with this name are already registered. If you need to make changes, please contact support.",
-        }, { status: 409 })
-      }
-    }
+    const duplicateFingerprint = computeDuplicateFingerprint(formData, cls.id) || null
 
     // Create student with retry for serial number collisions under high concurrency
     let student: any = null
@@ -115,12 +88,13 @@ export async function POST(req: Request, { params }: { params: { token: string }
               schoolId: cls.school.id,
               classId: cls.id,
               serialNumber,
+              duplicateFingerprint,
               formData: {
                 ...validated.formData,
                 ...autoFields,
                 class: cls.name,
               },
-              photoUrl: validated.photoUrl || "",
+              photoUrl: validated.photoUrl,
               photoPath,
               status: "SUBMITTED",
             },

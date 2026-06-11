@@ -7,7 +7,7 @@ export async function enqueueJob(input: EnqueueInput) {
     data: {
       type: input.type,
       status: "PENDING",
-      schoolId: input.schoolId,
+      schoolId: input.schoolId || null,
       createdById: input.createdById || null,
       payload: input.payload as Prisma.InputJsonValue,
     },

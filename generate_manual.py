@@ -1,5 +1,5 @@
 """
-Generate a comprehensive User Manual for Print ID Craft in Word format.
+Generate a comprehensive User Manual for WiseMelon in Word format.
 Uses actual screenshots captured from the application.
 """
 import os
@@ -12,7 +12,7 @@ from docx.oxml.ns import qn, nsdecls
 from docx.oxml import parse_xml
 
 SCREENSHOTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "screenshots")
-OUTPUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Print_ID_Craft_User_Manual.docx")
+OUTPUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "WiseMelon_User_Manual.docx")
 
 def set_cell_shading(cell, color):
     """Set cell background color."""
@@ -106,7 +106,7 @@ def create_manual():
     for _ in range(4):
         doc.add_paragraph()
     
-    title = doc.add_heading('Print ID Craft', level=0)
+    title = doc.add_heading('WiseMelon', level=0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     for run in title.runs:
         run.font.size = Pt(36)
@@ -205,7 +205,7 @@ def create_manual():
     add_heading_styled(doc, '1. Introduction & Overview', level=1)
     
     doc.add_paragraph(
-        'Print ID Craft is a comprehensive, web-based platform designed for managing student ID cards '
+        'WiseMelon is a comprehensive, web-based platform designed for managing student ID cards '
         'across multiple schools. It provides a complete end-to-end solution from student data collection '
         'to ID card printing, with built-in role-based access control, photo verification, and batch processing.'
     )
@@ -245,7 +245,7 @@ def create_manual():
     add_heading_styled(doc, '2. System Architecture & User Roles', level=1)
     
     doc.add_paragraph(
-        'Print ID Craft uses a modern web architecture built with Next.js, Prisma ORM, PostgreSQL (Supabase), '
+        'WiseMelon uses a modern web architecture built with Next.js, Prisma ORM, PostgreSQL (Supabase), '
         'and Supabase Storage for file uploads. The application supports three distinct user roles:'
     )
     
@@ -295,7 +295,7 @@ def create_manual():
     add_heading_styled(doc, '3. Landing Page', level=1)
     
     doc.add_paragraph(
-        'The landing page is the first thing visitors see when they access Print ID Craft. '
+        'The landing page is the first thing visitors see when they access WiseMelon. '
         'It features a modern, animated design with a clean layout that introduces the platform\'s capabilities.'
     )
     
@@ -320,7 +320,7 @@ def create_manual():
     add_heading_styled(doc, '3.3 Partnership Section', level=2)
     doc.add_paragraph(
         'The partnership section addresses common concerns schools face with traditional ID card vendors '
-        'and positions Print ID Craft as a reliable solution. An animated submarine illustration adds '
+        'and positions WiseMelon as a reliable solution. An animated submarine illustration adds '
         'visual interest.'
     )
     add_screenshot(doc, "04_landing_partnership.png", "Figure 3.3: Partnership-First Approach Section")
@@ -341,7 +341,7 @@ def create_manual():
     add_heading_styled(doc, '4. Login System', level=1)
     
     doc.add_paragraph(
-        'Print ID Craft provides separate login portals for Teachers and Manufacturers (Admins). '
+        'WiseMelon provides separate login portals for Teachers and Manufacturers (Admins). '
         'The login system uses NextAuth.js with secure credential-based authentication and bcrypt password hashing.'
     )
     
@@ -872,7 +872,7 @@ def create_manual():
         'Green checkmark confirmation',
         'Unique Serial Number — Students should save this for their records',
         'ID Card Preview — Shows the finalized card with a watermark',
-        '"Powered by Print ID Craft" branding',
+        '"Powered by WiseMelon" branding',
     ]
     for item in success_features:
         doc.add_paragraph(item, style='List Bullet')
@@ -885,7 +885,7 @@ def create_manual():
     add_heading_styled(doc, '10. Photo Verification Engine', level=1)
     
     doc.add_paragraph(
-        'Print ID Craft includes a built-in Photo Verification Engine that automatically validates '
+        'WiseMelon includes a built-in Photo Verification Engine that automatically validates '
         'uploaded photos against ID card standards before accepting them.'
     )
     
@@ -1069,20 +1069,20 @@ def create_manual():
     end_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
     end_text = doc.add_paragraph(
-        'For additional support or feature requests, please contact the Print ID Craft team.'
+        'For additional support or feature requests, please contact the WiseMelon team.'
     )
     end_text.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
     doc.add_paragraph()
     
-    end_url = doc.add_paragraph('www.printidcraft.com')
+    end_url = doc.add_paragraph('www.wisemelon.com')
     end_url.alignment = WD_ALIGN_PARAGRAPH.CENTER
     end_url.runs[0].font.color.rgb = RGBColor(0x3B, 0x82, 0xF6)
     end_url.runs[0].font.size = Pt(14)
     end_url.runs[0].bold = True
     
     doc.add_paragraph()
-    version_final = doc.add_paragraph('© 2026 Print ID Craft. All rights reserved.')
+    version_final = doc.add_paragraph('© 2026 WiseMelon. All rights reserved.')
     version_final.alignment = WD_ALIGN_PARAGRAPH.CENTER
     version_final.runs[0].font.size = Pt(10)
     version_final.runs[0].font.color.rgb = RGBColor(0x94, 0xA3, 0xB8)

@@ -1,8 +1,9 @@
 """Replace the <main>...</main> block in src/app/page.tsx with new WiseMelon content."""
 import io, os, re
 
-PAGE = r"c:\Users\choud\Desktop\print-id-craft\print-id-craft\src\app\page.tsx"
-NEW_MAIN_PATH = r"c:\Users\choud\Desktop\print-id-craft\print-id-craft\scripts\new_main.md"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PAGE = os.path.join(ROOT, "src", "app", "page.tsx")
+NEW_MAIN_PATH = os.path.join(ROOT, "scripts", "new_main.md")
 
 with open(PAGE, "r", encoding="utf-8") as f:
     src = f.read()

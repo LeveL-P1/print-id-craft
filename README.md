@@ -1,4 +1,4 @@
-# Print ID Craft
+# WiseMelon
 
 Production portal for school ID-card collection and manufacturing.
 
@@ -23,16 +23,50 @@ SENTRY_DSN=
 NEXT_PUBLIC_SENTRY_DSN=
 ```
 
-`CRON_SECRET` secures manual maintenance and job-worker calls (`Authorization: Bearer ...`). Optional on Vercel Hobby; required if you enable crons on Pro (see `vercel.pro.example.json`).
+`CRON_SECRET` secures cron and worker calls (`Authorization: Bearer ...`). Required in production when Vercel crons are enabled.
 
-## Vercel Hobby (free) deploy
+## Vercel Pro + Supabase Pro (recommended for season)
 
-`vercel.json` intentionally has **no `crons` block** — scheduled crons and 300s function duration require **Vercel Pro**.
+This repo ships **Pro-ready** settings in `vercel.json`:
 
-On Hobby:
+- Job worker cron every 2 minutes: `GET /api/jobs/process`
+- Daily maintenance: `GET /api/maintenance/cleanup`
+- Weekly platform metadata backup: `GET /api/admin/backup/scheduled` (Sunday 03:00 UTC)
 
-- Background jobs still run when you enqueue work (archive export, QR after import, print batch) via an immediate worker kick.
-- Run maintenance manually (see Maintenance below) or upgrade to Pro and copy settings from `vercel.pro.example.json`.
+Function timeouts: job worker **300s**; most API routes **60s**.
+
+### Supabase dashboard (after upgrading to Pro)
+
+1. Enable **daily backups** (and optional **PITR** for point-in-time recovery).
+2. Confirm bucket `student-photos` exists and is accessible with the service role.
+3. Run `npx prisma db push` once after deploy if `EXPORT_PLATFORM_BACKUP` was added to the `JobType` enum.
+
+### Backup strategy (no data loss)
+
+| Layer | What | How |
+|-------|------|-----|
+| Database | Postgres rows | Supabase Pro daily backups + optional PITR |
+| Metadata JSON | Users, schools, classes, templates, students, batches | Weekly cron → `student-photos/backups/platform/*.json` |
+| Photos / PDFs / ZIPs | Binary files in Storage | Per-school **Complete Archive ZIP** exports; copy to external drive weekly |
+| Manual snapshot | Full JSON download | Manufacturer: `GET /api/admin/export-db` (paginated; use `?students=false` for metadata-only) |
+| On-demand cloud backup | Same as weekly job | Manufacturer: `POST /api/admin/backup/run` |
+
+Check backup health: `GET /api/admin/backup/status` (manufacturer session).
+
+Manual weekly backup trigger:
+
+```bash
+curl -X POST https://your-domain/api/admin/backup/run \
+  -H "Cookie: next-auth.session-token=..." \
+  -H "Content-Type: application/json" \
+  -d '{"includeStudents":true}'
+```
+
+Or rely on the Sunday cron (uses `CRON_SECRET` like other maintenance routes).
+
+### Vercel Hobby note
+
+Scheduled crons and 300s durations require **Vercel Pro**. On Hobby, remove the `crons` block from `vercel.json` and call maintenance/backup endpoints manually; jobs still run when enqueued via immediate worker kick.
 
 ## Commands
 
@@ -105,13 +139,15 @@ Archive guardrails:
 
 ## Maintenance
 
-On **Vercel Pro**, you can add the cron from `vercel.pro.example.json` to call:
+Vercel Pro runs these crons automatically (see `vercel.json`):
 
 ```text
-GET /api/maintenance/cleanup
+GET /api/maintenance/cleanup        (daily 02:00 UTC)
+GET /api/jobs/process               (every 2 minutes)
+GET /api/admin/backup/scheduled     (Sunday 03:00 UTC)
 ```
 
-On **Vercel Hobby**, call the same endpoint manually (no scheduled cron):
+On **Vercel Hobby**, call the same endpoints manually (no scheduled cron):
 
 This deletes expired rate-limit rows. It requires `CRON_SECRET` in production.
 It also prunes old `SystemEvent` and completed/failed `Job` records. Retention
@@ -141,13 +177,16 @@ Admin APIs:
 ```text
 GET /api/admin/events
 GET /api/admin/jobs
+GET /api/admin/backup/status
+POST /api/admin/backup/run
+GET /api/admin/export-db
 ```
 
 Manufacturer session required.
 The manufacturer dashboard also includes a compact Operations panel showing
 readiness, recent backend events, and recent jobs.
 
-`Job` records track background work: archive exports, QR generation after import, and print batch PDF generation. On Hobby, the worker runs when jobs are enqueued (not on a schedule). On Pro, add the job cron from `vercel.pro.example.json`.
+`Job` records track background work: archive exports, QR generation after import, print batch PDF generation, and platform metadata backups. On Pro, crons in `vercel.json` process the queue every 2 minutes. On Hobby, the worker runs when jobs are enqueued (not on a schedule).
 
 Poll job status: `GET /api/jobs/{jobId}`. Download completed archive: `GET /api/jobs/{jobId}/download`.
 

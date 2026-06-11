@@ -4,6 +4,8 @@
  * normalization and fuzzy group matching.
  */
 
+import { createHash } from "crypto"
+
 /**
  * Normalizes a field key by lowercasing and stripping non-alphanumeric chars.
  */
@@ -58,6 +60,162 @@ function findGroupForKey(normKey: string): string | null {
     }
   }
   return null
+}
+
+/** Semantic roles used for validation, sorting, and duplicate detection. */
+export type FieldRole =
+  | "name"
+  | "father"
+  | "mother"
+  | "address"
+  | "mobile"
+  | "rollno"
+  | "dob"
+  | "branch"
+  | "flag"
+  | "bloodgroup"
+  | "default"
+
+const VALID_ROLES = new Set<string>([
+  "name", "father", "mother", "address", "mobile", "rollno",
+  "dob", "branch", "flag", "bloodgroup", "default",
+])
+
+const GROUP_TO_ROLE: Record<string, FieldRole> = {
+  name: "name",
+  father: "father",
+  mother: "mother",
+  dateofbirth: "dob",
+  address: "address",
+  mobile: "mobile",
+  phone: "mobile",
+  mob_father: "mobile",
+  rollno: "rollno",
+  admissionno: "rollno",
+  branch: "branch",
+  flagcolor: "flag",
+  bloodgroup: "bloodgroup",
+}
+
+/** Display order for public registration forms (lower = earlier). */
+export const FIELD_ROLE_SORT_ORDER: Record<FieldRole, number> = {
+  name: 10,
+  father: 20,
+  mother: 30,
+  dob: 40,
+  rollno: 50,
+  branch: 55,
+  address: 60,
+  mobile: 70,
+  flag: 80,
+  bloodgroup: 90,
+  default: 100,
+}
+
+/**
+ * Classify a form field's semantic role from explicit config, key, and label.
+ * Works across schools with different column names ("GR NO", "नाव", etc.).
+ */
+export function getFieldRole(
+  key: string,
+  label: string = "",
+  explicitRole?: string
+): FieldRole {
+  if (explicitRole && VALID_ROLES.has(explicitRole)) {
+    return explicitRole as FieldRole
+  }
+
+  const k = (key || "").toLowerCase()
+  const l = (label || "").toLowerCase()
+  const hay = `${k} ${l}`
+
+  // Phone/mobile fields — check before father/mother name heuristics
+  if (
+    k === "mob_father" || k === "mother_phone" || k === "fatherphone" ||
+    k === "motherphone" || /\b(mobile|phone|contact|whatsapp|tel)\b/.test(hay) ||
+    (k.includes("mob") && !k.includes("mother") && !/\bfather\b/.test(l))
+  ) {
+    if (!/\b(father|mother)\s*name\b/.test(hay) && !/\bname\b/.test(l)) {
+      return "mobile"
+    }
+  }
+
+  if (/\b(addr|address)\b/.test(hay)) return "address"
+  if (/\b(roll|gr\.?\s*no|gr\b|general\s*register|admission\s*no|adm\.?\s*no)\b/.test(hay)) {
+    return "rollno"
+  }
+  if (/\b(house ?flag|flag ?colou?r|^house$|colou?r ?house|^colour$|^color$)\b/.test(hay)) {
+    return "flag"
+  }
+  if (/\b(blood ?group|bloodgroup)\b/.test(hay)) return "bloodgroup"
+  if (/\b(dob|dateofbirth|date of birth|birthdate|birthday)\b/.test(hay)) return "dob"
+  if (/\b(branch|campus)\b/.test(hay)) return "branch"
+
+  if ((l.includes("father") || k.includes("father")) && !/\b(mobile|phone|mob|contact)\b/.test(hay)) {
+    return "father"
+  }
+  if ((l.includes("mother") || k.includes("mother")) && !/\b(mobile|phone|mob|contact)\b/.test(hay)) {
+    return "mother"
+  }
+  if (/\b(surname)\b/.test(hay)) return "name"
+  if (/\b(name|student)\b/.test(hay) && !l.includes("father") && !l.includes("mother")) {
+    return "name"
+  }
+
+  const group = findGroupForKey(normalizeKey(key))
+  if (group && GROUP_TO_ROLE[group]) return GROUP_TO_ROLE[group]
+
+  return "default"
+}
+
+/** Infer role for storage on fieldConfig (undefined when unknown). */
+export function inferFieldRole(key: string, label?: string): FieldRole | undefined {
+  const role = getFieldRole(key, label || "")
+  return role === "default" ? undefined : role
+}
+
+export type SortableFormField = {
+  key: string
+  label: string
+  type: string
+  required: boolean
+  role?: string
+}
+
+/** Sort dynamic school fields into a parent-friendly order. */
+export function sortFieldsByRole<T extends SortableFormField>(fields: T[]): T[] {
+  return [...fields].sort((a, b) => {
+    const orderA = FIELD_ROLE_SORT_ORDER[getFieldRole(a.key, a.label, a.role)]
+    const orderB = FIELD_ROLE_SORT_ORDER[getFieldRole(b.key, b.label, b.role)]
+    if (orderA !== orderB) return orderA - orderB
+    return a.label.localeCompare(b.label)
+  })
+}
+
+/** Normalize a value for duplicate comparison (case/space/punctuation insensitive). */
+export function normalizeFormValue(value: string): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+}
+
+/**
+ * Stable fingerprint for duplicate detection: class + name + father + DOB.
+ * Returns empty string when name or father is missing.
+ */
+export function computeDuplicateFingerprint(
+  formData: Record<string, string>,
+  classId: string
+): string {
+  const name = normalizeFormValue(resolveFieldValue(formData, "name"))
+  const father = normalizeFormValue(resolveFieldValue(formData, "father"))
+  const dob = normalizeFormValue(resolveFieldValue(formData, "dateofbirth"))
+  if (!name || !father) return ""
+  const payload = dob
+    ? `${classId}|${name}|${father}|${dob}`
+    : `${classId}|${name}|${father}`
+  return createHash("sha256").update(payload).digest("hex")
 }
 
 /**

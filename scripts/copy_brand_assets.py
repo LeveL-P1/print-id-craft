@@ -3,7 +3,7 @@ import fitz
 import shutil
 import os
 
-ROOT = r"c:\Users\choud\Desktop\print-id-craft\print-id-craft"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PUBLIC = os.path.join(ROOT, "public")
 CAT_DIR = os.path.join(PUBLIC, "catalogue")
 os.makedirs(CAT_DIR, exist_ok=True)

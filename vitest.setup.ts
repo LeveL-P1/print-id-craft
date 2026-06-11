@@ -73,7 +73,11 @@ vi.mock('@/lib/jobs/enqueue', () => ({
   kickJobWorker: vi.fn().mockResolvedValue(undefined),
 }))
 
-// Mock crypto.randomUUID
-vi.mock('crypto', () => ({
-  randomUUID: () => 'mock-uuid-1234'
-}))
+// Mock crypto.randomUUID; keep createHash for duplicate fingerprint tests
+vi.mock('crypto', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('crypto')>()
+  return {
+    ...actual,
+    randomUUID: () => 'mock-uuid-1234',
+  }
+})

@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { z } from "zod"
 import { migrateTemplateToPt } from "@/lib/font-size-units"
+import { inferFieldRole } from "@/lib/field-resolver"
 
 const templateSchema = z.object({
   frontLayout: z.any().optional(),
@@ -45,11 +46,13 @@ function deriveFieldConfigFromMappings(fieldMappings: any[]): any[] {
         formType = "text" // will be auto-filled from class name
       }
 
+      const role = inferFieldRole(m.fieldKey, m.label)
       return {
         key: m.fieldKey,
         label: m.label,
         type: formType,
         required: true,
+        ...(role ? { role } : {}),
       }
     })
 }

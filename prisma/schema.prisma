@@ -106,6 +106,7 @@ model Student {
   classId       String
   class         Class         @relation(fields: [classId], references: [id])
   serialNumber  String        @unique
+  duplicateFingerprint String?
   formData      Json
   photoUrl      String        @default("")
   photoPath     String        @default("")
@@ -122,6 +123,7 @@ model Student {
   @@index([schoolId, submittedAt])
   @@index([schoolId, serialNumber])
   @@index([classId])
+  @@index([classId, duplicateFingerprint])
   @@index([status])
   @@index([photoPath])
 }
@@ -207,6 +209,7 @@ enum JobType {
   GENERATE_QR
   GENERATE_PRINT_BATCH
   EXPORT_SCHOOL_ARCHIVE
+  EXPORT_PLATFORM_BACKUP
 }
 
 enum JobStatus {

@@ -107,7 +107,7 @@ async function main() {
   const hashedPassword = await bcrypt.hash("Admin@123", 12)
   const manufacturer = await prisma.user.create({
     data: {
-      email: "admin@printidcraft.com",
+      email: "admin@wisemelon.com",
       password: hashedPassword,
       name: "Admin User",
       role: "MANUFACTURER",
@@ -284,7 +284,7 @@ async function main() {
   console.log("📋 Login Credentials:")
   console.log("  ─────────────────────────────────────────")
   console.log("  MANUFACTURER:")
-  console.log("    Email:    admin@printidcraft.com")
+  console.log("    Email:    admin@wisemelon.com")
   console.log("    Password: Admin@123")
   console.log("  ─────────────────────────────────────────")
   console.log("  TEACHER (St. Xavier's):")

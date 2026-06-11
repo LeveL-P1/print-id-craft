@@ -1,5 +1,5 @@
 """
-Print ID Craft User Manual Generator - With blank screenshot placeholders
+WiseMelon User Manual Generator - With blank screenshot placeholders
 """
 import os
 from docx import Document
@@ -9,7 +9,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import nsdecls
 from docx.oxml import parse_xml
 
-OUTPUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Print_ID_Craft_User_Manual.docx")
+OUTPUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "WiseMelon_User_Manual.docx")
 
 def h(doc, text, level=1):
     heading = doc.add_heading(text, level=level)
@@ -95,7 +95,7 @@ def main():
     # ══════════ TITLE PAGE ══════════
     for _ in range(5):
         doc.add_paragraph()
-    title = doc.add_heading('Print ID Craft', level=0)
+    title = doc.add_heading('WiseMelon', level=0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     for r in title.runs:
         r.font.size = Pt(36)
@@ -177,7 +177,7 @@ def main():
     # ══════════ 1. INTRODUCTION ══════════
     h(doc, '1. Introduction & Overview')
     doc.add_paragraph(
-        'Print ID Craft is a comprehensive, web-based platform designed for managing student ID cards '
+        'WiseMelon is a comprehensive, web-based platform designed for managing student ID cards '
         'across multiple schools. It provides a complete end-to-end solution from student data collection '
         'to ID card printing, with built-in role-based access control, photo verification, and batch processing.')
     doc.add_paragraph()
@@ -202,7 +202,7 @@ def main():
     # ══════════ 2. ARCHITECTURE ══════════
     h(doc, '2. System Architecture & User Roles')
     doc.add_paragraph(
-        'Print ID Craft uses Next.js, Prisma ORM, PostgreSQL (Supabase), and Supabase Storage. '
+        'WiseMelon uses Next.js, Prisma ORM, PostgreSQL (Supabase), and Supabase Storage. '
         'The application supports three distinct user roles:')
     doc.add_paragraph()
     
@@ -229,7 +229,7 @@ def main():
 
     # ══════════ 3. LANDING PAGE ══════════
     h(doc, '3. Landing Page')
-    doc.add_paragraph('The landing page introduces Print ID Craft with animated sections and a modern design.')
+    doc.add_paragraph('The landing page introduces WiseMelon with animated sections and a modern design.')
     
     doc.add_paragraph()
     h(doc, '3.1 Hero Section', 2)
@@ -484,7 +484,7 @@ def main():
     placeholder(doc, "Figure 9.3: Student Form — Review Screen")
     
     h(doc, '9.4 Success Screen', 2)
-    doc.add_paragraph('Green checkmark, unique Serial Number (students should save this), watermarked ID Card Preview, "Powered by Print ID Craft" branding.')
+    p = doc.add_paragraph('Green checkmark, unique Serial Number (students should save this), watermarked ID Card Preview, "Powered by WiseMelon" branding.')
     placeholder(doc, "Figure 9.4: Submission Success Screen", 2)
     doc.add_page_break()
 
@@ -583,10 +583,10 @@ def main():
         doc.add_paragraph()
     end = doc.add_heading('Thank You', 1)
     end.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p = doc.add_paragraph('For support or feature requests, contact the Print ID Craft team.')
+    p = doc.add_paragraph('For support or feature requests, contact the WiseMelon team.')
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     doc.add_paragraph()
-    p2 = doc.add_paragraph('© 2026 Print ID Craft. All rights reserved.')
+    p2 = doc.add_paragraph('© 2026 WiseMelon. All rights reserved.')
     p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p2.runs[0].font.color.rgb = RGBColor(0x94, 0xA3, 0xB8)
 

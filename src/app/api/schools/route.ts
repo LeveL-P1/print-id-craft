@@ -134,7 +134,7 @@ export async function POST(req: Request) {
       const defaultPassword = await bcrypt.hash("Teacher@123", 12)
       
       const existingUser = await tx.user.findUnique({ where: { email: validated.contactEmail } })
-      const teacherEmail = existingUser ? `teacher_${school.id.substring(0, 8)}@printidcraft.com` : validated.contactEmail
+      const teacherEmail = existingUser ? `teacher_${school.id.substring(0, 8)}@wisemelon.com` : validated.contactEmail
       
       await tx.user.create({
         data: {

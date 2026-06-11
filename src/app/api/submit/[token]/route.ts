@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { buildFormFields, type FormField } from "@/lib/submit-fields"
+import { buildFormFields, checkSubmissionStatus, type FormField } from "@/lib/submit-fields"
 import { migrateTemplateToPt } from "@/lib/font-size-units"
+import { getFieldRole, inferFieldRole, resolveFieldValue, sortFieldsByRole } from "@/lib/field-resolver"
 
 export async function GET(req: Request, { params }: { params: { token: string } }) {
   try {
@@ -26,6 +27,37 @@ export async function GET(req: Request, { params }: { params: { token: string } 
 
     if (cls.expiresAt && new Date() > cls.expiresAt) {
       return NextResponse.json({ error: "This link has expired", code: "EXPIRED" }, { status: 410 })
+    }
+
+    // Optional: check whether this student was already submitted (return visit).
+    const { searchParams } = new URL(req.url)
+    if (searchParams.get("statusCheck") === "1") {
+      let formData: Record<string, string> = {}
+      const rawFormData = searchParams.get("formData")
+      if (rawFormData) {
+        try {
+          formData = JSON.parse(rawFormData) as Record<string, string>
+        } catch {
+          return NextResponse.json({ error: "Invalid formData" }, { status: 400 })
+        }
+      }
+      const name = resolveFieldValue(formData, "name")
+      const father = resolveFieldValue(formData, "father")
+      if (!name || !father) {
+        return NextResponse.json({ success: true, data: { submitted: false } })
+      }
+      const status = await checkSubmissionStatus(cls.id, formData)
+      return NextResponse.json({
+        success: true,
+        data: status.submitted
+          ? {
+              submitted: true,
+              serialNumber: status.serialNumber,
+              submittedAt: status.submittedAt,
+              studentName: status.studentName,
+            }
+          : { submitted: false },
+      })
     }
 
     // One-shot legacy → pt font-size migration. Same logic as the
@@ -89,7 +121,8 @@ export async function GET(req: Request, { params }: { params: { token: string } 
         const l = (f.label || "").toLowerCase()
         let formType: string = f.type || "text"
         if (k === "phone" || k.includes("mob") || l.includes("mobile") || l.includes("phone")) formType = "tel"
-        templateFallback.push({ key: f.key, label: f.label, type: formType, required: true })
+        const role = f.role || inferFieldRole(f.key, f.label)
+        templateFallback.push({ key: f.key, label: f.label, type: formType, required: true, role })
       }
     } else if (rawMappings.length > 0) {
       for (const m of rawMappings) {
@@ -97,7 +130,8 @@ export async function GET(req: Request, { params }: { params: { token: string } 
         const k = (m.fieldKey || "").toLowerCase()
         let formType = "text"
         if (k.includes("phone") || k.includes("mob") || k === "mob_father" || k === "mother_phone") formType = "tel"
-        templateFallback.push({ key: m.fieldKey, label: m.label, type: formType, required: true })
+        const role = inferFieldRole(m.fieldKey, m.label)
+        templateFallback.push({ key: m.fieldKey, label: m.label, type: formType, required: true, role })
       }
     }
 
@@ -108,6 +142,18 @@ export async function GET(req: Request, { params }: { params: { token: string } 
       console.error("buildFormFields failed (non-fatal):", e)
       resolvedFieldConfig = templateFallback
     }
+
+    // Merge semantic roles from template onto data-derived keys, then sort
+    // fields into a parent-friendly order (name → parents → address → mobile…).
+    const roleByKey = Object.fromEntries(
+      templateFallback.map(f => [f.key, f.role || inferFieldRole(f.key, f.label)])
+    )
+    resolvedFieldConfig = sortFieldsByRole(
+      resolvedFieldConfig.map(f => ({
+        ...f,
+        role: roleByKey[f.key] || getFieldRole(f.key, f.label),
+      }))
+    )
 
     // Detect flag/house field from EITHER fieldMappings (type=flag) OR fieldConfig key/label.
     const FLAG_FIELD_KEYS = ["flagColor", "houseFlag", "house_flag", "houseColor", "house_color"]

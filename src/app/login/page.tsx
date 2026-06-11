@@ -73,8 +73,8 @@ function LoginForm() {
       <div className="login-left" style={{ animationDelay: '0.1s' }}>
         <div className="login-left-content">
           <div className="login-logo">
-            <div className="login-logo-icon">P</div>
-            <span className="login-logo-text">Print ID Craft</span>
+            <div className="login-logo-icon">W</div>
+            <span className="login-logo-text">WiseMelon</span>
           </div>
 
           <div className="login-illustration">
@@ -149,7 +149,7 @@ function LoginForm() {
                 id="email"
                 type="email"
                 required
-                placeholder={isAdminMode ? "admin@printidcraft.com" : "teacher@school.com"}
+                placeholder={isAdminMode ? "admin@wisemelon.com" : "teacher@school.com"}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={loading}

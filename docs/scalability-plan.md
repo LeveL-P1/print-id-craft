@@ -1,6 +1,6 @@
 # Scaling Strategy: 1000+ Scalable ID Card Generation
 
-Generating 1,000+ high-resolution, print-ready ID cards directly in the browser will inevitably crash the client-side tab due to memory limits (Canvas memory limits and `jsPDF` blob bloat). To make the Print ID Craft application truly scalable, we must move heavy generations to a server-side asynchronous job runner.
+Generating 1,000+ high-resolution, print-ready ID cards directly in the browser will inevitably crash the client-side tab due to memory limits (Canvas memory limits and `jsPDF` blob bloat). To make the WiseMelon application truly scalable, we must move heavy generations to a server-side asynchronous job runner.
 
 ## 1. Architectural Approach
 

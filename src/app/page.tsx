@@ -43,7 +43,7 @@ function Header() {
           </div>
           <div className="flex flex-col">
             <span className="font-serif text-lg font-bold leading-tight text-[#0B1F3A]">WiseMelon</span>
-            <span className="text-[10px] font-semibold uppercase tracking-widest text-[#0B1F3A]/50">Print ID Craft</span>
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-[#0B1F3A]/50">WiseMelon Pvt Ltd</span>
           </div>
         </Link>
 
@@ -444,7 +444,7 @@ function Footer() {
               <span className="font-serif text-xl font-bold text-[#0B1F3A]">WiseMelon</span>
             </Link>
             <p className="text-gray-500 text-sm leading-relaxed max-w-sm">
-              Print ID Craft is a division of WiseMelon Ventures Pvt. Ltd., dedicated to providing premium institutional supplies and corporate gifting solutions.
+              WiseMelon is a division of WiseMelon Ventures Pvt. Ltd., dedicated to providing premium institutional supplies and corporate gifting solutions.
             </p>
           </div>
 

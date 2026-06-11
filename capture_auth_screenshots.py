@@ -20,8 +20,8 @@ async def main():
             ("darshanchoudhari22@gmail.com", "Admin@123"),
             ("darshanchoudhari22@gmail.com", "Darshan@123"),
             ("darshanchoudhari22@gmail.com", "admin123"),
-            ("admin@printidcraft.com", "Admin@123"),
-            ("admin@printidcraft.com", "admin123"),
+            ("admin@wisemelon.com", "Admin@123"),
+            ("admin@wisemelon.com", "admin123"),
         ]
         
         logged_in = False

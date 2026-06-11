@@ -1,15 +1,20 @@
 "use client"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useParams } from "next/navigation"
 import SharedIDCardPreview from "@/components/IDCardPreview"
 import dynamic from "next/dynamic"
 import PhotoVerifier from "@/components/PhotoVerifier"
+import {
+  getFieldRole,
+  resolveFieldValue,
+  type FieldRole,
+} from "@/lib/field-resolver"
 
 const JpgCardPreview = dynamic(() => import("@/components/JpgCardPreview"), { ssr: false })
 const PhotoBgProcessor = dynamic(() => import("@/components/PhotoBgProcessor"), { ssr: false })
 const PhotoCropper = dynamic(() => import("@/components/PhotoCropper"), { ssr: false })
 
-type FieldConfig = { key: string; label: string; type: string; required: boolean }
+type FieldConfig = { key: string; label: string; type: string; required: boolean; role?: string }
 type TemplateElement = { 
   id: string; type: string; x: number; y: number; width: number; height: number; 
   content: string; fontSize?: number; fill?: string; align?: string; bold?: boolean 
@@ -37,25 +42,19 @@ type FormConfig = {
   flagColors?: string[]
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Field-intent helpers — classify each fieldConfig entry from the key/label so
-// we can render parent-friendly inputs (dropdowns, prefixes, validation) for
-// well-known fields without requiring template changes.
-// ─────────────────────────────────────────────────────────────────────────────
-type FieldIntent = "name" | "roll" | "address" | "mobile" | "flag" | "default"
+const fieldRole = (field: FieldConfig): FieldRole =>
+  getFieldRole(field.key, field.label, field.role)
 
-const fieldIntent = (field: FieldConfig): FieldIntent => {
-  const k = (field.key || "").toLowerCase()
-  const l = (field.label || "").toLowerCase()
-  const hay = `${k} ${l}`
-  if (/\b(mobile|phone|contact|whatsapp|tel)\b/.test(hay)) return "mobile"
-  if (/\b(addr|address)\b/.test(hay)) return "address"
-  // Roll number / GR (General Register) number / Admission number — all the
-  // same kind of student identifier from a form-rendering point of view.
-  if (/\b(roll|gr\.?\s*no|gr\b|general\s*register|admission\s*no|adm\.?\s*no)\b/.test(hay)) return "roll"
-  if (/\b(house ?flag|flag ?colou?r|^house$|colou?r ?house|^colour$|^color$)\b/.test(hay)) return "flag"
-  if (/\b(name|father|mother|guardian|surname)\b/.test(hay)) return "name"
-  return "default"
+const formatSubmittedDate = (iso: string) => {
+  try {
+    return new Date(iso).toLocaleDateString("en-IN", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    })
+  } catch {
+    return iso
+  }
 }
 
 // Title-case each word: "darshan choudhari" -> "Darshan Choudhari".
@@ -259,6 +258,17 @@ export default function SubmitPage() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [alertMsg, setAlertMsg] = useState("")
   const [duplicateBlocked, setDuplicateBlocked] = useState(false)
+  const [duplicateInfo, setDuplicateInfo] = useState<{
+    studentName: string
+    serialNumber?: string
+    submittedAt?: string
+    isRoll?: boolean
+  } | null>(null)
+  const [alreadySubmitted, setAlreadySubmitted] = useState<{
+    studentName: string
+    serialNumber: string
+    submittedAt: string
+  } | null>(null)
   const [photoVerified, setPhotoVerified] = useState(false)
   const [bgSkippable, setBgSkippable] = useState(false)
 
@@ -280,8 +290,30 @@ export default function SubmitPage() {
   // and have a ~4 KB size limit, far too small for the photo data URL.
   // ───────────────────────────────────────────────────────────────────────────
   const DRAFT_KEY = `submit-draft:${token}`
+  const SUBMITTED_KEY = `submit-done:${token}`
   const [draftRestored, setDraftRestored] = useState(false)
   const [draftBanner, setDraftBanner] = useState(false)
+
+  const checkSubmissionStatus = useCallback(async (fd: Record<string, string>) => {
+    const name = resolveFieldValue(fd, "name")
+    const father = resolveFieldValue(fd, "father")
+    if (!name || !father) return
+    try {
+      const res = await fetch(
+        `/api/submit/${token}?statusCheck=1&formData=${encodeURIComponent(JSON.stringify(fd))}`
+      )
+      const data = await res.json()
+      if (data.success && data.data?.submitted) {
+        setAlreadySubmitted({
+          studentName: data.data.studentName || name,
+          serialNumber: data.data.serialNumber,
+          submittedAt: data.data.submittedAt,
+        })
+      }
+    } catch {
+      // Non-fatal — parent can still fill the form
+    }
+  }, [token])
 
   // Restore once on mount (before the config fetch overwrites class field).
   useEffect(() => {
@@ -314,6 +346,9 @@ export default function SubmitPage() {
         (draft.formData && Object.keys(draft.formData).some(k => k !== "class" && (draft.formData?.[k] || "").trim() !== "")) ||
         !!draft.photoPreview
       if (hasAnyData) setDraftBanner(true)
+      if (draft.formData) {
+        checkSubmissionStatus(draft.formData)
+      }
     } catch {
       // Corrupt draft — ignore and start fresh.
     } finally {
@@ -373,6 +408,14 @@ export default function SubmitPage() {
       .catch(() => { setErrorMsg("Failed to load form"); setStep("error") })
   }, [token])
 
+  useEffect(() => {
+    if (!config || step === "loading" || step === "error" || step === "success") return
+    const name = resolveFieldValue(formData, "name")
+    const father = resolveFieldValue(formData, "father")
+    if (!name || !father) return
+    checkSubmissionStatus(formData)
+  }, [config, formData, step, checkSubmissionStatus])
+
   const handleFieldChange = (key: string, value: string) => {
     setFormData(prev => ({ ...prev, [key]: value }))
   }
@@ -390,19 +433,27 @@ export default function SubmitPage() {
       for (const f of config.fieldConfig) {
         if (f.key === "class") continue
         const value = (formData[f.key] || "").trim()
-        const intent = fieldIntent(f)
-        if (intent === "address" && f.required) {
+        const role = fieldRole(f)
+        if (f.required && !value) {
+          setAlertMsg(`Please fill in ${f.label}.`)
+          return
+        }
+        if (role === "address" && f.required) {
           if (wordCount(value) < ADDRESS_MIN_WORDS) {
             setAlertMsg(`Please write the full address — at least ${ADDRESS_MIN_WORDS} words (house no, street, area, city, pincode).`)
             return
           }
         }
-        if (intent === "mobile" && f.required) {
+        if (role === "mobile" && f.required) {
           const local = stripIndianPrefix(value)
           if (local.length !== 10) {
             setAlertMsg("Mobile number must be exactly 10 digits (after +91).")
             return
           }
+        }
+        if (role === "branch" && f.required && value.length < 2) {
+          setAlertMsg("Please enter the branch name.")
+          return
         }
       }
     }
@@ -424,6 +475,10 @@ export default function SubmitPage() {
 
   const handleSubmit = async () => {
     if (!config) return
+    if (!croppedPhoto) {
+      setAlertMsg("Please upload a student photo before submitting.")
+      return
+    }
     setSubmitting(true)
     setUploadProgress(0)
     try {
@@ -467,15 +522,27 @@ export default function SubmitPage() {
       if (data.success) {
         setUploadProgress(100)
         setResult(data.data)
-        // Submission succeeded — wipe the saved draft so the next visitor on
-        // this device (or the same parent re-opening the link) starts clean.
         clearDraft()
+        try {
+          const studentName = resolveFieldValue(formData, "name")
+          window.localStorage.setItem(SUBMITTED_KEY, JSON.stringify({
+            studentName,
+            serialNumber: data.data.serialNumber,
+            submittedAt: new Date().toISOString(),
+          }))
+        } catch { /* ignore */ }
         setStep("success")
-      } else if (data.error === "DUPLICATE_NAME") {
+      } else if (data.error === "DUPLICATE_NAME" || data.error === "DUPLICATE_ROLL") {
+        setDuplicateInfo({
+          studentName: data.existing?.studentName || resolveFieldValue(formData, "name"),
+          serialNumber: data.existing?.serialNumber,
+          submittedAt: data.existing?.submittedAt,
+          isRoll: data.error === "DUPLICATE_ROLL",
+        })
         setDuplicateBlocked(true)
         setSubmitting(false)
       } else {
-        setAlertMsg(data.error || "Submission failed")
+        setAlertMsg(data.message || data.error || "Submission failed")
         setTimeout(() => setAlertMsg(""), 5000)
         setSubmitting(false)
       }
@@ -556,16 +623,71 @@ export default function SubmitPage() {
     </div>
   )
 
+  if (alreadySubmitted) {
+    const supportPhone = "919881877607"
+    const waMessage = encodeURIComponent(
+      `Hello, I need help with the ID card form for ${config?.schoolName || "the school"}` +
+      (config?.className ? ` (${config.className})` : "") +
+      (alreadySubmitted.studentName ? ` for ${alreadySubmitted.studentName}.` : ".") +
+      ` Registration ID: ${alreadySubmitted.serialNumber}. Please help.`
+    )
+    const waUrl = `https://wa.me/${supportPhone}?text=${waMessage}`
+    return (
+      <div className="submit-page">
+        <div className="submit-container" style={{ maxWidth: 520 }}>
+          <div style={{ textAlign: 'center', padding: '40px 24px' }}>
+            <div style={{
+              width: 72, height: 72, borderRadius: '50%',
+              background: '#dcfce7',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              margin: '0 auto 20px', fontSize: 36,
+            }}>✓</div>
+            <h2 style={{ fontSize: 22, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
+              Form Already Submitted
+            </h2>
+            <p style={{ fontSize: 14, color: '#64748b', marginBottom: 8, lineHeight: 1.6 }}>
+              {alreadySubmitted.studentName ? (
+                <>You already submitted this form for <strong style={{ color: '#0f172a' }}>{alreadySubmitted.studentName}</strong></>
+              ) : (
+                <>You already submitted this form</>
+              )}
+              {alreadySubmitted.submittedAt ? (
+                <> on <strong>{formatSubmittedDate(alreadySubmitted.submittedAt)}</strong></>
+              ) : null}
+              {config?.className ? <> in <strong>{config.className}</strong></> : null}.
+            </p>
+            <div style={{ background: '#f8fafc', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+              <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>Registration ID</p>
+              <p style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', fontFamily: 'monospace' }}>
+                {alreadySubmitted.serialNumber}
+              </p>
+            </div>
+            <p style={{ fontSize: 13, color: '#94a3b8', marginBottom: 24, lineHeight: 1.6 }}>
+              Do not fill the form again. Contact the school if you need changes.
+            </p>
+            <a
+              href={waUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                gap: 10, width: '100%', maxWidth: 320,
+                padding: '14px 20px', borderRadius: 12,
+                background: '#25D366', color: 'white',
+                fontSize: 15, fontWeight: 700,
+                textDecoration: 'none',
+              }}
+            >
+              Contact School on WhatsApp
+            </a>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   if (duplicateBlocked) {
-    const studentName =
-      formData.name ||
-      formData.fullName ||
-      formData.studentName ||
-      formData["Student Name"] ||
-      formData.student_name ||
-      formData.full_name ||
-      formData["Full Name"] ||
-      ""
+    const studentName = duplicateInfo?.studentName || resolveFieldValue(formData, "name")
     const supportPhone = "919881877607" // +91 98818 77607
     const waMessage = encodeURIComponent(
       `Hello, I am trying to submit the ID card form for ${config?.schoolName || "the school"}` +
@@ -589,10 +711,25 @@ export default function SubmitPage() {
               Already Registered
             </h2>
             <p style={{ fontSize: 14, color: '#64748b', marginBottom: 8, lineHeight: 1.6 }}>
-              Details with this name {studentName ? <strong style={{ color: '#0f172a' }}>({studentName})</strong> : null} are already registered in {config?.className || "this class"}.
+              {duplicateInfo?.isRoll
+                ? "This roll number is already registered"
+                : "This student is already registered"}
+              {studentName ? <> for <strong style={{ color: '#0f172a' }}>{studentName}</strong></> : null}
+              {config?.className ? <> in <strong>{config.className}</strong></> : null}.
+              {duplicateInfo?.submittedAt ? (
+                <> Submitted on <strong>{formatSubmittedDate(duplicateInfo.submittedAt)}</strong>.</>
+              ) : null}
             </p>
+            {duplicateInfo?.serialNumber && (
+              <div style={{ background: '#f8fafc', borderRadius: 12, padding: 16, marginBottom: 16 }}>
+                <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>Registration ID</p>
+                <p style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', fontFamily: 'monospace' }}>
+                  {duplicateInfo.serialNumber}
+                </p>
+              </div>
+            )}
             <p style={{ fontSize: 13, color: '#94a3b8', marginBottom: 24, lineHeight: 1.6 }}>
-              You cannot submit the form again with the same name. If you need to make changes or believe this is a mistake, please contact our support team on WhatsApp.
+              You cannot submit again. If you need changes or believe this is a mistake, contact the school on WhatsApp.
             </p>
 
             {/* WhatsApp support button */}
@@ -625,6 +762,7 @@ export default function SubmitPage() {
             <button
               onClick={() => {
                 setDuplicateBlocked(false)
+                setDuplicateInfo(null)
                 setStep("form")
               }}
               style={{
@@ -687,7 +825,7 @@ export default function SubmitPage() {
                   </>
                 )}
               </div>
-              <div style={{ textAlign: 'center', marginTop: 8, fontSize: 11, color: '#cbd5e1' }}>Powered by Print ID Craft</div>
+              <div style={{ textAlign: 'center', marginTop: 8, fontSize: 11, color: '#cbd5e1' }}>Powered by WiseMelon</div>
             </div>
 
             {/* Details Check Panel */}
@@ -699,7 +837,7 @@ export default function SubmitPage() {
                   <div style={{ padding: '16px 16px 0', display: 'flex', alignItems: 'center', gap: 12 }}>
                     <img src={croppedPhoto} alt="Photo" style={{ width: 48, height: 60, borderRadius: 6, objectFit: 'cover', border: '2px solid #e2e8f0' }} />
                     <div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{formData.name || formData.fullName || '—'}</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{resolveFieldValue(formData, "name") || '—'}</div>
                       <div style={{ fontSize: 12, color: '#64748b' }}>{config?.className}</div>
                     </div>
                   </div>
@@ -888,11 +1026,11 @@ export default function SubmitPage() {
                   </div>
                 )}
                 {config?.fieldConfig.filter(f => f.key !== "class").map(field => {
-                  const intent = fieldIntent(field)
+                  const role = fieldRole(field)
                   const value = formData[field.key] || ""
 
                   // ── Mobile: locked "+91" prefix + 10-digit numeric input ──
-                  if (intent === "mobile") {
+                  if (role === "mobile") {
                     // Prefer the explicit local-state value (what the user
                     // last typed). Fall back to stripping the stored "+91 …"
                     // form once on initial mount / draft restore.
@@ -940,7 +1078,7 @@ export default function SubmitPage() {
                   }
 
                   // ── Address: textarea + minimum-word counter ──
-                  if (intent === "address") {
+                  if (role === "address") {
                     const wc = wordCount(value)
                     const ok = wc >= ADDRESS_MIN_WORDS
                     return (
@@ -970,7 +1108,7 @@ export default function SubmitPage() {
                   }
 
                   // ── House Flag: dropdown of existing colours, else free text ──
-                  if (intent === "flag") {
+                  if (role === "flag") {
                     const opts = config?.flagColors || []
                     if (opts.length > 0) {
                       return (
@@ -1011,8 +1149,67 @@ export default function SubmitPage() {
                     )
                   }
 
+                  // ── Date of birth ──
+                  if (role === "dob") {
+                    return (
+                      <div key={field.key} className="form-group">
+                        <label>
+                          {field.label}
+                          {field.required && <span style={{ color: '#ef4444' }}> *</span>}
+                        </label>
+                        <input
+                          type="date"
+                          required={field.required}
+                          value={value}
+                          onChange={e => handleFieldChange(field.key, e.target.value)}
+                        />
+                      </div>
+                    )
+                  }
+
+                  // ── Branch ──
+                  if (role === "branch") {
+                    return (
+                      <div key={field.key} className="form-group">
+                        <label>
+                          {field.label}
+                          {field.required && <span style={{ color: '#ef4444' }}> *</span>}
+                        </label>
+                        <input
+                          type="text"
+                          required={field.required}
+                          value={value}
+                          onChange={e => handleFieldChange(field.key, titleCaseWords(e.target.value))}
+                          placeholder="e.g. Bibevewadi Branch"
+                        />
+                      </div>
+                    )
+                  }
+
+                  // ── Blood group ──
+                  if (role === "bloodgroup") {
+                    return (
+                      <div key={field.key} className="form-group">
+                        <label>
+                          {field.label}
+                          {field.required && <span style={{ color: '#ef4444' }}> *</span>}
+                        </label>
+                        <select
+                          required={field.required}
+                          value={value}
+                          onChange={e => handleFieldChange(field.key, e.target.value)}
+                        >
+                          <option value="">Select...</option>
+                          {["A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-"].map(bg => (
+                            <option key={bg} value={bg}>{bg}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )
+                  }
+
                   // ── Roll / GR / Admission number: numeric, with example placeholder ──
-                  if (intent === "roll") {
+                  if (role === "rollno") {
                     const lbl = field.label.toLowerCase()
                     // Choose an example that matches the label so a school using
                     // "GR No." doesn't see a single-digit roll-number style hint.
@@ -1037,18 +1234,18 @@ export default function SubmitPage() {
                   }
 
                   // ── Name-like field: auto title-case + first/middle/last guidance ──
-                  if (intent === "name") {
+                  if (role === "name" || role === "father" || role === "mother") {
                     const lbl = field.label.toLowerCase()
-                    const example = lbl.includes("father")
+                    const example = role === "father" || lbl.includes("father")
                       ? "Ramesh Kumar Choudhari"
-                      : lbl.includes("mother")
+                      : role === "mother" || lbl.includes("mother")
                         ? "Sunita Kumar Choudhari"
                         : lbl.includes("guardian")
                           ? "Ramesh Kumar Choudhari"
                           : lbl.includes("surname")
                             ? "Choudhari"
                             : "Darshan Sunil Choudhari"
-                    const showOrderHint = !lbl.includes("surname")
+                    const showOrderHint = role === "name" && !lbl.includes("surname")
                     return (
                       <div key={field.key} className="form-group">
                         <label>

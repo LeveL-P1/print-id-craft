@@ -1,6 +1,6 @@
 @echo off
 echo =======================================
-echo Print ID Craft Offline Installation
+echo WiseMelon Offline Installation
 echo =======================================
 echo.
 echo Please ensure your Database server is running.
