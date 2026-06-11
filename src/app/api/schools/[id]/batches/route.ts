@@ -3,6 +3,8 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { enqueueJob, kickJobWorker } from "@/lib/jobs/enqueue"
+import { MAX_PRINT_BATCH_STUDENTS } from "@/lib/jobs/types"
+import { StudentStatus } from "@prisma/client"
 
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
@@ -54,13 +56,29 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       )
     }
 
+    const printableWhere = {
+      schoolId: params.id,
+      status: { in: [StudentStatus.SUBMITTED, StudentStatus.APPROVED] },
+    }
+
+    const totalPrintable = await prisma.student.count({ where: printableWhere })
+    if (totalPrintable > MAX_PRINT_BATCH_STUDENTS) {
+      return NextResponse.json(
+        {
+          error: `Too many students for one print batch (${totalPrintable}). Filter by class/status or print in smaller groups.`,
+          maxStudents: MAX_PRINT_BATCH_STUDENTS,
+          totalStudents: totalPrintable,
+        },
+        { status: 413 }
+      )
+    }
+
     const students = await prisma.student.findMany({
       where: {
-        schoolId: params.id,
-        status: { in: ["SUBMITTED", "APPROVED"] },
+        ...printableWhere,
       },
       orderBy: { serialNumber: "asc" },
-      include: { class: { select: { name: true } } },
+      select: { id: true },
     })
 
     if (students.length === 0) {

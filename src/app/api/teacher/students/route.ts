@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { withStudentPhotoUrl } from "@/lib/student-photo-url"
+import { normalizeFormValue } from "@/lib/field-resolver"
 
 export const dynamic = "force-dynamic"
 
@@ -28,12 +29,11 @@ export async function GET(req: Request) {
     if (classId) where.classId = classId
     if (search && search.trim()) {
       const q = search.trim()
+      const nq = normalizeFormValue(q)
       where.OR = [
         { serialNumber: { contains: q, mode: "insensitive" } },
-        { formData: { path: ["fullName"], string_contains: q } },
-        { formData: { path: ["Full Name"], string_contains: q } },
-        { formData: { path: ["Student Name"], string_contains: q } },
-        { formData: { path: ["name"], string_contains: q } },
+        { fullName: { contains: q, mode: "insensitive" } },
+        ...(nq ? [{ normalizedSearchText: { contains: nq } }] : []),
       ]
     }
 

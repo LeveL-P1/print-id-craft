@@ -65,6 +65,28 @@ export async function localUpload(
   }
 }
 
+export async function localUploadFromFile(
+  bucket: string,
+  filePath: string,
+  sourcePath: string,
+  options?: { upsert?: boolean }
+): Promise<{ data: { path: string } | null; error: any }> {
+  try {
+    const fullDir = path.join(UPLOAD_ROOT, bucket, path.dirname(filePath))
+    ensureDir(fullDir)
+
+    const fullPath = path.join(UPLOAD_ROOT, bucket, filePath)
+    if (!options?.upsert && fs.existsSync(fullPath)) {
+      return { data: null, error: { message: "File already exists" } }
+    }
+
+    fs.copyFileSync(sourcePath, fullPath)
+    return { data: { path: filePath }, error: null }
+  } catch (e: any) {
+    return { data: null, error: { message: e.message } }
+  }
+}
+
 /**
  * Delete a file from local storage
  */

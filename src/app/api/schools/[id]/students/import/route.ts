@@ -8,6 +8,8 @@ import { reportError } from "@/lib/observability"
 import { enqueueJob, kickJobWorker } from "@/lib/jobs/enqueue"
 import { MAX_IMPORT_ROWS, parseCsvRows, validateImportFile } from "@/lib/spreadsheet-safety"
 import { parseExcelBuffer } from "@/lib/excel"
+import { allocateStudentSerials } from "@/lib/student-serial"
+import { buildStudentIndexData } from "@/lib/student-index"
 
 export const maxDuration = 60; // Vercel function timeout config
 
@@ -385,75 +387,50 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       }, { status: 400 })
     }
 
-    // Generate serial numbers
-    const schoolCode = school.name
-      .replace(/[^A-Za-z]/g, "")
-      .substring(0, 6)
-      .toUpperCase()
-
-    const lastStudent = await prisma.student.findFirst({
-      where: { schoolId },
-      orderBy: { serialNumber: "desc" },
-    })
-
-    let nextNum = 1
-    if (lastStudent) {
-      const match = lastStudent.serialNumber.match(/-(\d+)$/)
-      if (match) {
-        nextNum = parseInt(match[1]) + 1
-      } else {
-        const count = await prisma.student.count({ where: { schoolId } })
-        nextNum = count + 1
-      }
-    }
-
-    // Bulk prepare students
-    const studentsToCreate = validRows.map((row) => {
-      const serialNumber = `${schoolCode}-${String(nextNum).padStart(4, "0")}`
-      nextNum++
-      return {
-        id: randomUUID(),
-        schoolId,
-        classId: row.classId,
-        serialNumber,
-        formData: row.formData,
-        photoUrl: "",
-        status: "SUBMITTED" as any,
-        _row: row,
-      }
-    })
-
     const createdStudents: Array<{ id: string; serialNumber: string; name: string; className: string; photoId: string }> = []
     const importErrors: Array<{ row: number; error: string }> = []
 
-    // Batch create students (createMany in chunks of 500)
-    const CHUNK_SIZE = 500;
-    for (let i = 0; i < studentsToCreate.length; i += CHUNK_SIZE) {
-      const chunk = studentsToCreate.slice(i, i + CHUNK_SIZE);
-      try {
-        await prisma.student.createMany({
-          data: chunk.map((s) => {
-            const { _row, ...data } = s;
-            return data;
-          }),
-          skipDuplicates: true,
-        });
+    try {
+      await prisma.$transaction(async (tx) => {
+        const serialNumbers = await allocateStudentSerials(tx, schoolId, school.name, validRows.length)
 
-        // Add to created list
-        chunk.forEach((s) => {
-          createdStudents.push({
-            id: s.id,
-            serialNumber: s.serialNumber,
-            name: s._row.formData.fullName || s._row.formData["Full Name"] || "Unknown",
-            className: s._row.className,
-            photoId: s._row.photoId,
-          });
-        });
-      } catch (err: any) {
-        chunk.forEach((s) => {
-          importErrors.push({ row: s._row.rowNum, error: err?.message || "Batch insert failed" });
-        });
-      }
+        const studentsToCreate = validRows.map((row, index) => ({
+          id: randomUUID(),
+          schoolId,
+          classId: row.classId,
+          serialNumber: serialNumbers[index],
+          ...buildStudentIndexData(row.formData, row.classId),
+          formData: row.formData,
+          photoUrl: "",
+          status: "SUBMITTED" as any,
+          _row: row,
+        }))
+
+        const CHUNK_SIZE = 500
+        for (let i = 0; i < studentsToCreate.length; i += CHUNK_SIZE) {
+          const chunk = studentsToCreate.slice(i, i + CHUNK_SIZE)
+          await tx.student.createMany({
+            data: chunk.map((s) => {
+              const { _row, ...data } = s
+              return data
+            }),
+          })
+
+          chunk.forEach((s) => {
+            createdStudents.push({
+              id: s.id,
+              serialNumber: s.serialNumber,
+              name: s._row.formData.fullName || s._row.formData["Full Name"] || "Unknown",
+              className: s._row.className,
+              photoId: s._row.photoId,
+            })
+          })
+        }
+      }, { timeout: 45_000 })
+    } catch (err: any) {
+      validRows.forEach((row) => {
+        importErrors.push({ row: row.rowNum, error: err?.message || "Batch insert failed" })
+      })
     }
 
     if (createdStudents.length === 0 && importErrors.length > 0) {

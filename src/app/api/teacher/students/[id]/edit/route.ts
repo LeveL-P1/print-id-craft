@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { buildStudentIndexData } from "@/lib/student-index"
 
 export const dynamic = "force-dynamic"
 
@@ -41,7 +42,10 @@ export async function PUT(
 
     const updated = await prisma.student.update({
       where: { id: studentId },
-      data: { formData },
+      data: {
+        formData,
+        ...buildStudentIndexData(formData, student.classId),
+      },
       select: { id: true, formData: true },
     })
 

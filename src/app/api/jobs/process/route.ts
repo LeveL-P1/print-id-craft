@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { runPendingJobs } from "@/lib/jobs/runner"
 
 export const dynamic = "force-dynamic"
-export const maxDuration = 300
+export const maxDuration = 900
 
 function isAuthorized(req: Request) {
   const secret = process.env.WORKER_SECRET || process.env.CRON_SECRET

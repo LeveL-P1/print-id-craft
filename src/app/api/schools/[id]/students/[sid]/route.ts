@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { withStudentPhotoUrl } from "@/lib/student-photo-url"
+import { buildStudentIndexData } from "@/lib/student-index"
 
 export async function GET(
   req: Request,
@@ -73,7 +74,17 @@ export async function PATCH(
 
     // Build update object
     const updateData: any = {}
-    if (formData) updateData.formData = formData
+    if (formData || classId) {
+      const currentStudent = await prisma.student.findFirst({
+        where: { id: params.sid, schoolId: params.id },
+        select: { classId: true, formData: true },
+      })
+      const targetClassId = classId || currentStudent?.classId
+      if (!targetClassId) return NextResponse.json({ error: "Student not found" }, { status: 404 })
+      const targetFormData = formData || currentStudent?.formData
+      if (formData) updateData.formData = formData
+      Object.assign(updateData, buildStudentIndexData(targetFormData as Record<string, unknown>, targetClassId))
+    }
     if (photoUrl !== undefined) updateData.photoUrl = photoUrl
     if (photoPath !== undefined && typeof photoPath === "string" && photoPath.startsWith(`students/${params.id}/`)) {
       updateData.photoPath = photoPath

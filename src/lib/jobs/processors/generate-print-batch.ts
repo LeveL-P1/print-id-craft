@@ -220,7 +220,7 @@ export async function processGeneratePrintBatch(schoolId: string, payload: Gener
 }
 
 export async function failPrintBatch(batchId: string, error: unknown) {
-  await prisma.printBatch.update({ where: { id: batchId }, data: { status: "PENDING" } })
+  await prisma.printBatch.update({ where: { id: batchId }, data: { status: "FAILED" } })
   await reportError(error, {
     type: "JOB_FAILED",
     message: "Print batch generation failed",

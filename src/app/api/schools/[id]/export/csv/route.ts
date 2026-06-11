@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { csvCell } from "@/lib/spreadsheet-safety"
+import { buildStudentExportRow, STUDENT_EXPORT_HEADERS } from "@/lib/export/student-export"
 
 export const maxDuration = 60; // Vercel function timeout config
 
@@ -36,7 +37,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
     const stream = new ReadableStream({
       async start(controller) {
-        const headers = "Serial Number,Full Name,Class,Roll No.,Date of Birth,Blood Group,Father Name,Mother Name,Phone,Address,Photo Path,Photo URL,Status,Submitted At";
+        const headers = [...STUDENT_EXPORT_HEADERS].map(csvCell).join(",");
         controller.enqueue(new TextEncoder().encode(headers + "\n"));
 
         let lastId: string | undefined = undefined;
@@ -58,23 +59,21 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           }
 
           const rows = students.map((s) => {
-            const fd = s.formData as any;
-            return [
-              s.serialNumber,
-              fd.fullName || "",
-              s.class?.name || "",
-              fd.rollNo || "",
-              fd.dob || "",
-              fd.bloodGroup || "",
-              fd.fatherName || "",
-              fd.motherName || "",
-              fd.phone || "",
-              fd.address || "",
-              s.photoPath || "",
-              s.photoUrl || "",
-              s.status,
-              s.submittedAt ? new Date(s.submittedAt).toLocaleDateString() : "",
-            ].map(csvCell).join(",");
+            const fd = (s.formData || {}) as Record<string, string>
+            return buildStudentExportRow(
+              {
+                id: s.id,
+                serialNumber: s.serialNumber,
+                status: s.status,
+                formData: fd,
+                className: s.class?.name || "",
+                schoolName: school?.name || "",
+                photoPath: s.photoPath,
+                photoUrl: s.photoUrl,
+                submittedAt: s.submittedAt,
+              },
+              ""
+            ).map(csvCell).join(",")
           }).join("\n");
 
           controller.enqueue(new TextEncoder().encode(rows + "\n"));

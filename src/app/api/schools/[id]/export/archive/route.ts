@@ -4,24 +4,24 @@ import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { enqueueJob, kickJobWorker } from "@/lib/jobs/enqueue"
 import type { ExportArchivePayload } from "@/lib/jobs/types"
+import { EXPORT_DEFAULT_MAX_STUDENTS, EXPORT_MAX_STUDENTS } from "@/lib/export/constants"
 
 export const dynamic = "force-dynamic"
-
-const DEFAULT_MAX_STUDENTS = 1500
-const HARD_MAX_STUDENTS = 3000
 
 function parseFilters(req: Request, schoolId: string) {
   const url = new URL(req.url)
   const classId = url.searchParams.get("classId")
   const status = url.searchParams.get("status")
   const includePhotos = url.searchParams.get("photos") !== "false"
-  const requestedLimit = Number(url.searchParams.get("limit") || DEFAULT_MAX_STUDENTS)
+  const formatParam = url.searchParams.get("format")
+  const format: ExportArchivePayload["format"] = formatParam === "excel" ? "excel" : "archive"
+  const requestedLimit = Number(url.searchParams.get("limit") || EXPORT_DEFAULT_MAX_STUDENTS)
   const maxStudents = Math.min(
-    Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : DEFAULT_MAX_STUDENTS,
-    HARD_MAX_STUDENTS
+    Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : EXPORT_DEFAULT_MAX_STUDENTS,
+    EXPORT_MAX_STUDENTS
   )
 
-  return { classId, status, includePhotos, maxStudents, schoolId }
+  return { classId, status, includePhotos, format, maxStudents, schoolId }
 }
 
 async function validateArchiveRequest(schoolId: string, filters: ReturnType<typeof parseFilters>) {
@@ -42,7 +42,7 @@ async function validateArchiveRequest(schoolId: string, filters: ReturnType<type
           error: "Archive too large for one request",
           totalStudents,
           maxStudents: filters.maxStudents,
-          hint: "Use classId/status filters, set photos=false for metadata-only export, or export in smaller batches.",
+          hint: "Use class or status filters, or set photos=false for a faster metadata-only export.",
         },
         { status: 413 }
       ),
@@ -66,6 +66,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     classId: filters.classId,
     status: filters.status,
     includePhotos: filters.includePhotos,
+    format: filters.format,
     maxStudents: filters.maxStudents,
     totalStudents: validation.totalStudents as number,
   }
@@ -84,7 +85,9 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     data: {
       jobId: job.id,
       status: job.status,
-      message: "Archive export queued. Poll /api/jobs/{jobId} and download when completed.",
+      totalStudents: validation.totalStudents,
+      maxStudents: filters.maxStudents,
+      message: "Export queued. Large schools (up to 15,000 students) may take several minutes.",
     },
   })
 }

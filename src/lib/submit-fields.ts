@@ -13,10 +13,10 @@
 
 import { prisma } from "@/lib/prisma"
 import {
-  computeDuplicateFingerprint,
   normalizeFormValue,
   resolveFieldValue,
 } from "@/lib/field-resolver"
+import { buildStudentIndexData } from "@/lib/student-index"
 
 export type FormField = {
   key: string
@@ -64,6 +64,10 @@ export async function buildFormFields(
   schoolId: string,
   fallbackFromTemplate: FormField[]
 ): Promise<FormField[]> {
+  if (fallbackFromTemplate.length > 0) {
+    return fallbackFromTemplate.filter(f => !AUTO_KEYS_NORM.has(normalizeKey(f.key)))
+  }
+
   // Pull a bounded sample of existing students. 500 is plenty to learn
   // the column vocabulary without scanning huge tables.
   const existing = await prisma.student.findMany({
@@ -260,7 +264,8 @@ export async function checkDuplicateSubmission(
   formData: Record<string, string>
 ): Promise<DuplicateCheckResult> {
   const { name, father, dob, roll } = extractIdentityFields(formData)
-  const fingerprint = computeDuplicateFingerprint(formData, classId)
+  const indexData = buildStudentIndexData(formData, classId)
+  const fingerprint = indexData.duplicateFingerprint
 
   if (fingerprint) {
     const byFingerprint = await prisma.student.findFirst({
@@ -282,36 +287,73 @@ export async function checkDuplicateSubmission(
     }
   }
 
-  if (roll) {
-    const normRoll = normalizeFormValue(roll)
-    const existingStudents = await prisma.student.findMany({
-      where: { classId, status: { not: "FLAGGED" } },
-      select: { formData: true, serialNumber: true, submittedAt: true },
+  if (indexData.normalizedRollNo) {
+    const byRoll = await prisma.student.findFirst({
+      where: {
+        classId,
+        normalizedRollNo: indexData.normalizedRollNo,
+        status: { not: "FLAGGED" },
+      },
+      select: { serialNumber: true, submittedAt: true, formData: true },
     })
-    for (const s of existingStudents) {
-      const fd = (s.formData as Record<string, string>) || {}
-      const existingRoll = normalizeFormValue(resolveFieldValue(fd, "rollno"))
-      if (existingRoll && existingRoll === normRoll) {
-        return toDuplicateResult(
-          "roll",
-          "DUPLICATE_ROLL",
-          "This roll number is already registered in this class.",
-          s,
-          name
-        )
-      }
+    if (byRoll) {
+      return toDuplicateResult(
+        "roll",
+        "DUPLICATE_ROLL",
+        "This roll number is already registered in this class.",
+        byRoll,
+        name
+      )
     }
   }
 
-  if (name && father) {
+  if (indexData.normalizedName && indexData.normalizedFatherName) {
+    const byIdentity = await prisma.student.findFirst({
+      where: {
+        classId,
+        normalizedName: indexData.normalizedName,
+        normalizedFatherName: indexData.normalizedFatherName,
+        ...(indexData.normalizedDob ? { normalizedDob: indexData.normalizedDob } : {}),
+        status: { not: "FLAGGED" },
+      },
+      select: { serialNumber: true, submittedAt: true, formData: true },
+    })
+    if (byIdentity) {
+      return toDuplicateResult(
+        "identity",
+        "DUPLICATE_NAME",
+        "This student is already registered in this class. Contact the school for changes.",
+        byIdentity,
+        name
+      )
+    }
+  }
+
+  if (roll || (name && father)) {
+    const normRoll = normalizeFormValue(roll)
+    const requireDob = !!dob
     const existingStudents = await prisma.student.findMany({
       where: { classId, status: { not: "FLAGGED" } },
       select: { formData: true, serialNumber: true, submittedAt: true },
     })
-    const requireDob = !!dob
+
     for (const s of existingStudents) {
       const fd = (s.formData as Record<string, string>) || {}
-      if (identityMatches(fd, name, father, dob, requireDob)) {
+
+      if (normRoll) {
+        const existingRoll = normalizeFormValue(resolveFieldValue(fd, "rollno"))
+        if (existingRoll && existingRoll === normRoll) {
+          return toDuplicateResult(
+            "roll",
+            "DUPLICATE_ROLL",
+            "This roll number is already registered in this class.",
+            s,
+            name
+          )
+        }
+      }
+
+      if (name && father && identityMatches(fd, name, father, dob, requireDob)) {
         return toDuplicateResult(
           "identity",
           "DUPLICATE_NAME",

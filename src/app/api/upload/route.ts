@@ -40,7 +40,7 @@ export async function POST(req: Request) {
       }
 
       const schoolId = folder.split("/")[1]
-      const cls = await prisma.class.findFirst({
+      const classToken = await prisma.class.findFirst({
         where: {
           linkToken: submitToken,
           schoolId,
@@ -50,12 +50,25 @@ export async function POST(req: Request) {
         select: { id: true },
       })
 
-      if (!cls) {
+      let schoolToken: { id: string } | null = null
+      if (!classToken) {
+        schoolToken = await prisma.school.findFirst({
+          where: {
+            id: schoolId,
+            linkToken: submitToken,
+            linkActive: true,
+            OR: [{ linkExpiresAt: null }, { linkExpiresAt: { gt: new Date() } }],
+          },
+          select: { id: true },
+        })
+      }
+
+      if (!classToken && !schoolToken) {
         return NextResponse.json({ error: "Invalid or expired upload token" }, { status: 403 })
       }
 
       const ip = getClientIp(req)
-      const rl = await durableRateLimit(`upload:${submitToken}:${ip}`, 20, 60 * 1000)
+      const rl = await durableRateLimit(`upload:${schoolId}:${submitToken}:${ip}`, 30, 60 * 1000)
       if (!rl.success) {
         return NextResponse.json({ error: "Too many uploads. Please try again later." }, { status: 429 })
       }

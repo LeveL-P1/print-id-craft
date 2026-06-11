@@ -1162,42 +1162,59 @@ export default function SchoolDetailPage() {
     }
   }
 
+  const pollExportJob = async (jobId: string, successLabel: string, totalStudents?: number) => {
+    const maxAttempts = 450
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise((r) => setTimeout(r, 2000))
+      const statusRes = await fetch(`/api/jobs/${jobId}`)
+      const statusData = await statusRes.json()
+      const job = statusData.data
+      if (job?.status === "COMPLETED") {
+        window.open(`/api/jobs/${jobId}/download`, "_blank")
+        toast.success(successLabel)
+        return true
+      }
+      if (job?.status === "FAILED") {
+        toast.error(job.error || "Export failed")
+        return false
+      }
+      if (job?.status === "RUNNING" && attempt > 0 && attempt % 15 === 0) {
+        const countLabel = totalStudents ? `${totalStudents.toLocaleString()} students` : "large export"
+        toast.message(`Still preparing ${countLabel}… (${Math.round((attempt * 2) / 60)} min)`)
+      }
+    }
+    toast.error("Export still running — check Operations → Recent Jobs and download when ready.")
+    return false
+  }
+
   const handleExport = async (format: "csv" | "excel" | "archive") => {
     const params = new URLSearchParams()
     if (classFilter) params.set("classId", classFilter)
     if (statusFilter) params.set("status", statusFilter)
-    if (format === "archive") {
+    if (format === "excel" || format === "archive") {
       try {
-        toast.message("Preparing archive export…")
+        if (format === "excel") params.set("format", "excel")
+        toast.message(format === "excel" ? "Preparing Excel export with photos…" : "Preparing archive export…")
         const res = await fetch(`/api/schools/${schoolId}/export/archive?${params}`)
         const data = await res.json()
         if (!res.ok) {
-          toast.error(data.error || "Archive export failed")
+          toast.error(data.error || "Export failed")
           return
         }
         const jobId = data.data?.jobId
         if (!jobId) {
-          toast.error("Archive export did not return a job id")
+          toast.error("Export did not return a job id")
           return
         }
-        for (let attempt = 0; attempt < 120; attempt++) {
-          await new Promise((r) => setTimeout(r, 2000))
-          const statusRes = await fetch(`/api/jobs/${jobId}`)
-          const statusData = await statusRes.json()
-          const job = statusData.data
-          if (job?.status === "COMPLETED") {
-            window.open(`/api/jobs/${jobId}/download`, "_blank")
-            toast.success("Archive ready — download started")
-            return
-          }
-          if (job?.status === "FAILED") {
-            toast.error(job.error || "Archive export failed")
-            return
-          }
-        }
-        toast.error("Archive export timed out. Check Operations → Recent Jobs.")
+        await pollExportJob(
+          jobId,
+          format === "excel"
+            ? "Excel package ready — unzip to view student details and photos"
+            : "Archive ready — download started",
+          data.data?.totalStudents
+        )
       } catch {
-        toast.error("Archive export failed")
+        toast.error("Export failed")
       }
       return
     }
@@ -3010,7 +3027,9 @@ export default function SchoolDetailPage() {
         {tab === "export" && (
           <div style={{ background: 'white', borderRadius: 16, border: '1px solid #e2e8f0', padding: 32 }}>
             <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>Export Student Data</h3>
-            <p style={{ color: '#94a3b8', fontSize: 14, marginBottom: 24 }}>Download student records in your preferred format.</p>
+            <p style={{ color: '#94a3b8', fontSize: 14, marginBottom: 24 }}>
+              Download readable student records with school name, class name, and photo locations — not raw database IDs.
+            </p>
 
             <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
               <select value={classFilter} onChange={e => setClassFilter(e.target.value)} style={{ height: 40, padding: '0 12px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 13 }}>
@@ -3027,16 +3046,21 @@ export default function SchoolDetailPage() {
             </div>
 
             <div style={{ display: 'flex', gap: 16 }}>
-              <button className="btn btn-primary" style={{ padding: '14px 28px' }} onClick={() => handleExport("csv")}>
+              <button className="btn btn-outline" style={{ padding: '14px 28px' }} onClick={() => handleExport("csv")}>
                 📄 Download CSV
               </button>
-              <button className="btn btn-outline" style={{ padding: '14px 28px' }} onClick={() => handleExport("excel")}>
-                📊 Download Excel
+              <button className="btn btn-primary" style={{ padding: '14px 28px' }} onClick={() => handleExport("excel")}>
+                📊 Download Excel + Photos
               </button>
               <button className="btn btn-outline" style={{ padding: '14px 28px' }} onClick={() => handleExport("archive")}>
                 🗂️ Complete Archive
               </button>
             </div>
+            <p style={{ color: '#64748b', fontSize: 13, marginTop: 16, lineHeight: 1.6 }}>
+              <strong>Excel + Photos</strong> handles up to <strong>15,000 students</strong> in one export — photos download in parallel and save by student name.
+              <code>students-complete.json</code> keeps a full backup so no data is lost. Large schools may take several minutes.
+              CSV is spreadsheet-only. Complete Archive also includes QR codes and print files.
+            </p>
           </div>
         )}
       </div>

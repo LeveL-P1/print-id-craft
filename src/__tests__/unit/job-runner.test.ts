@@ -54,7 +54,10 @@ describe("runPendingJobs", () => {
     }
 
     ;(prisma.job.findFirst as any).mockResolvedValueOnce(job)
-    ;(prisma.job.updateMany as any).mockResolvedValueOnce({ count: 1 })
+    ;(prisma.job.updateMany as any)
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 })
     ;(prisma.job.findUnique as any).mockResolvedValueOnce({ ...job, status: "RUNNING", attempts: 1 })
     ;(prisma.job.update as any).mockResolvedValue({})
 
@@ -76,7 +79,10 @@ describe("runPendingJobs", () => {
     }
 
     ;(prisma.job.findFirst as any).mockResolvedValueOnce(job)
-    ;(prisma.job.updateMany as any).mockResolvedValueOnce({ count: 1 })
+    ;(prisma.job.updateMany as any)
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 })
     ;(prisma.job.findUnique as any).mockResolvedValueOnce({ ...job, status: "RUNNING", attempts: 1 })
     ;(prisma.job.update as any).mockResolvedValue({})
 

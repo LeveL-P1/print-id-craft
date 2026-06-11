@@ -8,7 +8,7 @@ import { computeAutoAssignedFields } from "@/lib/submit-fields"
 import { getNextStudentSerial } from "@/lib/student-serial"
 import { reportError } from "@/lib/observability"
 import { checkDuplicateSubmission } from "@/lib/submit-fields"
-import { computeDuplicateFingerprint } from "@/lib/field-resolver"
+import { buildStudentIndexData } from "@/lib/student-index"
 
 const photoUrlRefine = (url: string) => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
@@ -79,8 +79,6 @@ export async function POST(req: Request, { params }: { params: { token: string }
       }, { status: 409 })
     }
 
-    const duplicateFingerprint = computeDuplicateFingerprint(formData, cls.id) || null
-
     let student: any = null
     let retries = 3
     while (retries > 0) {
@@ -92,40 +90,20 @@ export async function POST(req: Request, { params }: { params: { token: string }
           const photoPath = validated.photoPath?.startsWith(`students/${school.id}/`)
             ? validated.photoPath
             : ""
-          const newStudent = await tx.student.create({
+          const finalFormData = { ...validated.formData, ...autoFields, class: cls.name }
+          const indexData = buildStudentIndexData(finalFormData, cls.id)
+          return tx.student.create({
             data: {
               schoolId: school.id,
               classId: cls.id,
               serialNumber,
-              duplicateFingerprint,
-              formData: { ...validated.formData, ...autoFields, class: cls.name },
+              ...indexData,
+              formData: finalFormData,
               photoUrl: validated.photoUrl,
               photoPath,
               status: "SUBMITTED",
             },
           })
-          try {
-            const qrContent = JSON.stringify({
-              serial: serialNumber,
-              school: school.id,
-              student: newStudent.id,
-            })
-            const qrBuffer = await QRCode.toBuffer(qrContent, { width: 300, margin: 2 })
-            const qrPath = `students/${school.id}/qr/${newStudent.id}.png`
-            await storageUpload("student-photos", qrPath, qrBuffer, {
-              contentType: "image/png",
-              upsert: true,
-            })
-            const qrUrl = storagePublicUrl("student-photos", qrPath)
-            await tx.student.update({
-              where: { id: newStudent.id },
-              data: { qrCodeUrl: qrUrl },
-            })
-            return { ...newStudent, qrCodeUrl: qrUrl }
-          } catch (qrError) {
-            console.error("QR generation error:", qrError)
-            return newStudent
-          }
         })
         break
       } catch (err: any) {
@@ -135,6 +113,27 @@ export async function POST(req: Request, { params }: { params: { token: string }
         }
         throw err
       }
+    }
+
+    try {
+      const qrContent = JSON.stringify({
+        serial: student.serialNumber,
+        school: school.id,
+        student: student.id,
+      })
+      const qrBuffer = await QRCode.toBuffer(qrContent, { width: 300, margin: 2 })
+      const qrPath = `students/${school.id}/qr/${student.id}.png`
+      await storageUpload("student-photos", qrPath, qrBuffer, {
+        contentType: "image/png",
+        upsert: true,
+      })
+      const qrUrl = storagePublicUrl("student-photos", qrPath)
+      await prisma.student.update({
+        where: { id: student.id },
+        data: { qrCodeUrl: qrUrl },
+      })
+    } catch (qrError) {
+      console.error("QR generation error:", qrError)
     }
 
     return NextResponse.json(

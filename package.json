@@ -15,6 +15,8 @@
     "load:full": "node scripts/load-full.js",
     "seed": "prisma db seed",
     "db:push": "prisma db push",
+    "db:backfill-student-indexes": "ts-node --project tsconfig.seed.json scripts/backfill-student-indexes.ts",
+    "db:prepare-live": "prisma db push && prisma generate && npm run db:backfill-student-indexes",
     "db:reset": "prisma db push --force-reset && prisma db seed",
     "db:use:mysql": "node scripts/set-db.js mysql && prisma generate",
     "db:use:postgres": "node scripts/set-db.js postgresql && prisma generate",

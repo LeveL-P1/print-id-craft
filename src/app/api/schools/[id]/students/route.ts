@@ -4,6 +4,8 @@ import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { getNextStudentSerial } from "@/lib/student-serial"
 import { withStudentPhotoUrl } from "@/lib/student-photo-url"
+import { buildStudentIndexData } from "@/lib/student-index"
+import { normalizeFormValue } from "@/lib/field-resolver"
 
 // Optimize: prefer longer-running function for connection reuse
 export const maxDuration = 10
@@ -29,13 +31,11 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     // Search by serial number or form data name fields (check all common name keys)
     if (search && search.trim()) {
       const q = search.trim()
+      const nq = normalizeFormValue(q)
       where.OR = [
         { serialNumber: { contains: q, mode: "insensitive" } },
-        { formData: { path: ["fullName"], string_contains: q } },
-        { formData: { path: ["Full Name"], string_contains: q } },
-        { formData: { path: ["Student Name"], string_contains: q } },
-        { formData: { path: ["Student_Name"], string_contains: q } },
-        { formData: { path: ["name"], string_contains: q } },
+        { fullName: { contains: q, mode: "insensitive" } },
+        ...(nq ? [{ normalizedSearchText: { contains: nq } }] : []),
       ]
     }
 
@@ -106,8 +106,18 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       const safePhotoPath = typeof photoPath === "string" && photoPath.startsWith(`students/${schoolId}/`)
         ? photoPath
         : ""
+      const indexData = buildStudentIndexData(formData, classId)
       return tx.student.create({
-        data: { schoolId, classId, serialNumber, formData, photoUrl: photoUrl || "", photoPath: safePhotoPath, status: "SUBMITTED" },
+        data: {
+          schoolId,
+          classId,
+          serialNumber,
+          ...indexData,
+          formData,
+          photoUrl: photoUrl || "",
+          photoPath: safePhotoPath,
+          status: "SUBMITTED",
+        },
         include: { class: { select: { id: true, name: true } } },
       })
     })

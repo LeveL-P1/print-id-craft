@@ -1,7 +1,7 @@
 import type { Job, Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { reportError } from "@/lib/observability"
-import { JOB_MAX_ATTEMPTS, MAX_JOBS_PER_RUN } from "./types"
+import { JOB_MAX_ATTEMPTS, JOB_STALE_RUNNING_MINUTES, MAX_JOBS_PER_RUN } from "./types"
 import type {
   ExportArchivePayload,
   GeneratePrintBatchPayload,
@@ -14,6 +14,33 @@ import type { PlatformBackupPayload } from "./types"
 import { failPrintBatch, processGeneratePrintBatch } from "./processors/generate-print-batch"
 
 async function claimNextJob(): Promise<Job | null> {
+  const staleStartedBefore = new Date(Date.now() - JOB_STALE_RUNNING_MINUTES * 60 * 1000)
+  await prisma.job.updateMany({
+    where: {
+      status: "RUNNING",
+      startedAt: { lt: staleStartedBefore },
+      attempts: { lt: JOB_MAX_ATTEMPTS },
+    },
+    data: {
+      status: "PENDING",
+      error: `Recovered stale RUNNING job after ${JOB_STALE_RUNNING_MINUTES} minutes`,
+      startedAt: null,
+    },
+  })
+
+  await prisma.job.updateMany({
+    where: {
+      status: "RUNNING",
+      startedAt: { lt: staleStartedBefore },
+      attempts: { gte: JOB_MAX_ATTEMPTS },
+    },
+    data: {
+      status: "FAILED",
+      error: `Stale RUNNING job exceeded ${JOB_MAX_ATTEMPTS} attempts`,
+      completedAt: new Date(),
+    },
+  })
+
   for (let attempt = 0; attempt < 5; attempt++) {
     const candidate = await prisma.job.findFirst({
       where: { status: "PENDING" },

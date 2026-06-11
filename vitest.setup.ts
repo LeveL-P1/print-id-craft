@@ -20,45 +20,50 @@ vi.mock('@/lib/supabase', () => ({
 
 // Mock Prisma
 vi.mock('@/lib/prisma', () => {
-  return {
-    prisma: {
-      student: {
-        createMany: vi.fn(),
-        findMany: vi.fn(),
-        findFirst: vi.fn(),
-        count: vi.fn(),
-        findUnique: vi.fn(),
-        update: vi.fn(),
-      },
-      class: {
-        findMany: vi.fn(),
-        create: vi.fn(),
-      },
-      school: {
-        findUnique: vi.fn(),
-      },
-      template: {
-        upsert: vi.fn(),
-      },
-      printBatch: {
-        findFirst: vi.fn(),
-      },
-      rateLimit: {
-        deleteMany: vi.fn(),
-      },
-      systemEvent: {
-        create: vi.fn(),
-        findMany: vi.fn(),
-      },
-      job: {
-        create: vi.fn(),
-        update: vi.fn(),
-        updateMany: vi.fn(),
-        findFirst: vi.fn(),
-        findUnique: vi.fn(),
-        findMany: vi.fn(),
-      },
+  const prisma = {
+    student: {
+      createMany: vi.fn(),
+      findMany: vi.fn(),
+      findFirst: vi.fn(),
+      count: vi.fn(),
+      findUnique: vi.fn(),
+      update: vi.fn(),
     },
+    class: {
+      findMany: vi.fn(),
+      create: vi.fn(),
+    },
+    school: {
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+    },
+    template: {
+      upsert: vi.fn(),
+    },
+    printBatch: {
+      findFirst: vi.fn(),
+    },
+    rateLimit: {
+      deleteMany: vi.fn(),
+    },
+    systemEvent: {
+      create: vi.fn(),
+      findMany: vi.fn(),
+    },
+    job: {
+      create: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      findFirst: vi.fn(),
+      findUnique: vi.fn(),
+      findMany: vi.fn(),
+    },
+    $queryRaw: vi.fn().mockResolvedValue([{ max: 0 }]),
+    $transaction: vi.fn(async (fn: any) => fn(prisma)),
+  }
+
+  return {
+    prisma,
     batchExecute: vi.fn().mockResolvedValue({ results: [], errors: [] })
   }
 })

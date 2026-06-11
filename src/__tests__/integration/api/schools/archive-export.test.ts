@@ -18,15 +18,15 @@ describe("GET /api/schools/[id]/export/archive", () => {
   })
 
   it("refuses archives above the request student cap", async () => {
-    ;(prisma.student.count as any).mockResolvedValue(3001)
+    ;(prisma.student.count as any).mockResolvedValue(15001)
 
-    const req = new Request("http://localhost:3000/api/schools/s1/export/archive?limit=1000")
+    const req = new Request("http://localhost:3000/api/schools/s1/export/archive?limit=15000")
     const res = await GET(req, { params: { id: "s1" } })
     const data = await res.json()
 
     expect(res.status).toBe(413)
     expect(data.error).toBe("Archive too large for one request")
-    expect(data.totalStudents).toBe(3001)
-    expect(data.maxStudents).toBe(1000)
+    expect(data.totalStudents).toBe(15001)
+    expect(data.maxStudents).toBe(15000)
   })
 })

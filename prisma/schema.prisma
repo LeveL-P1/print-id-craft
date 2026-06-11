@@ -107,6 +107,12 @@ model Student {
   class         Class         @relation(fields: [classId], references: [id])
   serialNumber  String        @unique
   duplicateFingerprint String?
+  fullName      String        @default("")
+  normalizedName String      @default("")
+  normalizedFatherName String @default("")
+  normalizedDob String       @default("")
+  normalizedRollNo String    @default("")
+  normalizedSearchText String @default("")
   formData      Json
   photoUrl      String        @default("")
   photoPath     String        @default("")
@@ -122,8 +128,12 @@ model Student {
   @@index([schoolId, classId, status])
   @@index([schoolId, submittedAt])
   @@index([schoolId, serialNumber])
+  @@index([schoolId, fullName])
+  @@index([schoolId, normalizedSearchText])
   @@index([classId])
   @@index([classId, duplicateFingerprint])
+  @@index([classId, normalizedRollNo])
+  @@index([classId, normalizedName, normalizedFatherName, normalizedDob])
   @@index([status])
   @@index([photoPath])
 }
