@@ -4,6 +4,8 @@ import "./globals.css"
 import { Providers } from "@/components/providers"
 import { Toaster } from "sonner"
 import ErrorBoundary from "@/components/ErrorBoundary"
+import { Analytics } from "@vercel/analytics/next"
+import { SpeedInsights } from "@vercel/speed-insights/next"
 
 const inter = Inter({ subsets: ["latin"] })
 const poppins = Poppins({ 
@@ -46,6 +48,8 @@ export default function RootLayout({
           </ErrorBoundary>
           <Toaster richColors position="bottom-right" />
         </Providers>
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   )
