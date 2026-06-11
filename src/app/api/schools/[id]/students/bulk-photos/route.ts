@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { storageUpload, storagePublicUrl, ensureBucket } from "@/lib/storage"
 
-export const maxDuration = 60; // Vercel function timeout config
+export const maxDuration = 300; // Vercel Pro function timeout config
 
 const BUCKET = "student-photos"
 const MAX_FILES = 500

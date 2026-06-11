@@ -1,7 +1,7 @@
 import type { Job, Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { reportError } from "@/lib/observability"
-import { JOB_MAX_ATTEMPTS, JOB_STALE_RUNNING_MINUTES, MAX_JOBS_PER_RUN } from "./types"
+import { JOB_MAX_ATTEMPTS, JOB_RUN_TIME_BUDGET_MS, JOB_STALE_RUNNING_MINUTES, MAX_JOBS_PER_RUN } from "./types"
 import type {
   ExportArchivePayload,
   GeneratePrintBatchPayload,
@@ -146,8 +146,11 @@ async function executeJob(job: Job) {
 
 export async function runPendingJobs(limit = MAX_JOBS_PER_RUN) {
   const processed: Array<{ jobId: string; type: string; status: string }> = []
+  const startedAt = Date.now()
 
   for (let i = 0; i < limit; i++) {
+    if (Date.now() - startedAt > JOB_RUN_TIME_BUDGET_MS) break
+
     const job = await claimNextJob()
     if (!job) break
 
@@ -162,6 +165,8 @@ export async function runPendingJobs(limit = MAX_JOBS_PER_RUN) {
         status: job.attempts >= JOB_MAX_ATTEMPTS ? "FAILED" : "RETRY",
       })
     }
+
+    if (Date.now() - startedAt > JOB_RUN_TIME_BUDGET_MS) break
   }
 
   return processed

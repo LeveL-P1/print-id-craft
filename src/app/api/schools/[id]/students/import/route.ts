@@ -11,7 +11,9 @@ import { parseExcelBuffer } from "@/lib/excel"
 import { allocateStudentSerials } from "@/lib/student-serial"
 import { buildStudentIndexData } from "@/lib/student-index"
 
-export const maxDuration = 60; // Vercel function timeout config
+export const maxDuration = 300; // Vercel Pro function timeout config
+
+const QR_JOB_CHUNK_SIZE = 500
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   try {
@@ -489,19 +491,24 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     }
 
     let qrJobId: string | undefined
+    const qrJobIds: string[] = []
     if (createdStudents.length > 0) {
-      const job = await enqueueJob({
-        type: "GENERATE_QR",
-        schoolId,
-        createdById: session.user.id,
-        payload: {
-          students: createdStudents.map((s) => ({
-            id: s.id,
-            serialNumber: s.serialNumber,
-          })),
-        },
-      })
-      qrJobId = job.id
+      for (let i = 0; i < createdStudents.length; i += QR_JOB_CHUNK_SIZE) {
+        const chunk = createdStudents.slice(i, i + QR_JOB_CHUNK_SIZE)
+        const job = await enqueueJob({
+          type: "GENERATE_QR",
+          schoolId,
+          createdById: session.user.id,
+          payload: {
+            students: chunk.map((s) => ({
+              id: s.id,
+              serialNumber: s.serialNumber,
+            })),
+          },
+        })
+        qrJobIds.push(job.id)
+      }
+      qrJobId = qrJobIds[0]
       await kickJobWorker(new URL(req.url).origin)
     }
 
@@ -515,6 +522,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         errors: importErrors.slice(0, 20),
         classesCreated: classColumnHeader ? Array.from(new Set(validRows.map(r => r.className))).length : 0,
         qrJobId,
+        qrJobIds,
       },
     })
   } catch (error: any) {

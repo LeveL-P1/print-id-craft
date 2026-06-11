@@ -38,6 +38,7 @@ export type EnqueueInput = {
 }
 
 export const MAX_JOBS_PER_RUN = 2
+export const JOB_RUN_TIME_BUDGET_MS = 270_000
 export const JOB_MAX_ATTEMPTS = 3
 export const JOB_STALE_RUNNING_MINUTES = 30
 export const MAX_PRINT_BATCH_STUDENTS = 1500

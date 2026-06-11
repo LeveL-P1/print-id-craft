@@ -3,15 +3,23 @@
   "installCommand": "npm install --legacy-peer-deps",
   "functions": {
     "src/app/api/jobs/process/route.ts": {
-      "memory": 1024,
+      "memory": 2048,
       "maxDuration": 300
     },
     "src/app/api/admin/backup/scheduled/route.ts": {
-      "memory": 1024,
+      "memory": 2048,
       "maxDuration": 60
     },
+    "src/app/api/schools/[id]/students/import/route.ts": {
+      "memory": 2048,
+      "maxDuration": 300
+    },
+    "src/app/api/schools/[id]/students/bulk-photos/route.ts": {
+      "memory": 2048,
+      "maxDuration": 300
+    },
     "src/app/api/**/*": {
-      "memory": 1024,
+      "memory": 2048,
       "maxDuration": 60
     }
   },
