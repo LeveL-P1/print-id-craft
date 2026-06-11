@@ -56,7 +56,7 @@
     },
     {
       "path": "/api/jobs/process",
-      "schedule": "0 4 * * *"
+      "schedule": "*/2 * * * *"
     },
     {
       "path": "/api/admin/backup/scheduled",
