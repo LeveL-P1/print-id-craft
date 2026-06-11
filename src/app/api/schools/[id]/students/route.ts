@@ -47,6 +47,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           serialNumber: true,
           photoUrl: true,
           photoPath: true,
+          photoBgStatus: true,
           formData: true,
           status: true,
           flagNote: true,

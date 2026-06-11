@@ -93,6 +93,7 @@ type StudentData = {
   serialNumber: string
   photoUrl: string
   photoPath?: string
+  photoBgStatus?: string
   formData: any
   status: string
   flagNote: string | null
@@ -207,6 +208,16 @@ export default function SchoolDetailPage() {
   const [manualAssigning, setManualAssigning] = useState<string>('')
   const [manualSearchQuery, setManualSearchQuery] = useState('')
   const [allStudentsList, setAllStudentsList] = useState<any[]>([])
+
+  // Batch reprocess skipped photo backgrounds
+  const [reprocessOpen, setReprocessOpen] = useState(false)
+  const [reprocessLoading, setReprocessLoading] = useState(false)
+  const [reprocessStarting, setReprocessStarting] = useState(false)
+  const [reprocessInfo, setReprocessInfo] = useState<{
+    skippedCount: number
+    rembgAvailable: boolean
+    activeJob: any | null
+  } | null>(null)
 
   // Memoized blob-URL map for unmatched photo thumbnails. Previously, the
   // render path called `URL.createObjectURL(file)` inline on every render
@@ -1218,6 +1229,54 @@ export default function SchoolDetailPage() {
     setAllStudentsList([])
   }
 
+  const fetchReprocessInfo = async () => {
+    setReprocessLoading(true)
+    try {
+      const qs = classFilter ? `?classId=${encodeURIComponent(classFilter)}` : ""
+      const res = await fetch(`/api/schools/${schoolId}/students/reprocess-photos${qs}`)
+      const data = await res.json()
+      if (data.success) {
+        setReprocessInfo(data.data)
+      } else {
+        toast.error(data.error || "Failed to load reprocess info")
+      }
+    } catch {
+      toast.error("Failed to load reprocess info")
+    } finally {
+      setReprocessLoading(false)
+    }
+  }
+
+  const openReprocessModal = async () => {
+    setReprocessOpen(true)
+    await fetchReprocessInfo()
+  }
+
+  const startReprocessJob = async () => {
+    setReprocessStarting(true)
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/students/reprocess-photos`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          classId: classFilter || null,
+          maxStudents: 5000,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || "Failed to start reprocess job")
+        return
+      }
+      toast.success("Background reprocess started — this may take a while for large schools.")
+      await fetchReprocessInfo()
+    } catch {
+      toast.error("Failed to start reprocess job")
+    } finally {
+      setReprocessStarting(false)
+    }
+  }
+
   // Flag management handlers
   const fetchFlags = async () => {
     try {
@@ -2134,6 +2193,10 @@ export default function SchoolDetailPage() {
               <button className="btn btn-outline" onClick={() => setPhotoUploadOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#8b5cf6', color: '#7c3aed' }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
                 Bulk Upload Photos
+              </button>
+              <button className="btn btn-outline" onClick={openReprocessModal} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#6366f1', color: '#4f46e5' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+                Reprocess Skipped Photos
               </button>
               <button className="btn btn-outline" onClick={openAddStudent} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#22c55e', color: '#16a34a' }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
@@ -3102,6 +3165,74 @@ export default function SchoolDetailPage() {
                         <button className="btn btn-primary" onClick={resetPhotoUpload} style={{ padding: '10px 28px' }}>Done ✓</button>
                       </div>
                     </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* REPROCESS SKIPPED PHOTOS MODAL */}
+          {reprocessOpen && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 24 }} onClick={() => { if (!reprocessStarting) setReprocessOpen(false) }}>
+              <div style={{ background: 'white', borderRadius: 20, maxWidth: 560, width: '100%', boxShadow: '0 25px 50px rgba(0,0,0,0.25)' }} onClick={e => e.stopPropagation()}>
+                <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>🎨 Reprocess Skipped Photos</h2>
+                    <p style={{ fontSize: 13, color: '#64748b' }}>
+                      Re-run background removal on photos where parents skipped AI cleanup.
+                    </p>
+                  </div>
+                  <button onClick={() => setReprocessOpen(false)} style={{ width: 32, height: 32, borderRadius: 8, border: 'none', background: '#f1f5f9', cursor: 'pointer', fontSize: 16 }}>✕</button>
+                </div>
+                <div style={{ padding: 24 }}>
+                  {reprocessLoading ? (
+                    <div style={{ textAlign: 'center', padding: 24, color: '#64748b' }}>Loading…</div>
+                  ) : reprocessInfo ? (
+                    <>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                        <div style={{ padding: 16, background: '#eef2ff', borderRadius: 12, textAlign: 'center' }}>
+                          <div style={{ fontSize: 28, fontWeight: 700, color: '#4f46e5' }}>{reprocessInfo.skippedCount}</div>
+                          <div style={{ fontSize: 12, color: '#6366f1' }}>Skipped photos{classFilter ? ' (filtered class)' : ''}</div>
+                        </div>
+                        <div style={{ padding: 16, background: reprocessInfo.rembgAvailable ? '#f0fdf4' : '#fef2f2', borderRadius: 12, textAlign: 'center' }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: reprocessInfo.rembgAvailable ? '#16a34a' : '#dc2626' }}>
+                            {reprocessInfo.rembgAvailable ? 'Server ready' : 'Server not configured'}
+                          </div>
+                          <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>REMBG_SERVICE_URL</div>
+                        </div>
+                      </div>
+                      {!reprocessInfo.rembgAvailable && (
+                        <div style={{ padding: 12, background: '#fff7ed', borderRadius: 10, border: '1px solid #fed7aa', fontSize: 12, color: '#9a3412', marginBottom: 16, lineHeight: 1.6 }}>
+                          Start the self-hosted rembg container (`docker/rembg`) and set <code>REMBG_SERVICE_URL</code> in your environment.
+                        </div>
+                      )}
+                      {reprocessInfo.activeJob && (
+                        <div style={{ padding: 12, background: '#f0f9ff', borderRadius: 10, border: '1px solid #bae6fd', fontSize: 12, color: '#0369a1', marginBottom: 16 }}>
+                          Job <strong>{reprocessInfo.activeJob.status}</strong>
+                          {reprocessInfo.activeJob.result?.processed != null && (
+                            <> — {reprocessInfo.activeJob.result.processed} processed, {reprocessInfo.activeJob.result.failed || 0} failed</>
+                          )}
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                        <button className="btn btn-outline" onClick={fetchReprocessInfo} disabled={reprocessLoading}>Refresh</button>
+                        <button
+                          className="btn btn-primary"
+                          onClick={startReprocessJob}
+                          disabled={
+                            reprocessStarting ||
+                            !reprocessInfo.rembgAvailable ||
+                            reprocessInfo.skippedCount === 0 ||
+                            !!reprocessInfo.activeJob
+                          }
+                          style={{ background: 'linear-gradient(135deg, #6366f1, #4f46e5)' }}
+                        >
+                          {reprocessStarting ? 'Starting…' : `Reprocess ${reprocessInfo.skippedCount} Photos`}
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: 24, color: '#94a3b8' }}>Could not load reprocess info.</div>
                   )}
                 </div>
               </div>

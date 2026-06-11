@@ -6,12 +6,14 @@ import type {
   ExportArchivePayload,
   GeneratePrintBatchPayload,
   GenerateQrPayload,
+  ReprocessPhotosPayload,
 } from "./types"
 import { processExportArchive } from "./processors/export-archive"
 import { processGenerateQr } from "./processors/generate-qr"
 import { processExportPlatformBackup } from "./processors/export-platform-backup"
 import type { PlatformBackupPayload } from "./types"
 import { failPrintBatch, processGeneratePrintBatch } from "./processors/generate-print-batch"
+import { processReprocessPhotos } from "./processors/reprocess-photos"
 
 async function claimNextJob(): Promise<Job | null> {
   const staleStartedBefore = new Date(Date.now() - JOB_STALE_RUNNING_MINUTES * 60 * 1000)
@@ -136,6 +138,15 @@ async function executeJob(job: Job) {
             await failPrintBatch(payload.batchId, error)
             throw error
           }
+        }
+        case "REPROCESS_PHOTOS": {
+          const result = await processReprocessPhotos(
+            job.id,
+            schoolId,
+            (job.payload || {}) as unknown as ReprocessPhotosPayload
+          )
+          await completeJob(job.id, result)
+          return result
         }
         default:
           throw new Error(`Unsupported job type: ${job.type}`)

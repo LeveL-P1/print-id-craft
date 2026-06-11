@@ -62,6 +62,7 @@ vi.mock('@/lib/prisma', () => {
       findMany: vi.fn(),
     },
     $queryRaw: vi.fn().mockResolvedValue([{ max: 0 }]),
+    $executeRaw: vi.fn().mockResolvedValue(0),
     $transaction: vi.fn(async (fn: any) => fn(prisma)),
   }
 

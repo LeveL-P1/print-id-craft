@@ -30,6 +30,12 @@ export type PlatformBackupPayload = {
   includeStudents: boolean
 }
 
+export type ReprocessPhotosPayload = {
+  classId?: string | null
+  studentIds?: string[]
+  maxStudents?: number
+}
+
 export type EnqueueInput = {
   type: JobType
   schoolId?: string | null

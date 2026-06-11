@@ -9,6 +9,7 @@ import {
   resolveFieldValue,
   type FieldRole,
 } from "@/lib/field-resolver"
+import { PHOTO_BG_STATUS, type PhotoBgStatus } from "@/lib/photo-bg-status"
 
 const JpgCardPreview = dynamic(() => import("@/components/JpgCardPreview"), { ssr: false })
 const PhotoBgProcessor = dynamic(() => import("@/components/PhotoBgProcessor"), { ssr: false })
@@ -282,6 +283,7 @@ export default function SubmitPage() {
   } | null>(null)
   const [photoVerified, setPhotoVerified] = useState(false)
   const [bgSkippable, setBgSkippable] = useState(false)
+  const [photoBgStatus, setPhotoBgStatus] = useState<PhotoBgStatus>("")
 
   // Visible 10-digit text for each mobile-intent field, kept separate from
   // formData so we never round-trip the "+91 " prefix through the input value
@@ -430,6 +432,14 @@ export default function SubmitPage() {
       .catch(() => { setErrorMsg("Failed to load form"); setStep("error") })
   }, [token])
 
+  // Pre-warm the in-browser AI model while parents fill in the Details form.
+  useEffect(() => {
+    if (step !== "form" || !config) return
+    import("@/lib/photo-background").then(({ preloadBgRemovalModel }) => {
+      preloadBgRemovalModel().catch(() => { /* offline or unsupported */ })
+    })
+  }, [step, config])
+
   useEffect(() => {
     if (!config || step === "loading" || step === "error" || step === "success") return
     const name = resolveFieldValue(formData, "name")
@@ -537,7 +547,7 @@ export default function SubmitPage() {
       const res = await fetch(`/api/submit/${token}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ formData, photoUrl, photoPath }),
+        body: JSON.stringify({ formData, photoUrl, photoPath, photoBgStatus }),
       })
       setUploadProgress(95)
       const data = await res.json()
@@ -1409,6 +1419,7 @@ export default function SubmitPage() {
                     const skipAi = !!bgQualityGood
                     setBgSkippable(skipAi)
                     if (skipAi) {
+                      setPhotoBgStatus(PHOTO_BG_STATUS.PLAIN)
                       setCroppedPhoto(previewUrl)
                       setStep("review")
                     } else {
@@ -1433,7 +1444,7 @@ export default function SubmitPage() {
                   <div style={{ borderRadius: 10, overflow: 'hidden', border: '2px solid #22c55e', maxWidth: 200, margin: '0 auto' }}>
                     <img src={photoPreview} alt="Preview" style={{ width: '100%', display: 'block' }} />
                   </div>
-                  <button onClick={() => { setPhotoPreview(""); setPhotoFile(null); setCroppedPhoto(""); setPhotoVerified(false); setBgSkippable(false) }} className="btn btn-outline" style={{ width: '100%', marginTop: 12, fontSize: 12 }}>
+                  <button onClick={() => { setPhotoPreview(""); setPhotoFile(null); setCroppedPhoto(""); setPhotoVerified(false); setBgSkippable(false); setPhotoBgStatus("") }} className="btn btn-outline" style={{ width: '100%', marginTop: 12, fontSize: 12 }}>
                     Choose Different Photo
                   </button>
                 </div>
@@ -1455,6 +1466,7 @@ export default function SubmitPage() {
                     style={{ flex: 1, justifyContent: 'center' }}
                     onClick={() => {
                       if (bgSkippable) {
+                        setPhotoBgStatus(PHOTO_BG_STATUS.PLAIN)
                         setCroppedPhoto(photoPreview)
                         setStep("review")
                       } else {
@@ -1487,13 +1499,18 @@ export default function SubmitPage() {
               <PhotoBgProcessor
                 photoUrl={photoPreview}
                 defaultBgColor={config?.photoBgColor || "#FFFFFF"}
+                submitToken={token}
+                schoolId={config?.schoolId}
                 autoConfirm
-                onProcessed={(processedUrl) => {
+                onStatus={setPhotoBgStatus}
+                onProcessed={(processedUrl, status) => {
+                  setPhotoBgStatus(status)
                   setPhotoPreview(processedUrl)
                   setCroppedPhoto(processedUrl)
                   setStep("review")
                 }}
-                onSkip={() => {
+                onSkip={(status) => {
+                  setPhotoBgStatus(status)
                   setCroppedPhoto(photoPreview)
                   setStep("review")
                 }}
@@ -1510,6 +1527,7 @@ export default function SubmitPage() {
                     setCroppedPhoto("")
                     setPhotoVerified(false)
                     setBgSkippable(false)
+                    setPhotoBgStatus("")
                     setStep("photo")
                   }}
                 >

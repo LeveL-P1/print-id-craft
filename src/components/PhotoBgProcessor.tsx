@@ -4,17 +4,22 @@ import {
   downscaleBlob,
   loadImageToCanvas,
   recolorPlainBackgroundOnCanvas,
+  removeBackgroundViaServer,
   removeBackgroundWithBestModel,
 } from "@/lib/photo-background"
+import { PHOTO_BG_STATUS, type PhotoBgStatus } from "@/lib/photo-bg-status"
 
 type Props = {
   photoUrl: string
   /** School-wide ID photo background — same for every student in this class. */
   defaultBgColor: string
-  onProcessed: (processedDataUrl: string) => void
-  onSkip: () => void
+  onProcessed: (processedDataUrl: string, status: PhotoBgStatus) => void
+  onSkip: (status: PhotoBgStatus) => void
   /** When true, apply the school background and continue without manual confirm. */
   autoConfirm?: boolean
+  submitToken?: string
+  schoolId?: string
+  onStatus?: (status: PhotoBgStatus) => void
 }
 
 /**
@@ -71,6 +76,9 @@ export default function PhotoBgProcessor({
   onProcessed,
   onSkip,
   autoConfirm = false,
+  submitToken,
+  schoolId,
+  onStatus,
 }: Props) {
   const [processing, setProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -85,6 +93,14 @@ export default function PhotoBgProcessor({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const autoConfirmedRef = useRef(false)
   const autoSkippedRef = useRef(false)
+  const removalStartedRef = useRef(false)
+  const lastBgStatusRef = useRef<PhotoBgStatus>("")
+  const serverAttemptedRef = useRef(false)
+
+  const setBgStatus = useCallback((status: PhotoBgStatus) => {
+    lastBgStatusRef.current = status
+    onStatus?.(status)
+  }, [onStatus])
 
   // Verify the photo URL is valid on mount & ensure we have a displayable data URL
   useEffect(() => {
@@ -126,6 +142,8 @@ export default function PhotoBgProcessor({
       setError("No photo to process.")
       return
     }
+    if (removalStartedRef.current) return
+    removalStartedRef.current = true
 
     setProcessing(true)
     setProgress(10)
@@ -142,43 +160,76 @@ export default function PhotoBgProcessor({
         setProgress(100)
         setProgressMsg("Background updated!")
         const resultUrl = canvas.toDataURL("image/jpeg", 0.95)
+        setBgStatus(PHOTO_BG_STATUS.PLAIN)
         setProcessedUrl(resultUrl)
         setProcessing(false)
         return
       }
 
-      // Tier 3: messy background — IMG.LY isnet_fp16 + WebGPU (free, best in-browser).
-      setProgress(20)
-      setProgressMsg("Cleaning background with AI…")
-
       let blob = await urlToBlob(sourceUrl)
       blob = await downscaleBlob(blob, 768)
 
-      const resultBlob = await removeBackgroundWithBestModel(blob, (msg, pct) => {
-        setProgress(30 + pct * 0.6)
-        setProgressMsg(msg)
-      })
-      if (autoSkippedRef.current) return
-
-      setProgress(95)
-      setProgressMsg("Almost done…")
-
-      const reader = new FileReader()
-      reader.onload = () => {
-        const transparentUrl = reader.result as string
-        setRemovedBgUrl(transparentUrl)
-        setProgress(100)
-        setProcessing(false)
-        applyBackground(transparentUrl, schoolBgColor)
+      const applyTransparentBlob = (resultBlob: Blob) => {
+        if (autoSkippedRef.current) return
+        setProgress(95)
+        setProgressMsg("Almost done…")
+        setBgStatus(PHOTO_BG_STATUS.PROCESSED)
+        const reader = new FileReader()
+        reader.onload = () => {
+          const transparentUrl = reader.result as string
+          setRemovedBgUrl(transparentUrl)
+          setProgress(100)
+          setProcessing(false)
+          applyBackground(transparentUrl, schoolBgColor)
+        }
+        reader.readAsDataURL(resultBlob)
       }
-      reader.readAsDataURL(resultBlob)
+
+      // Tier 3a: in-browser AI (free, runs on parent's device).
+      setProgress(20)
+      setProgressMsg("Cleaning background with AI…")
+      try {
+        const resultBlob = await removeBackgroundWithBestModel(blob, (msg, pct) => {
+          setProgress(30 + pct * 0.5)
+          setProgressMsg(msg)
+        })
+        applyTransparentBlob(resultBlob)
+        return
+      } catch (clientErr) {
+        console.warn("Client background removal failed, trying server fallback:", clientErr)
+      }
+
+      // Tier 3b: server rembg fallback (retries / messy photos only).
+      if (!serverAttemptedRef.current) {
+        serverAttemptedRef.current = true
+        setProgress(55)
+        setProgressMsg("Trying backup server cleanup…")
+        try {
+          const resultBlob = await removeBackgroundViaServer(blob, {
+            bgColor: schoolBgColor,
+            submitToken,
+            schoolId,
+            onProgress: (msg, pct) => {
+              setProgress(55 + pct * 0.35)
+              setProgressMsg(msg)
+            },
+          })
+          applyTransparentBlob(resultBlob)
+          return
+        } catch (serverErr) {
+          console.error("Server background removal failed:", serverErr)
+        }
+      }
+
+      throw new Error("All background removal methods failed")
     } catch (err: any) {
       console.error("Background removal failed:", err)
+      removalStartedRef.current = false
       setError("Could not clean the background. You can still continue with your photo.")
       setProcessing(false)
       setProgress(0)
     }
-  }, [photoUrl, photoDataUrl, schoolBgColor])
+  }, [photoUrl, photoDataUrl, schoolBgColor, submitToken, schoolId, setBgStatus])
 
   const applyBackground = useCallback((transparentUrl: string, bgColor: string) => {
     const canvas = canvasRef.current
@@ -428,14 +479,14 @@ export default function PhotoBgProcessor({
 
   const handleConfirm = () => {
     if (processedUrl) {
-      onProcessed(processedUrl)
+      onProcessed(processedUrl, lastBgStatusRef.current || PHOTO_BG_STATUS.PROCESSED)
     }
   }
 
   useEffect(() => {
     if (autoConfirm && processedUrl && !processing && !autoConfirmedRef.current) {
       autoConfirmedRef.current = true
-      onProcessed(processedUrl)
+      onProcessed(processedUrl, lastBgStatusRef.current || PHOTO_BG_STATUS.PROCESSED)
     }
   }, [autoConfirm, processedUrl, processing, onProcessed])
 
@@ -447,11 +498,12 @@ export default function PhotoBgProcessor({
       autoSkippedRef.current = true
       setProgressMsg("Continuing with original photo...")
       setProcessing(false)
-      onSkip()
+      setBgStatus(PHOTO_BG_STATUS.SKIPPED)
+      onSkip(PHOTO_BG_STATUS.SKIPPED)
     }, 8000)
 
     return () => window.clearTimeout(timer)
-  }, [autoConfirm, processing, onSkip])
+  }, [autoConfirm, processing, onSkip, setBgStatus])
 
   const displayUrl = photoDataUrl || photoUrl
 
@@ -550,7 +602,12 @@ export default function PhotoBgProcessor({
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
             {photoLoaded && (
               <button
-                onClick={() => { setError(""); removeBackground() }}
+                onClick={() => {
+                  setError("")
+                  removalStartedRef.current = false
+                  serverAttemptedRef.current = false
+                  removeBackground()
+                }}
                 style={{
                   fontSize: 12, padding: '8px 16px', background: '#3b82f6',
                   color: 'white', border: 'none', borderRadius: 8,
@@ -561,7 +618,10 @@ export default function PhotoBgProcessor({
               </button>
             )}
             <button
-              onClick={onSkip}
+              onClick={() => {
+                setBgStatus(PHOTO_BG_STATUS.SKIPPED)
+                onSkip(PHOTO_BG_STATUS.SKIPPED)
+              }}
               style={{
                 fontSize: 12, padding: '8px 16px', background: '#f1f5f9',
                 color: '#475569', border: 'none', borderRadius: 8,

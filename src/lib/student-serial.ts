@@ -16,7 +16,8 @@ export async function getNextStudentSerial(
 
   // PostgreSQL advisory transaction locks serialize serial allocation per school
   // without changing the visible product flow or adding a new table.
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`student-serial:${schoolId}`}))`
+  // $executeRaw: pg_advisory_xact_lock returns void — $queryRaw cannot deserialize it
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`student-serial:${schoolId}`}))`
 
   const nextNum = (await getMaxStudentSerialNumber(tx, schoolId)) + 1
 
@@ -45,7 +46,8 @@ export async function allocateStudentSerials(
   if (count <= 0) return []
 
   const code = schoolCodeFromName(schoolName)
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`student-serial:${schoolId}`}))`
+  // $executeRaw: pg_advisory_xact_lock returns void — $queryRaw cannot deserialize it
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`student-serial:${schoolId}`}))`
   const start = (await getMaxStudentSerialNumber(tx, schoolId)) + 1
 
   return Array.from({ length: count }, (_, index) => formatStudentSerial(code, start + index))

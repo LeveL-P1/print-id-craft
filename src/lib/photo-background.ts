@@ -210,51 +210,94 @@ export async function loadImageToCanvas(url: string): Promise<{
   })
 }
 
-export async function removeBackgroundWithBestModel(
-  blob: Blob,
-  onProgress?: (msg: string, pct: number) => void
-): Promise<Blob> {
-  const { removeBackground } = await import("@imgly/background-removal")
-  const base = {
-    model: "isnet_fp16" as const,
-    proxyToWorker: true,
-    fetchArgs: { cache: "force-cache" as RequestCache },
-    output: { format: "image/png" as const, quality: 0.92 },
-    progress: (key: string, current: number, total: number) => {
-      const pct = Math.round((current / total) * 100)
-      if (key.includes("fetch")) onProgress?.("Downloading AI model...", pct)
-      else if (key.includes("inference")) onProgress?.("Cleaning background...", pct)
-    },
-  }
+type BgRemovalDevice = "gpu" | "cpu"
 
-  try {
-    return await removeBackground(blob, { ...base, device: "gpu" })
-  } catch {
-    return await removeBackground(blob, { ...base, device: "cpu" })
-  }
+let preloadPromise: Promise<BgRemovalDevice> | null = null
+let removalChain: Promise<unknown> = Promise.resolve()
+
+function runSerialized<T>(task: () => Promise<T>): Promise<T> {
+  const run = removalChain.then(task, task)
+  removalChain = run.then(() => undefined, () => undefined)
+  return run
 }
 
-let preloadPromise: Promise<void> | null = null
-
-export function preloadBgRemovalModel(): Promise<void> {
-  if (typeof window === "undefined") return Promise.resolve()
+export function preloadBgRemovalModel(): Promise<BgRemovalDevice> {
+  if (typeof window === "undefined") return Promise.resolve("cpu")
   if (!preloadPromise) {
-    preloadPromise = import("@imgly/background-removal")
-      .then(({ preload }) =>
-        preload({
+    preloadPromise = runSerialized(async () => {
+      const { preload } = await import("@imgly/background-removal")
+      try {
+        await preload({
           model: "isnet_fp16",
           device: "gpu",
           fetchArgs: { cache: "force-cache" },
         })
-      )
-      .catch(() =>
-        import("@imgly/background-removal").then(({ preload }) =>
-          preload({ model: "isnet_fp16", device: "cpu" })
-        )
-      )
-      .catch(() => { /* offline */ })
+        return "gpu" as const
+      } catch {
+        await preload({ model: "isnet_fp16", device: "cpu" })
+        return "cpu" as const
+      }
+    }).catch(() => "cpu" as const)
   }
   return preloadPromise
+}
+
+export async function removeBackgroundWithBestModel(
+  blob: Blob,
+  onProgress?: (msg: string, pct: number) => void
+): Promise<Blob> {
+  return runSerialized(async () => {
+    const device = await preloadBgRemovalModel()
+    const { removeBackground } = await import("@imgly/background-removal")
+    const base = {
+      model: "isnet_fp16" as const,
+      proxyToWorker: true,
+      fetchArgs: { cache: "force-cache" as RequestCache },
+      output: { format: "image/png" as const, quality: 0.92 },
+      progress: (key: string, current: number, total: number) => {
+        const pct = Math.round((current / total) * 100)
+        if (key.includes("fetch")) onProgress?.("Downloading AI model...", pct)
+        else if (key.includes("inference")) onProgress?.("Cleaning background...", pct)
+      },
+    }
+
+    try {
+      return await removeBackground(blob, { ...base, device })
+    } catch (gpuErr) {
+      if (device === "cpu") throw gpuErr
+      const { preload } = await import("@imgly/background-removal")
+      await preload({ model: "isnet_fp16", device: "cpu" })
+      return await removeBackground(blob, { ...base, device: "cpu" })
+    }
+  })
+}
+
+export async function removeBackgroundViaServer(
+  blob: Blob,
+  options: {
+    bgColor: string
+    submitToken?: string
+    schoolId?: string
+    onProgress?: (msg: string, pct: number) => void
+  }
+): Promise<Blob> {
+  options.onProgress?.("Trying server background removal…", 10)
+
+  const fd = new FormData()
+  fd.append("file", blob, "photo.jpg")
+  fd.append("bgColor", options.bgColor)
+  fd.append("format", "transparent")
+  if (options.submitToken) fd.append("submitToken", options.submitToken)
+  if (options.schoolId) fd.append("schoolId", options.schoolId)
+
+  const res = await fetch("/api/photo/remove-background", { method: "POST", body: fd })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.error || `Server removal failed (${res.status})`)
+  }
+
+  options.onProgress?.("Server cleanup complete", 90)
+  return await res.blob()
 }
 
 export async function downscaleBlob(blob: Blob, maxDim = 768): Promise<Blob> {

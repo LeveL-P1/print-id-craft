@@ -126,6 +126,8 @@ model Student {
   formData      Json
   photoUrl      String        @default("")
   photoPath     String        @default("")
+  // PLAIN | PROCESSED | SKIPPED | REPROCESSED — ID photo background pipeline
+  photoBgStatus String        @default("")
   qrCodeUrl     String?
   status        StudentStatus @default(SUBMITTED)
   flagNote      String?
@@ -146,6 +148,7 @@ model Student {
   @@index([classId, normalizedName, normalizedFatherName, normalizedDob])
   @@index([status])
   @@index([photoPath])
+  @@index([schoolId, photoBgStatus])
 }
 
 model RateLimit {
@@ -230,6 +233,7 @@ enum JobType {
   GENERATE_PRINT_BATCH
   EXPORT_SCHOOL_ARCHIVE
   EXPORT_PLATFORM_BACKUP
+  REPROCESS_PHOTOS
 }
 
 enum JobStatus {
