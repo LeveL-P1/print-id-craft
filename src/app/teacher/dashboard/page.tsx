@@ -26,6 +26,7 @@ type ClassData = {
   linkToken: string
   _count: { students: number }
   teachers: { id: string; name: string; email: string; isMainTeacher: boolean }[]
+  template?: any
 }
 
 type SubTeacher = {
@@ -428,11 +429,11 @@ export default function TeacherDashboard() {
                 <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>📋 Class Form Links — Share with Students</h3>
                 {isMain && (
                   <form onSubmit={handleAddClass} style={{ display: 'flex', gap: 8 }}>
-                    <input 
-                      type="text" 
-                      value={newClassName} 
-                      onChange={e => setNewClassName(e.target.value)} 
-                      placeholder="New Class Name" 
+                    <input
+                      type="text"
+                      value={newClassName}
+                      onChange={e => setNewClassName(e.target.value)}
+                      placeholder="New Class Name"
                       style={{ padding: '6px 12px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 13 }}
                       required
                     />
@@ -442,7 +443,7 @@ export default function TeacherDashboard() {
                   </form>
                 )}
               </div>
-              
+
               {(!data?.classes || data.classes.length === 0) ? (
                 <div style={{ padding: 20, textAlign: 'center', color: '#94a3b8', fontSize: 14 }}>
                   No classes added yet. {isMain && "Add a class to get started!"}
@@ -832,136 +833,140 @@ export default function TeacherDashboard() {
         )}
 
         {/* ========== STUDENT DETAIL MODAL ========== */}
-        {selectedStudent && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 24 }} onClick={() => setSelectedStudent(null)}>
-            <div style={{ background: 'white', borderRadius: 20, maxWidth: 800, width: '100%', maxHeight: '90vh', overflow: 'auto', boxShadow: '0 25px 50px rgba(0,0,0,0.25)' }} onClick={e => e.stopPropagation()}>
-              <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a' }}>Student Detail</h2>
-                  <p style={{ fontSize: 13, color: '#64748b' }}>{selectedStudent.serialNumber} · {selectedStudent.class?.name}</p>
-                </div>
-                <button onClick={() => setSelectedStudent(null)} style={{ width: 32, height: 32, borderRadius: 8, border: 'none', background: '#f1f5f9', cursor: 'pointer', fontSize: 16 }}>✕</button>
-              </div>
-              <div style={{ padding: 24 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '20px', marginBottom: 24 }}>
-                  <div style={{ width: 90, height: 120, borderRadius: 12, overflow: 'hidden', border: '2px solid #e2e8f0', background: '#f8fafc' }}>
-                    {selectedStudent.photoUrl ? (
-                      <img src={selectedStudent.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    ) : (
-                      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
-                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 20px' }}>
-                    {Object.entries(selectedStudent.formData as Record<string, string>).map(([key, value]) => (
-                      <div key={key}>
-                        <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'capitalize' }}>{key.replace(/([A-Z])/g, ' $1')}</div>
-                        <div style={{ fontSize: 14, fontWeight: 500, color: '#0f172a' }}>{String(value) || '—'}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Teacher Comment Display */}
-                {selectedStudent.teacherComment && (
-                  <div style={{ padding: '12px 16px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, color: '#1d4ed8', fontSize: 13, marginBottom: 16 }}>
-                    💬 <strong>Teacher Comment:</strong> {selectedStudent.teacherComment}
-                  </div>
-                )}
-
-                {selectedStudent.flagNote && (
-                  <div style={{ padding: '12px 16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, color: '#ef4444', fontSize: 13, marginBottom: 16 }}>
-                    📌 <strong>Flag Note:</strong> {selectedStudent.flagNote}
-                  </div>
-                )}
-
-                {templateData && (
+        {selectedStudent && (() => {
+          const studentClass = data?.classes.find(c => c.name === selectedStudent.class?.name)
+          const studentTemplate = studentClass?.template || templateData
+          return (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 24 }} onClick={() => setSelectedStudent(null)}>
+              <div style={{ background: 'white', borderRadius: 20, maxWidth: 800, width: '100%', maxHeight: '90vh', overflow: 'auto', boxShadow: '0 25px 50px rgba(0,0,0,0.25)' }} onClick={e => e.stopPropagation()}>
+                <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
-                    <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 16 }}>ID Card Preview</h3>
-                    <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', justifyContent: 'center' }}>
-                      {templateData.templateImageUrl ? (
-                        <>
-                          <div>
-                            <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>FRONT SIDE</div>
-                            <JpgCardPreview
-                              templateImageUrl={templateData.templateImageUrl}
-                              fieldMappings={templateData.fieldMappings || []}
-                              formData={selectedStudent.formData as Record<string, string>}
-                              studentPhoto={selectedStudent.photoUrl}
-                              scale={0.5}
-                              watermark="PREVIEW ONLY"
-                              cardWidthMm={(templateData as any).cardWidthMm}
-                              cardHeightMm={(templateData as any).cardHeightMm}
-                            />
-                          </div>
-                          {templateData.hasBackSide && templateData.backTemplateImageUrl && (
+                    <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a' }}>Student Detail</h2>
+                    <p style={{ fontSize: 13, color: '#64748b' }}>{selectedStudent.serialNumber} · {selectedStudent.class?.name}</p>
+                  </div>
+                  <button onClick={() => setSelectedStudent(null)} style={{ width: 32, height: 32, borderRadius: 8, border: 'none', background: '#f1f5f9', cursor: 'pointer', fontSize: 16 }}>✕</button>
+                </div>
+                <div style={{ padding: 24 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '20px', marginBottom: 24 }}>
+                    <div style={{ width: 90, height: 120, borderRadius: 12, overflow: 'hidden', border: '2px solid #e2e8f0', background: '#f8fafc' }}>
+                      {selectedStudent.photoUrl ? (
+                        <img src={selectedStudent.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
+                          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 20px' }}>
+                      {Object.entries(selectedStudent.formData as Record<string, string>).map(([key, value]) => (
+                        <div key={key}>
+                          <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'capitalize' }}>{key.replace(/([A-Z])/g, ' $1')}</div>
+                          <div style={{ fontSize: 14, fontWeight: 500, color: '#0f172a' }}>{String(value) || '—'}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Teacher Comment Display */}
+                  {selectedStudent.teacherComment && (
+                    <div style={{ padding: '12px 16px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, color: '#1d4ed8', fontSize: 13, marginBottom: 16 }}>
+                      💬 <strong>Teacher Comment:</strong> {selectedStudent.teacherComment}
+                    </div>
+                  )}
+
+                  {selectedStudent.flagNote && (
+                    <div style={{ padding: '12px 16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, color: '#ef4444', fontSize: 13, marginBottom: 16 }}>
+                      📌 <strong>Flag Note:</strong> {selectedStudent.flagNote}
+                    </div>
+                  )}
+
+                  {studentTemplate && (
+                    <div>
+                      <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 16 }}>ID Card Preview</h3>
+                      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', justifyContent: 'center' }}>
+                        {studentTemplate.templateImageUrl ? (
+                          <>
                             <div>
-                              <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>BACK SIDE</div>
+                              <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>FRONT SIDE</div>
                               <JpgCardPreview
-                                templateImageUrl={templateData.backTemplateImageUrl}
-                                fieldMappings={templateData.backFieldMappings || []}
+                                templateImageUrl={studentTemplate.templateImageUrl}
+                                fieldMappings={studentTemplate.fieldMappings || []}
                                 formData={selectedStudent.formData as Record<string, string>}
                                 studentPhoto={selectedStudent.photoUrl}
                                 scale={0.5}
                                 watermark="PREVIEW ONLY"
-                                cardWidthMm={(templateData as any).cardWidthMm}
-                                cardHeightMm={(templateData as any).cardHeightMm}
+                                cardWidthMm={(studentTemplate as any).cardWidthMm}
+                                cardHeightMm={(studentTemplate as any).cardHeightMm}
                               />
                             </div>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          <div>
-                            <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>FRONT</div>
-                            <IDCardPreview
-                              layout={templateData.frontLayout || []}
-                              widthMm={templateData.cardWidthMm || 85.6}
-                              heightMm={templateData.cardHeightMm || 54.0}
-                              formData={selectedStudent.formData as Record<string, string>}
-                              studentPhoto={selectedStudent.photoUrl}
-                              serialNumber={selectedStudent.serialNumber}
-                              scale={3.2}
-                            />
-                          </div>
-                          {templateData.hasBackSide && (
+                            {studentTemplate.hasBackSide && studentTemplate.backTemplateImageUrl && (
+                              <div>
+                                <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>BACK SIDE</div>
+                                <JpgCardPreview
+                                  templateImageUrl={studentTemplate.backTemplateImageUrl}
+                                  fieldMappings={studentTemplate.backFieldMappings || []}
+                                  formData={selectedStudent.formData as Record<string, string>}
+                                  studentPhoto={selectedStudent.photoUrl}
+                                  scale={0.5}
+                                  watermark="PREVIEW ONLY"
+                                  cardWidthMm={(studentTemplate as any).cardWidthMm}
+                                  cardHeightMm={(studentTemplate as any).cardHeightMm}
+                                />
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <>
                             <div>
-                              <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>BACK</div>
+                              <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>FRONT</div>
                               <IDCardPreview
-                                layout={templateData.backLayout || []}
-                                widthMm={templateData.cardWidthMm || 85.6}
-                                heightMm={templateData.cardHeightMm || 54.0}
+                                layout={studentTemplate.frontLayout || []}
+                                widthMm={studentTemplate.cardWidthMm || 85.6}
+                                heightMm={studentTemplate.cardHeightMm || 54.0}
                                 formData={selectedStudent.formData as Record<string, string>}
+                                studentPhoto={selectedStudent.photoUrl}
                                 serialNumber={selectedStudent.serialNumber}
                                 scale={3.2}
                               />
                             </div>
-                          )}
-                        </>
-                      )}
+                            {studentTemplate.hasBackSide && (
+                              <div>
+                                <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>BACK</div>
+                                <IDCardPreview
+                                  layout={studentTemplate.backLayout || []}
+                                  widthMm={studentTemplate.cardWidthMm || 85.6}
+                                  heightMm={studentTemplate.cardHeightMm || 54.0}
+                                  formData={selectedStudent.formData as Record<string, string>}
+                                  serialNumber={selectedStudent.serialNumber}
+                                  scale={3.2}
+                                />
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {/* Action Buttons */}
-                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20, borderTop: '1px solid #e2e8f0', paddingTop: 16, flexWrap: 'wrap' }}>
-                  {selectedStudent.status !== "APPROVED" && selectedStudent.status !== "PRINTED" && (
-                    <button className="btn btn-primary" style={{ fontSize: 13, background: 'linear-gradient(135deg, #22c55e, #16a34a)' }} onClick={() => { handleApprove(selectedStudent.id); setSelectedStudent(null) }}>✓ Approve</button>
-                  )}
-                  {selectedStudent.status !== "FLAGGED" && selectedStudent.status !== "PRINTED" && (
-                    <button className="btn btn-outline" style={{ fontSize: 13, color: '#ef4444', borderColor: '#ef4444' }} onClick={() => { handleDisapprove(selectedStudent.id); setSelectedStudent(null) }}>✕ Disapprove</button>
-                  )}
-                  <button className="btn btn-outline" style={{ fontSize: 13 }} onClick={() => {
-                    setCommentStudentId(selectedStudent.id)
-                    setCommentText(selectedStudent.teacherComment || "")
-                  }}>💬 Comment</button>
-                  <button className="btn btn-outline" style={{ fontSize: 13 }} onClick={() => setSelectedStudent(null)}>Close</button>
+                  {/* Action Buttons */}
+                  <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20, borderTop: '1px solid #e2e8f0', paddingTop: 16, flexWrap: 'wrap' }}>
+                    {selectedStudent.status !== "APPROVED" && selectedStudent.status !== "PRINTED" && (
+                      <button className="btn btn-primary" style={{ fontSize: 13, background: 'linear-gradient(135deg, #22c55e, #16a34a)' }} onClick={() => { handleApprove(selectedStudent.id); setSelectedStudent(null) }}>✓ Approve</button>
+                    )}
+                    {selectedStudent.status !== "FLAGGED" && selectedStudent.status !== "PRINTED" && (
+                      <button className="btn btn-outline" style={{ fontSize: 13, color: '#ef4444', borderColor: '#ef4444' }} onClick={() => { handleDisapprove(selectedStudent.id); setSelectedStudent(null) }}>✕ Disapprove</button>
+                    )}
+                    <button className="btn btn-outline" style={{ fontSize: 13 }} onClick={() => {
+                      setCommentStudentId(selectedStudent.id)
+                      setCommentText(selectedStudent.teacherComment || "")
+                    }}>💬 Comment</button>
+                    <button className="btn btn-outline" style={{ fontSize: 13 }} onClick={() => setSelectedStudent(null)}>Close</button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
         {/* ========== TEMPLATE TAB ========== */}
         {activeTab === "template" && isMain && (
           <div className="fade-in">
