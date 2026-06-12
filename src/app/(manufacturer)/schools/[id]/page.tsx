@@ -75,6 +75,8 @@ type SchoolTemplateSummary = {
   templateImageUrl: string | null
   hasBackSide: boolean
   _count?: { classes: number }
+  frontLayout?: any
+  backLayout?: any
   fieldMappings?: any
   fieldConfig?: any
   photoBgColor?: string
@@ -523,6 +525,61 @@ export default function SchoolDetailPage() {
     const tpl = schoolTemplates.find(t => t.id === tid) || cls.template
     if (!tpl) return "No template"
     return cls.templateId ? tpl.name : `${tpl.name} (default)`
+  }
+
+  const normalizeTemplateLookupName = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/\b(template|school|id|card|class|standard|std)\b/g, " ")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim()
+
+  const hasTemplateContent = (template: any) => {
+    if (!template) return false
+    const frontMappings = Array.isArray(template.fieldMappings) ? template.fieldMappings : []
+    const frontLayout = Array.isArray(template.frontLayout) ? template.frontLayout : []
+    return Boolean(template.templateImageUrl || frontMappings.length > 0 || frontLayout.length > 0)
+  }
+
+  const resolveStudentTemplate = (
+    studentClass: ClassData | undefined,
+    student: StudentData,
+    fallbackTemplate: any,
+  ) => {
+    const explicitTemplate = studentClass?.templateId
+      ? schoolTemplates.find(t => t.id === studentClass.templateId) || studentClass.template
+      : null
+
+    if (hasTemplateContent(explicitTemplate)) return explicitTemplate
+
+    const className =
+      studentClass?.name ||
+      student.class?.name ||
+      student.formData?.class ||
+      student.formData?.Class ||
+      student.formData?.className ||
+      student.formData?.["Class Name"] ||
+      ""
+    const normalizedClassName = normalizeTemplateLookupName(String(className))
+
+    if (normalizedClassName) {
+      const classMatchedTemplate = schoolTemplates
+        .map((template) => {
+          const normalizedTemplateName = normalizeTemplateLookupName(template.name || "")
+          if (!normalizedTemplateName || !hasTemplateContent(template)) return { template, score: 0 }
+          if (normalizedTemplateName === normalizedClassName) return { template, score: 100 }
+          if (normalizedTemplateName.startsWith(`${normalizedClassName} `)) return { template, score: 80 }
+          if (normalizedTemplateName.endsWith(` ${normalizedClassName}`)) return { template, score: 70 }
+          if (normalizedTemplateName.includes(normalizedClassName)) return { template, score: 50 }
+          return { template, score: 0 }
+        })
+        .sort((a, b) => b.score - a.score)[0]
+
+      if (classMatchedTemplate?.score > 0) return classMatchedTemplate.template
+    }
+
+    const defaultTemplate = schoolTemplates.find(hasTemplateContent)
+    return defaultTemplate || explicitTemplate || fallbackTemplate
   }
 
   const handleAssignClassTemplate = async (classId: string, templateId: string) => {
@@ -3669,6 +3726,9 @@ export default function SchoolDetailPage() {
         const fatherVal = editFd.fatherName || editFd["Father"] || editFd["Father Name"] || editFd.father || ""
         const motherVal = editFd.motherName || editFd["Mother"] || editFd["Mother Name"] || editFd.mother || ""
 
+        const studentClass = classes.find(c => c.id === selectedStudent.classId)
+        const studentTemplate = resolveStudentTemplate(studentClass, selectedStudent, templateData)
+
         // Determine critical missing fields
         const missingItems: string[] = []
         if (!selectedStudent.photoUrl) missingItems.push("Photo")
@@ -3787,37 +3847,37 @@ export default function SchoolDetailPage() {
                 </div>
               )}
 
-              {templateData?.templateImageUrl && templateData?.fieldMappings && (templateData.fieldMappings as any[]).length > 0 && (
+              {studentTemplate?.templateImageUrl && studentTemplate?.fieldMappings && (studentTemplate.fieldMappings as any[]).length > 0 && (
                 <div style={{ marginBottom: 24 }}>
                   <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 16 }}>ID Card Preview (JPG Template)</h3>
                   <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', justifyContent: 'center' }}>
                     <div>
                       <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>FRONT SIDE</div>
                       <JpgCardPreview
-                        templateImageUrl={templateData.templateImageUrl}
-                        fieldMappings={templateData.fieldMappings as any[]}
+                        templateImageUrl={studentTemplate.templateImageUrl}
+                        fieldMappings={studentTemplate.fieldMappings as any[]}
                         formData={selectedStudent.formData as Record<string, string>}
                         studentPhoto={selectedStudent.photoUrl}
                         flagImageUrl={resolveFlagImageUrl(selectedStudent.formData as Record<string, string>, flagImages)}
                         scale={1}
                         watermark="PREVIEW"
-                        cardWidthMm={(templateData as any).cardWidthMm}
-                        cardHeightMm={(templateData as any).cardHeightMm}
+                        cardWidthMm={(studentTemplate as any).cardWidthMm}
+                        cardHeightMm={(studentTemplate as any).cardHeightMm}
                       />
                     </div>
-                    {templateData.hasBackSide && templateData.backTemplateImageUrl && (
+                    {studentTemplate.hasBackSide && studentTemplate.backTemplateImageUrl && (
                       <div>
                         <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>BACK SIDE</div>
                         <JpgCardPreview
-                          templateImageUrl={templateData.backTemplateImageUrl}
-                          fieldMappings={templateData.backFieldMappings as any[] || []}
+                          templateImageUrl={studentTemplate.backTemplateImageUrl}
+                          fieldMappings={studentTemplate.backFieldMappings as any[] || []}
                           formData={selectedStudent.formData as Record<string, string>}
                           studentPhoto={selectedStudent.photoUrl}
                           flagImageUrl={resolveFlagImageUrl(selectedStudent.formData as Record<string, string>, flagImages)}
                           scale={1}
                           watermark="PREVIEW"
-                          cardWidthMm={(templateData as any).cardWidthMm}
-                          cardHeightMm={(templateData as any).cardHeightMm}
+                          cardWidthMm={(studentTemplate as any).cardWidthMm}
+                          cardHeightMm={(studentTemplate as any).cardHeightMm}
                         />
                       </div>
                     )}
@@ -3826,16 +3886,16 @@ export default function SchoolDetailPage() {
               )}
 
               {/* ID Card Preview (Canvas-based, fallback) */}
-              {templateData && !templateData.templateImageUrl && (
+              {studentTemplate && !studentTemplate.templateImageUrl && (
                 <div>
                   <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 16 }}>ID Card Preview</h3>
                   <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', justifyContent: 'center' }}>
                     <div>
                       <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 8, textAlign: 'center' }}>FRONT</div>
                       <IDCardPreview
-                        layout={templateData.frontLayout || []}
-                        widthMm={templateData.cardWidthMm || 85.6}
-                        heightMm={templateData.cardHeightMm || 54.0}
+                        layout={studentTemplate.frontLayout || []}
+                        widthMm={studentTemplate.cardWidthMm || 85.6}
+                        heightMm={studentTemplate.cardHeightMm || 54.0}
                         formData={selectedStudent.formData as Record<string, string>}
                         studentPhoto={selectedStudent.photoUrl}
                         schoolLogo={school?.logoUrl || undefined}
@@ -3843,17 +3903,19 @@ export default function SchoolDetailPage() {
                         scale={3.5}
                       />
                     </div>
-                    <div>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 8, textAlign: 'center' }}>BACK</div>
-                      <IDCardPreview
-                        layout={templateData.backLayout || []}
-                        widthMm={templateData.cardWidthMm || 85.6}
-                        heightMm={templateData.cardHeightMm || 54.0}
-                        formData={selectedStudent.formData as Record<string, string>}
-                        serialNumber={selectedStudent.serialNumber}
-                        scale={3.5}
-                      />
-                    </div>
+                    {studentTemplate.hasBackSide && (
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 8, textAlign: 'center' }}>BACK</div>
+                        <IDCardPreview
+                          layout={studentTemplate.backLayout || []}
+                          widthMm={studentTemplate.cardWidthMm || 85.6}
+                          heightMm={studentTemplate.cardHeightMm || 54.0}
+                          formData={selectedStudent.formData as Record<string, string>}
+                          serialNumber={selectedStudent.serialNumber}
+                          scale={3.5}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
