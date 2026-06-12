@@ -48,3 +48,36 @@ export async function reportError(
     },
   })
 }
+
+export async function reportSlowOperation(input: {
+  name: string
+  durationMs: number
+  thresholdMs: number
+  schoolId?: string | null
+  userId?: string | null
+  metadata?: Record<string, any>
+}) {
+  if (input.durationMs < input.thresholdMs) return
+
+  const metadata = {
+    ...input.metadata,
+    durationMs: Math.round(input.durationMs),
+    thresholdMs: input.thresholdMs,
+  }
+
+  Sentry.addBreadcrumb({
+    category: "performance",
+    level: "warning",
+    message: `${input.name} took ${Math.round(input.durationMs)}ms`,
+    data: metadata,
+  })
+
+  await recordEvent({
+    type: "MAINTENANCE",
+    severity: "WARNING",
+    message: `Slow operation: ${input.name}`,
+    schoolId: input.schoolId || null,
+    userId: input.userId || null,
+    metadata,
+  })
+}

@@ -16,6 +16,58 @@ export async function GET(req: Request) {
   const severity = url.searchParams.get("severity") || undefined
   const type = url.searchParams.get("type") || undefined
   const schoolId = url.searchParams.get("schoolId") || undefined
+  const summary = url.searchParams.get("summary") === "1"
+
+  if (summary) {
+    const minutes = Math.min(Math.max(Number(url.searchParams.get("minutes") || 15), 1), 24 * 60)
+    const since = new Date(Date.now() - minutes * 60 * 1000)
+    const [submitFailures, uploadFailures, criticalEvents, slowOperations] = await Promise.all([
+      prisma.systemEvent.count({
+        where: { type: "SUBMIT_FAILED", createdAt: { gte: since }, ...(schoolId ? { schoolId } : {}) },
+      }),
+      prisma.systemEvent.count({
+        where: { type: "UPLOAD_FAILED", createdAt: { gte: since }, ...(schoolId ? { schoolId } : {}) },
+      }),
+      prisma.systemEvent.count({
+        where: { severity: "CRITICAL", createdAt: { gte: since }, ...(schoolId ? { schoolId } : {}) },
+      }),
+      prisma.systemEvent.count({
+        where: {
+          type: "MAINTENANCE",
+          severity: "WARNING",
+          message: { startsWith: "Slow operation:" },
+          createdAt: { gte: since },
+          ...(schoolId ? { schoolId } : {}),
+        },
+      }),
+    ])
+
+    const submitFailureRatePerHour = (submitFailures / minutes) * 60
+    const alerts = [
+      ...(submitFailures >= 5 || submitFailureRatePerHour >= 10
+        ? [{ level: "critical", message: `/submit/* failures elevated: ${submitFailures} in ${minutes} min` }]
+        : []),
+      ...(uploadFailures >= 5
+        ? [{ level: "warning", message: `Upload failures elevated: ${uploadFailures} in ${minutes} min` }]
+        : []),
+      ...(slowOperations >= 10
+        ? [{ level: "warning", message: `Slow operations elevated: ${slowOperations} in ${minutes} min` }]
+        : []),
+    ]
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        windowMinutes: minutes,
+        submitFailures,
+        uploadFailures,
+        criticalEvents,
+        slowOperations,
+        submitFailureRatePerHour: Number(submitFailureRatePerHour.toFixed(2)),
+        alerts,
+      },
+    })
+  }
 
   const events = await prisma.systemEvent.findMany({
     where: {

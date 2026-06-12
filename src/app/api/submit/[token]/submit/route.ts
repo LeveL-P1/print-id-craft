@@ -6,7 +6,7 @@ import { storageUpload, storagePublicUrl } from "@/lib/storage"
 import QRCode from "qrcode"
 import { computeAutoAssignedFields } from "@/lib/submit-fields"
 import { getNextStudentSerial } from "@/lib/student-serial"
-import { reportError } from "@/lib/observability"
+import { reportError, reportSlowOperation } from "@/lib/observability"
 import { checkDuplicateSubmission } from "@/lib/submit-fields"
 import { buildStudentIndexData } from "@/lib/student-index"
 
@@ -31,6 +31,9 @@ const publicSubmitSchema = z.object({
 })
 
 export async function POST(req: Request, { params }: { params: { token: string } }) {
+  const startedAt = Date.now()
+  let schoolId: string | null = null
+  let classId: string | null = null
   try {
     // Rate limiting
     const ip = getClientIp(req)
@@ -47,6 +50,8 @@ export async function POST(req: Request, { params }: { params: { token: string }
     if (!cls) {
       return NextResponse.json({ error: "Invalid link" }, { status: 404 })
     }
+    schoolId = cls.school.id
+    classId = cls.id
     if (!cls.isActive) {
       return NextResponse.json({ error: "This link is closed" }, { status: 410 })
     }
@@ -155,7 +160,8 @@ export async function POST(req: Request, { params }: { params: { token: string }
     await reportError(error, {
       type: "SUBMIT_FAILED",
       message: "Public class submit failed",
-      metadata: { token: params.token },
+      schoolId,
+      metadata: { token: params.token, classId, durationMs: Date.now() - startedAt },
     })
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.issues }, { status: 400 })
@@ -163,5 +169,13 @@ export async function POST(req: Request, { params }: { params: { token: string }
     // Return specific prisma error message if available
     const message = error?.message || (typeof error === 'string' ? error : "Internal Server Error")
     return NextResponse.json({ error: message }, { status: 500 })
+  } finally {
+    await reportSlowOperation({
+      name: "api.submit.class",
+      durationMs: Date.now() - startedAt,
+      thresholdMs: 4_000,
+      schoolId,
+      metadata: { token: params.token, classId },
+    })
   }
 }

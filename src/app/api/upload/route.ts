@@ -5,7 +5,7 @@ import { storageUpload, storagePublicUrl, ensureBucket } from "@/lib/storage"
 import { prisma } from "@/lib/prisma"
 import { randomUUID } from "crypto"
 import { durableRateLimit, getClientIp } from "@/lib/rate-limit"
-import { reportError } from "@/lib/observability"
+import { reportError, reportSlowOperation } from "@/lib/observability"
 import sharp from "sharp"
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
@@ -75,11 +75,21 @@ async function validateAndPrepareImage(
 }
 
 export async function POST(req: Request) {
+  const startedAt = Date.now()
+  let telemetry: {
+    folder?: string
+    schoolId?: string | null
+    fileType?: string
+    originalSize?: number
+    storedSize?: number
+    publicUpload?: boolean
+  } = {}
   try {
     const formData = await req.formData()
     const file = formData.get("file") as File | null
     const folder = (formData.get("folder") as string) || "uploads"
     const submitToken = (formData.get("submitToken") as string) || ""
+    telemetry.folder = folder
 
     if (!SAFE_FOLDER_RE.test(folder)) {
       return NextResponse.json({ error: "Invalid upload folder" }, { status: 400 })
@@ -88,12 +98,14 @@ export async function POST(req: Request) {
     // Auth check: session-based for staff, token-bound for public student photo uploads.
     const session = await getServerSession(authOptions)
     const isPublicUpload = folder.startsWith("students/")
+    telemetry.publicUpload = !session && isPublicUpload
     if (!session) {
       if (!isPublicUpload || !submitToken) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
       }
 
       const schoolId = folder.split("/")[1]
+      telemetry.schoolId = schoolId
       const classToken = await prisma.class.findFirst({
         where: {
           linkToken: submitToken,
@@ -131,6 +143,8 @@ export async function POST(req: Request) {
     if (!file) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 })
     }
+    telemetry.fileType = file.type
+    telemetry.originalSize = file.size
 
     const maxAllowedSize = !session && isPublicUpload ? PUBLIC_MAX_FILE_SIZE : MAX_FILE_SIZE
     if (file.size > maxAllowedSize) {
@@ -160,6 +174,7 @@ export async function POST(req: Request) {
       prepared = await validateAndPrepareImage(buffer, {
         normalizePublicStudentPhoto: !session && isPublicUpload,
       })
+      telemetry.storedSize = prepared.buffer.length
     } catch (imageError: any) {
       return NextResponse.json({ error: imageError?.message || "Invalid image" }, { status: 400 })
     }
@@ -193,6 +208,13 @@ export async function POST(req: Request) {
     }
 
     const url = storagePublicUrl(BUCKET_NAME, filePath)
+    await reportSlowOperation({
+      name: "api.upload",
+      durationMs: Date.now() - startedAt,
+      thresholdMs: telemetry.publicUpload ? 4_000 : 8_000,
+      schoolId: telemetry.schoolId || (folder.startsWith("students/") ? folder.split("/")[1] : null),
+      metadata: telemetry,
+    })
     return NextResponse.json({
       success: true,
       url,
@@ -203,6 +225,11 @@ export async function POST(req: Request) {
     await reportError(error, {
       type: "UPLOAD_FAILED",
       message: "Upload route failed",
+      schoolId: telemetry.schoolId || null,
+      metadata: {
+        ...telemetry,
+        durationMs: Date.now() - startedAt,
+      },
     })
     return NextResponse.json(
       { error: "Upload failed", detail: error?.message },
