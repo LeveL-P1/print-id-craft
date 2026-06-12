@@ -1,11 +1,11 @@
 "use client"
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { useSession, signOut } from "next-auth/react"
-import IDCardPreview from "@/components/IDCardPreview"
-import JpgCardPreview from "@/components/JpgCardPreview"
 import dynamic from "next/dynamic"
 import { toast } from "sonner"
 
+const IDCardPreview = dynamic(() => import("@/components/IDCardPreview"), { ssr: false })
+const JpgCardPreview = dynamic(() => import("@/components/JpgCardPreview"), { ssr: false })
 const JpgTemplateMapper = dynamic(() => import("@/components/JpgTemplateMapper"), { ssr: false })
 
 type StudentData = {

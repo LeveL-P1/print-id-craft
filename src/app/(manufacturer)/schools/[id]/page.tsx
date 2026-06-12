@@ -250,6 +250,9 @@ export default function SchoolDetailPage() {
   const [flagColors, setFlagColors] = useState<string[]>([])
   const [flagImages, setFlagImages] = useState<Record<string, string>>({})
   const [flagUploading, setFlagUploading] = useState<string>('')
+  const schoolTemplatesLoadedRef = useRef(false)
+  const templateLoadedRef = useRef(false)
+  const flagsLoadedRef = useRef(false)
 
   const fetchSchool = async () => {
     try {
@@ -263,7 +266,10 @@ export default function SchoolDetailPage() {
     try {
       const res = await fetch(`/api/schools/${schoolId}/templates`, { cache: 'no-store' })
       const data = await res.json()
-      if (data.success) setSchoolTemplates(data.data || [])
+      if (data.success) {
+        setSchoolTemplates(data.data || [])
+        schoolTemplatesLoadedRef.current = true
+      }
     } catch (err) { console.error(err) }
   }
 
@@ -354,7 +360,10 @@ export default function SchoolDetailPage() {
       // cached template (e.g. previous photoBorderRadius value).
       const res = await fetch(`/api/schools/${schoolId}/template`, { cache: 'no-store' })
       const data = await res.json()
-      if (data.success) setTemplateData(data.data)
+      if (data.success) {
+        setTemplateData(data.data)
+        templateLoadedRef.current = true
+      }
     } catch (err) { console.error(err) }
   }
 
@@ -367,12 +376,11 @@ export default function SchoolDetailPage() {
     setStudents([])
     setStudentTotal(0)
     filtersInitialized.current = false
-    // Load only essential data first (school info, classes, template) for fast initial render
-    Promise.all([fetchSchool(), fetchClasses(false), fetchTemplate(), fetchSchoolTemplates()]).finally(() => setLoading(false))
-    // Defer heavier data fetches slightly to avoid blocking initial render
-    setTimeout(() => { fetchStudents(1, { status: "", classId: "", search: "" }) }, 100)
-    // Always fetch flags on load so house-based flag images persist across refreshes
-    fetchFlags()
+    schoolTemplatesLoadedRef.current = false
+    templateLoadedRef.current = false
+    flagsLoadedRef.current = false
+    // Keep the first paint light; tab-specific data loads when that workflow opens.
+    Promise.all([fetchSchool(), fetchClasses(false)]).finally(() => setLoading(false))
   }, [schoolId])
 
   // Re-fetch students when filters/search change (but not on initial tab switch)
@@ -392,7 +400,20 @@ export default function SchoolDetailPage() {
   useEffect(() => {
     if (tab === "students" && students.length === 0 && !loading) {
       setTabLoading(true)
-      fetchStudents().finally(() => setTabLoading(false))
+      Promise.all([
+        fetchStudents(),
+        templateLoadedRef.current ? Promise.resolve() : fetchTemplate(),
+        schoolTemplatesLoadedRef.current ? Promise.resolve() : fetchSchoolTemplates(),
+        flagsLoadedRef.current ? Promise.resolve() : fetchFlags(),
+      ]).finally(() => setTabLoading(false))
+    }
+    if (tab === "classes" && !loading && !schoolTemplatesLoadedRef.current) {
+      fetchSchoolTemplates()
+    }
+    if (tab === "template" && !loading) {
+      if (!templateLoadedRef.current) fetchTemplate()
+      if (!schoolTemplatesLoadedRef.current) fetchSchoolTemplates()
+      if (!flagsLoadedRef.current) fetchFlags()
     }
     if (tab === "batches" && batches.length === 0 && !loading) {
       setTabLoading(true)
@@ -1355,6 +1376,7 @@ export default function SchoolDetailPage() {
           if (f.imageUrl) imgMap[f.color] = f.imageUrl
         }
         setFlagImages(imgMap)
+        flagsLoadedRef.current = true
       }
     } catch (err) { console.error(err) }
   }
