@@ -15,7 +15,7 @@ export async function removeBackgroundRembg(imageBuffer: Buffer): Promise<Buffer
   }
 
   const form = new FormData()
-  form.append("file", new Blob([imageBuffer], { type: "image/jpeg" }), "photo.jpg")
+  form.append("file", new Blob([new Uint8Array(imageBuffer)], { type: "image/jpeg" }), "photo.jpg")
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 90_000)

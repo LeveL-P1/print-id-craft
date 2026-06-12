@@ -691,7 +691,10 @@ export default function PhotoBgProcessor({
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button
               type="button"
-              onClick={onSkip}
+              onClick={() => {
+                setBgStatus(PHOTO_BG_STATUS.SKIPPED)
+                onSkip(PHOTO_BG_STATUS.SKIPPED)
+              }}
               className="btn btn-outline"
               style={{ flex: '1 1 140px', justifyContent: 'center', whiteSpace: 'normal', lineHeight: 1.35, minHeight: 44 }}
             >

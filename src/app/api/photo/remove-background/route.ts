@@ -86,7 +86,7 @@ export async function POST(req: Request) {
 
     if (returnFormat === "jpeg") {
       const jpeg = await compositePhotoBackground(transparent, bgColor)
-      return new NextResponse(jpeg, {
+      return new NextResponse(new Uint8Array(jpeg), {
         status: 200,
         headers: {
           "Content-Type": "image/jpeg",
@@ -95,7 +95,7 @@ export async function POST(req: Request) {
       })
     }
 
-    return new NextResponse(transparent, {
+    return new NextResponse(new Uint8Array(transparent), {
       status: 200,
       headers: {
         "Content-Type": "image/png",
