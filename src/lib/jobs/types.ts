@@ -34,6 +34,8 @@ export type ReprocessPhotosPayload = {
   classId?: string | null
   studentIds?: string[]
   maxStudents?: number
+  /** "skipped" (default) = only SKIPPED status; "all" = empty + SKIPPED */
+  mode?: "skipped" | "all"
 }
 
 export type EnqueueInput = {

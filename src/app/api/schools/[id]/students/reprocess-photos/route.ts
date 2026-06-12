@@ -17,21 +17,22 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
     const url = new URL(req.url)
     const classId = url.searchParams.get("classId")
+    const mode = url.searchParams.get("mode") || "skipped" // "skipped" or "all"
 
-    const where: {
-      schoolId: string
-      photoBgStatus: string
-      photoPath: { not: string }
-      classId?: string
-    } = {
+    const baseWhere: any = {
       schoolId: params.id,
-      photoBgStatus: PHOTO_BG_STATUS.SKIPPED,
       photoPath: { not: "" },
     }
-    if (classId) where.classId = classId
+    if (classId) baseWhere.classId = classId
 
-    const [skippedCount, rembgAvailable] = await Promise.all([
-      prisma.student.count({ where }),
+    // "all" mode: target photos with empty OR skipped bg status (anything not yet AI-processed)
+    // "skipped" mode (default): only photos explicitly marked SKIPPED
+    const skippedWhere = { ...baseWhere, photoBgStatus: PHOTO_BG_STATUS.SKIPPED }
+    const allUnprocessedWhere = { ...baseWhere, photoBgStatus: { in: ["", PHOTO_BG_STATUS.SKIPPED] } }
+    const filterWhere = mode === "all" ? allUnprocessedWhere : skippedWhere
+
+    const [filteredCount, rembgAvailable] = await Promise.all([
+      prisma.student.count({ where: filterWhere }),
       Promise.resolve(isRembgConfigured()),
     ])
 
@@ -53,7 +54,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     return NextResponse.json({
       success: true,
       data: {
-        skippedCount,
+        skippedCount: filteredCount,
         rembgAvailable,
         activeJob,
       },
@@ -100,12 +101,13 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const classId = typeof body.classId === "string" ? body.classId : null
     const studentIds = Array.isArray(body.studentIds) ? body.studentIds : undefined
     const maxStudents = typeof body.maxStudents === "number" ? body.maxStudents : 5000
+    const mode = typeof body.mode === "string" ? body.mode : "skipped"
 
     const job = await enqueueJob({
       type: "REPROCESS_PHOTOS",
       schoolId: params.id,
       createdById: session.user?.id || null,
-      payload: { classId, studentIds, maxStudents },
+      payload: { classId, studentIds, maxStudents, mode },
     })
 
     const origin = new URL(req.url).origin

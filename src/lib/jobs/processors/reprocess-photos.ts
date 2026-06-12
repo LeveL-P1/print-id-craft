@@ -31,16 +31,16 @@ export async function processReprocessPhotos(
   })
   const bgColor = template?.photoBgColor || "#FFFFFF"
 
-  const where: {
-    schoolId: string
-    photoBgStatus: string
-    photoPath: { not: string }
-    classId?: string
-    id?: { in: string[] }
-  } = {
+  const where: any = {
     schoolId,
-    photoBgStatus: PHOTO_BG_STATUS.SKIPPED,
     photoPath: { not: "" },
+  }
+  // "all" mode: target photos with empty OR skipped bg status
+  // "skipped" mode (default): only photos explicitly marked SKIPPED
+  if (payload.mode === "all") {
+    where.photoBgStatus = { in: ["", PHOTO_BG_STATUS.SKIPPED] }
+  } else {
+    where.photoBgStatus = PHOTO_BG_STATUS.SKIPPED
   }
   if (payload.classId) where.classId = payload.classId
   if (payload.studentIds?.length) where.id = { in: payload.studentIds }

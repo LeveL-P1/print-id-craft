@@ -211,6 +211,7 @@ export default function SchoolDetailPage() {
 
   // Batch reprocess skipped photo backgrounds
   const [reprocessOpen, setReprocessOpen] = useState(false)
+  const [reprocessMode, setReprocessMode] = useState<"skipped" | "all">("skipped")
   const [reprocessLoading, setReprocessLoading] = useState(false)
   const [reprocessStarting, setReprocessStarting] = useState(false)
   const [reprocessInfo, setReprocessInfo] = useState<{
@@ -1229,11 +1230,13 @@ export default function SchoolDetailPage() {
     setAllStudentsList([])
   }
 
-  const fetchReprocessInfo = async () => {
+  const fetchReprocessInfo = async (mode: "skipped" | "all" = reprocessMode) => {
     setReprocessLoading(true)
     try {
-      const qs = classFilter ? `?classId=${encodeURIComponent(classFilter)}` : ""
-      const res = await fetch(`/api/schools/${schoolId}/students/reprocess-photos${qs}`)
+      const params = new URLSearchParams()
+      if (classFilter) params.set("classId", classFilter)
+      if (mode === "all") params.set("mode", "all")
+      const res = await fetch(`/api/schools/${schoolId}/students/reprocess-photos?${params.toString()}`)
       const data = await res.json()
       if (data.success) {
         setReprocessInfo(data.data)
@@ -1247,9 +1250,10 @@ export default function SchoolDetailPage() {
     }
   }
 
-  const openReprocessModal = async () => {
+  const openReprocessModal = async (mode: "skipped" | "all") => {
+    setReprocessMode(mode)
     setReprocessOpen(true)
-    await fetchReprocessInfo()
+    await fetchReprocessInfo(mode)
   }
 
   const startReprocessJob = async () => {
@@ -1261,6 +1265,7 @@ export default function SchoolDetailPage() {
         body: JSON.stringify({
           classId: classFilter || null,
           maxStudents: 5000,
+          mode: reprocessMode,
         }),
       })
       const data = await res.json()
@@ -1268,8 +1273,12 @@ export default function SchoolDetailPage() {
         toast.error(data.error || "Failed to start reprocess job")
         return
       }
-      toast.success("Background reprocess started — this may take a while for large schools.")
-      await fetchReprocessInfo()
+      toast.success(
+        reprocessMode === "all"
+          ? "Background AI background processing started for all unprocessed photos — this may take a while."
+          : "Background reprocess started for skipped photos — this may take a while for large schools."
+      )
+      await fetchReprocessInfo(reprocessMode)
     } catch {
       toast.error("Failed to start reprocess job")
     } finally {
@@ -2194,9 +2203,13 @@ export default function SchoolDetailPage() {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
                 Bulk Upload Photos
               </button>
-              <button className="btn btn-outline" onClick={openReprocessModal} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#6366f1', color: '#4f46e5' }}>
+              <button className="btn btn-outline" onClick={() => openReprocessModal("skipped")} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#6366f1', color: '#4f46e5' }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
                 Reprocess Skipped Photos
+              </button>
+              <button className="btn btn-outline" onClick={() => openReprocessModal("all")} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#d946ef', color: '#c026d3' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="m5 3 1 2.5L8.5 6 6 7 5 9.5 4 7 1.5 6 4 5.5Z"/><path d="m19 17 1 2.5 2.5.5-2.5 1-1 2.5-1-2.5-2.5-1 2.5-1Z"/></svg>
+                Apply AI Background
               </button>
               <button className="btn btn-outline" onClick={openAddStudent} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#22c55e', color: '#16a34a' }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
@@ -3177,9 +3190,13 @@ export default function SchoolDetailPage() {
               <div style={{ background: 'white', borderRadius: 20, maxWidth: 560, width: '100%', boxShadow: '0 25px 50px rgba(0,0,0,0.25)' }} onClick={e => e.stopPropagation()}>
                 <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
-                    <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>🎨 Reprocess Skipped Photos</h2>
+                    <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>
+                      {reprocessMode === "all" ? "🤖 Apply AI Background" : "🎨 Reprocess Skipped Photos"}
+                    </h2>
                     <p style={{ fontSize: 13, color: '#64748b' }}>
-                      Re-run background removal on photos where parents skipped AI cleanup.
+                      {reprocessMode === "all"
+                        ? "Run background removal on all student photos that haven't been AI-processed yet."
+                        : "Re-run background removal on photos where parents skipped AI cleanup."}
                     </p>
                   </div>
                   <button onClick={() => setReprocessOpen(false)} style={{ width: 32, height: 32, borderRadius: 8, border: 'none', background: '#f1f5f9', cursor: 'pointer', fontSize: 16 }}>✕</button>
@@ -3192,7 +3209,10 @@ export default function SchoolDetailPage() {
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
                         <div style={{ padding: 16, background: '#eef2ff', borderRadius: 12, textAlign: 'center' }}>
                           <div style={{ fontSize: 28, fontWeight: 700, color: '#4f46e5' }}>{reprocessInfo.skippedCount}</div>
-                          <div style={{ fontSize: 12, color: '#6366f1' }}>Skipped photos{classFilter ? ' (filtered class)' : ''}</div>
+                          <div style={{ fontSize: 12, color: '#6366f1' }}>
+                            {reprocessMode === "all" ? "Unprocessed photos" : "Skipped photos"}
+                            {classFilter ? ' (filtered class)' : ''}
+                          </div>
                         </div>
                         <div style={{ padding: 16, background: reprocessInfo.rembgAvailable ? '#f0fdf4' : '#fef2f2', borderRadius: 12, textAlign: 'center' }}>
                           <div style={{ fontSize: 14, fontWeight: 700, color: reprocessInfo.rembgAvailable ? '#16a34a' : '#dc2626' }}>
@@ -3215,7 +3235,7 @@ export default function SchoolDetailPage() {
                         </div>
                       )}
                       <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-                        <button className="btn btn-outline" onClick={fetchReprocessInfo} disabled={reprocessLoading}>Refresh</button>
+                        <button className="btn btn-outline" onClick={() => fetchReprocessInfo(reprocessMode)} disabled={reprocessLoading}>Refresh</button>
                         <button
                           className="btn btn-primary"
                           onClick={startReprocessJob}
@@ -3227,7 +3247,7 @@ export default function SchoolDetailPage() {
                           }
                           style={{ background: 'linear-gradient(135deg, #6366f1, #4f46e5)' }}
                         >
-                          {reprocessStarting ? 'Starting…' : `Reprocess ${reprocessInfo.skippedCount} Photos`}
+                          {reprocessStarting ? 'Starting…' : reprocessMode === "all" ? `Process ${reprocessInfo.skippedCount} Photos` : `Reprocess ${reprocessInfo.skippedCount} Photos`}
                         </button>
                       </div>
                     </>

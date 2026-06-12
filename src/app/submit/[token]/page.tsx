@@ -13,6 +13,7 @@ import { PHOTO_BG_STATUS, type PhotoBgStatus } from "@/lib/photo-bg-status"
 
 const JpgCardPreview = dynamic(() => import("@/components/JpgCardPreview"), { ssr: false })
 const PhotoBgProcessor = dynamic(() => import("@/components/PhotoBgProcessor"), { ssr: false })
+const PhotoCropper = dynamic(() => import("@/components/PhotoCropper"), { ssr: false })
 
 type FieldConfig = { key: string; label: string; type: string; required: boolean; role?: string }
 type TemplateElement = { 
@@ -257,7 +258,7 @@ export default function SubmitPage() {
   const params = useParams()
   const token = params.token as string
 
-  const [step, setStep] = useState<"loading" | "error" | "form" | "photo" | "bgprocess" | "review" | "success">("loading")
+  const [step, setStep] = useState<"loading" | "error" | "form" | "photo" | "crop" | "bgprocess" | "review" | "success">("loading")
   const [errorMsg, setErrorMsg] = useState("")
   const [config, setConfig] = useState<FormConfig | null>(null)
   const [formData, setFormData] = useState<Record<string, string>>({})
@@ -1418,13 +1419,8 @@ export default function SubmitPage() {
                     setPhotoVerified(true)
                     const skipAi = !!bgQualityGood
                     setBgSkippable(skipAi)
-                    if (skipAi) {
-                      setPhotoBgStatus(PHOTO_BG_STATUS.PLAIN)
-                      setCroppedPhoto(previewUrl)
-                      setStep("review")
-                    } else {
-                      setStep("bgprocess")
-                    }
+                    // Always go to crop step first — user can skip if framing is fine
+                    setStep("crop")
                   }}
                   schoolBgColor={config?.photoBgColor}
                 />
@@ -1464,17 +1460,9 @@ export default function SubmitPage() {
                     type="button"
                     className="btn btn-primary btn-fluid"
                     style={{ flex: 1, justifyContent: 'center' }}
-                    onClick={() => {
-                      if (bgSkippable) {
-                        setPhotoBgStatus(PHOTO_BG_STATUS.PLAIN)
-                        setCroppedPhoto(photoPreview)
-                        setStep("review")
-                      } else {
-                        setStep("bgprocess")
-                      }
-                    }}
+                    onClick={() => setStep("crop")}
                   >
-                    {bgSkippable ? "Continue to Review" : "Apply School Background"}
+                    Crop & Continue
                   </button>
                 </div>
               )}
@@ -1490,6 +1478,55 @@ export default function SubmitPage() {
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* CROP STEP */}
+          {step === "crop" && photoPreview && (
+            <div>
+              <PhotoCropper
+                photoUrl={photoPreview}
+                aspectRatio={3 / 4}
+                onCropped={(croppedDataUrl) => {
+                  setPhotoPreview(croppedDataUrl)
+                  setCroppedPhoto(croppedDataUrl)
+                  if (bgSkippable) {
+                    setPhotoBgStatus(PHOTO_BG_STATUS.PLAIN)
+                    setStep("review")
+                  } else {
+                    setStep("bgprocess")
+                  }
+                }}
+                onCancel={() => {
+                  // Skip crop — use original photo
+                  if (bgSkippable) {
+                    setPhotoBgStatus(PHOTO_BG_STATUS.PLAIN)
+                    setCroppedPhoto(photoPreview)
+                    setStep("review")
+                  } else {
+                    setStep("bgprocess")
+                  }
+                }}
+              />
+
+              <div style={{ marginTop: 16 }}>
+                <button
+                  type="button"
+                  className="btn btn-outline btn-fluid"
+                  style={{ width: '100%', justifyContent: 'center' }}
+                  onClick={() => {
+                    setPhotoPreview("")
+                    setPhotoFile(null)
+                    setCroppedPhoto("")
+                    setPhotoVerified(false)
+                    setBgSkippable(false)
+                    setPhotoBgStatus("")
+                    setStep("photo")
+                  }}
+                >
+                  ← Choose a different photo
+                </button>
+              </div>
             </div>
           )}
 

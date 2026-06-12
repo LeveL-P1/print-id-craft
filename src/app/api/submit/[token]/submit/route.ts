@@ -71,17 +71,19 @@ export async function POST(req: Request, { params }: { params: { token: string }
       }, { status: 409 })
     }
 
+    // Pre-compute auto-assigned fields OUTSIDE the transaction to avoid
+    // hitting Prisma's default 5 000 ms interactive-transaction timeout.
+    // This is a read-only lookup (findMany take:200) that doesn't need the
+    // serialisation guarantee of the advisory-lock transaction.
+    const autoFields = await computeAutoAssignedFields(cls.school.id)
+
     // Create student with retry for serial number collisions under high concurrency
     let student: any = null
     let retries = 3
     while (retries > 0) {
       try {
-        // Auto-assigned keys (NO, PHOTO NO.) are computed from existing
-        // data per school so the parent never has to type them. They
-        // override anything the parent may have submitted for these keys.
         student = await prisma.$transaction(async (tx) => {
           const serialNumber = await getNextStudentSerial(tx, cls.school.id, cls.school.name)
-          const autoFields = await computeAutoAssignedFields(cls.school.id)
           const photoPath = validated.photoPath?.startsWith(`students/${cls.school.id}/`)
             ? validated.photoPath
             : ""
@@ -104,7 +106,7 @@ export async function POST(req: Request, { params }: { params: { token: string }
               status: "SUBMITTED",
             },
           })
-        })
+        }, { timeout: 15000 })
 
         break // Success — exit retry loop
       } catch (err: any) {

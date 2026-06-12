@@ -83,14 +83,16 @@ export async function POST(req: Request, { params }: { params: { token: string }
       }, { status: 409 })
     }
 
+    // Pre-compute auto-assigned fields OUTSIDE the transaction to avoid
+    // hitting Prisma's default 5 000 ms interactive-transaction timeout.
+    const autoFields = await computeAutoAssignedFields(school.id)
+
     let student: any = null
     let retries = 3
     while (retries > 0) {
       try {
-        // Auto-assigned keys (NO, PHOTO NO.) — same logic as per-class endpoint.
         student = await prisma.$transaction(async (tx) => {
           const serialNumber = await getNextStudentSerial(tx, school.id, school.name)
-          const autoFields = await computeAutoAssignedFields(school.id)
           const photoPath = validated.photoPath?.startsWith(`students/${school.id}/`)
             ? validated.photoPath
             : ""
@@ -109,7 +111,7 @@ export async function POST(req: Request, { params }: { params: { token: string }
               status: "SUBMITTED",
             },
           })
-        })
+        }, { timeout: 15000 })
         break
       } catch (err: any) {
         if (err?.code === "P2002" && retries > 1) {
