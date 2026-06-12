@@ -1,7 +1,6 @@
 "use client"
 import { useState, useEffect, useCallback } from "react"
 import { useParams } from "next/navigation"
-import SharedIDCardPreview from "@/components/IDCardPreview"
 import dynamic from "next/dynamic"
 import PhotoVerifier from "@/components/PhotoVerifier"
 import {
@@ -10,6 +9,7 @@ import {
   type FieldRole,
 } from "@/lib/field-resolver"
 import { PHOTO_BG_STATUS, type PhotoBgStatus } from "@/lib/photo-bg-status"
+import { prepareStudentPhotoForUpload } from "@/lib/client-photo-upload"
 
 const JpgCardPreview = dynamic(() => import("@/components/JpgCardPreview"), { ssr: false })
 const PhotoBgProcessor = dynamic(() => import("@/components/PhotoBgProcessor"), { ssr: false })
@@ -425,14 +425,6 @@ export default function SubmitPage() {
       .catch(() => { setErrorMsg("Failed to load form"); setStep("error") })
   }, [token])
 
-  // Pre-warm the in-browser AI model while parents fill in the Details form.
-  useEffect(() => {
-    if (step !== "form" || !config) return
-    import("@/lib/photo-background").then(({ preloadBgRemovalModel }) => {
-      preloadBgRemovalModel().catch(() => { /* offline or unsupported */ })
-    })
-  }, [step, config])
-
   useEffect(() => {
     if (!config || step === "loading" || step === "error" || step === "success") return
     const name = resolveFieldValue(formData, "name")
@@ -512,25 +504,32 @@ export default function SubmitPage() {
       if (croppedPhoto) {
         try {
           setUploadProgress(10)
-          const blob = await fetch(croppedPhoto).then(r => r.blob())
+          const uploadFile = await prepareStudentPhotoForUpload(croppedPhoto)
           setUploadProgress(25)
           const fd = new FormData()
-          fd.append("file", new File([blob], `photo-${Date.now()}.jpg`, { type: "image/jpeg" }))
+          fd.append("file", uploadFile)
           fd.append("folder", `students/${config.schoolId}`)
           fd.append("submitToken", token)
           setUploadProgress(30)
-          const uploadRes = await fetch("/api/upload", { method: "POST", body: fd })
+          let uploadRes = await fetch("/api/upload", { method: "POST", body: fd })
+          if (!uploadRes.ok && uploadRes.status >= 500) {
+            uploadRes = await fetch("/api/upload", { method: "POST", body: fd })
+          }
           const uploadData = await uploadRes.json()
           setUploadProgress(70)
           if (uploadRes.ok && uploadData.success) {
             photoUrl = uploadData.url
             photoPath = uploadData.path || ""
           } else {
-            console.error("Photo upload error:", uploadData.error)
+            throw new Error(uploadData.error || "Photo upload failed")
           }
           setUploadProgress(80)
         } catch (photoErr) {
           console.error("Photo upload failed:", photoErr)
+          setAlertMsg("Photo upload failed. Please check your internet and try again.")
+          setSubmitting(false)
+          setUploadProgress(0)
+          return
         }
       } else {
         setUploadProgress(80)

@@ -8,6 +8,7 @@ import { durableRateLimit, getClientIp } from "@/lib/rate-limit"
 import { reportError } from "@/lib/observability"
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
+const PUBLIC_MAX_FILE_SIZE = 2.5 * 1024 * 1024 // parent submit photos should already be compressed client-side
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"]
 const BUCKET_NAME = "student-photos"
 const SAFE_FOLDER_RE = /^(students\/[a-zA-Z0-9_-]+|logos|templates|flags\/[a-zA-Z0-9_-]+)$/
@@ -78,9 +79,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 })
     }
 
-    if (file.size > MAX_FILE_SIZE) {
+    const maxAllowedSize = !session && isPublicUpload ? PUBLIC_MAX_FILE_SIZE : MAX_FILE_SIZE
+    if (file.size > maxAllowedSize) {
       return NextResponse.json(
-        { error: `File too large. Max ${MAX_FILE_SIZE / 1024 / 1024}MB` },
+        { error: `File too large. Max ${maxAllowedSize / 1024 / 1024}MB` },
         { status: 400 }
       )
     }
