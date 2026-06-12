@@ -34,13 +34,8 @@ Restart the Next.js app after changing `.env`.
 
 1. Create a Railway account.
 2. Create a new Railway project from the GitHub repo.
-3. Set the Railway service root directory to:
-
-```text
-docker/rembg
-```
-
-4. Railway should detect the `Dockerfile` automatically.
+3. Leave the Railway service root directory empty.
+4. Railway will use the root `railway.json`, which points to the root `Dockerfile`.
 5. Generate a public domain for the service.
 6. Open:
 

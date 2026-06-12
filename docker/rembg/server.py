@@ -1,15 +1,22 @@
 """Self-hosted rembg HTTP service for WiseMelon."""
 
 import os
+from functools import lru_cache
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import Response
-from rembg import remove
+from rembg import new_session, remove
 
 
 MAX_FILE_SIZE = 10 * 1024 * 1024
+MODEL_NAME = os.environ.get("REMBG_MODEL", "u2net_human_seg")
 
 app = FastAPI(title="WiseMelon rembg")
+
+
+@lru_cache(maxsize=1)
+def get_session():
+    return new_session(MODEL_NAME)
 
 
 @app.get("/")
@@ -19,7 +26,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "model": MODEL_NAME}
 
 
 @app.post("/api/remove")
@@ -30,7 +37,7 @@ async def remove_bg(file: UploadFile = File(...)):
     if len(data) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="File too large")
 
-    output = remove(data)
+    output = remove(data, session=get_session())
     return Response(content=output, media_type="image/png")
 
 
