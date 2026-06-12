@@ -641,6 +641,22 @@ export default function JpgTemplateMapper({
   }
 
   const lastMoveTimeRef = useRef(0)
+  const dragFrameRef = useRef<number | null>(null)
+  const pendingDragUpdateRef = useRef<{ id: string; updates: Partial<FieldMapping> } | null>(null)
+
+  const queueDragMappingUpdate = useCallback((id: string, updates: Partial<FieldMapping>) => {
+    pendingDragUpdateRef.current = { id, updates }
+    if (dragFrameRef.current !== null) return
+    dragFrameRef.current = window.requestAnimationFrame(() => {
+      const pending = pendingDragUpdateRef.current
+      pendingDragUpdateRef.current = null
+      dragFrameRef.current = null
+      if (!pending) return
+      setMappings((prev) =>
+        prev.map((m) => (m.id === pending.id ? { ...m, ...pending.updates } : m))
+      )
+    })
+  }, [])
 
   const handleMouseMove = useCallback(
     (e: MouseEvent) => {
@@ -655,7 +671,7 @@ export default function JpgTemplateMapper({
       const dy = ((e.clientY - dragState.startY) / rect.height) * 100
 
       if (dragState.mode === "move") {
-        updateMapping(dragState.id, {
+        queueDragMappingUpdate(dragState.id, {
           x: Math.max(0, Math.min(95, dragState.origX + dx)),
           y: Math.max(0, Math.min(95, dragState.origY + dy)),
         })
@@ -683,7 +699,7 @@ export default function JpgTemplateMapper({
             newH = dragState.origH - actualDy
         }
 
-        updateMapping(dragState.id, {
+        queueDragMappingUpdate(dragState.id, {
           x: snapValue(newX),
           y: snapValue(newY),
           width: snapValue(newW),
@@ -691,11 +707,22 @@ export default function JpgTemplateMapper({
         })
       }
     },
-    [dragState, mappings, snapValue]
+    [dragState, mappings, queueDragMappingUpdate, snapValue]
   )
 
   const handleMouseUp = useCallback(() => {
     if (dragState) {
+      if (dragFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragFrameRef.current)
+        dragFrameRef.current = null
+      }
+      const pending = pendingDragUpdateRef.current
+      if (pending) {
+        setMappings((prev) =>
+          prev.map((m) => (m.id === pending.id ? { ...m, ...pending.updates } : m))
+        )
+        pendingDragUpdateRef.current = null
+      }
       // Save undo state when drag ends
       pushToHistory(mappings.map(m => {
         if (m.id === dragState.id) {
@@ -791,6 +818,14 @@ export default function JpgTemplateMapper({
       }
     }
   }, [dragState, handleMouseMove, handleMouseUp])
+
+  useEffect(() => {
+    return () => {
+      if (dragFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragFrameRef.current)
+      }
+    }
+  }, [])
 
   const handleSave = async () => {
     if (!imageUrl) return

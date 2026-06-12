@@ -190,19 +190,20 @@ export function recolorPlainBackgroundOnCanvas(
   return true
 }
 
-export async function loadImageToCanvas(url: string): Promise<{
+export async function loadImageToCanvas(url: string, maxDim = 1024): Promise<{
   canvas: HTMLCanvasElement
   ctx: CanvasRenderingContext2D
 }> {
   return new Promise((resolve, reject) => {
     const img = new Image()
     img.onload = () => {
+      const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight))
       const canvas = document.createElement("canvas")
-      canvas.width = img.naturalWidth
-      canvas.height = img.naturalHeight
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale))
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
       const ctx = canvas.getContext("2d")
       if (!ctx) { reject(new Error("Canvas unavailable")); return }
-      ctx.drawImage(img, 0, 0)
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
       resolve({ canvas, ctx })
     }
     img.onerror = () => reject(new Error("Image load failed"))
@@ -303,10 +304,15 @@ export async function removeBackgroundViaServer(
 export async function downscaleBlob(blob: Blob, maxDim = 768): Promise<Blob> {
   return new Promise((resolve) => {
     const img = new Image()
+    const url = URL.createObjectURL(blob)
+    const finish = (result: Blob) => {
+      URL.revokeObjectURL(url)
+      resolve(result)
+    }
     img.onload = () => {
       const { naturalWidth: w, naturalHeight: h } = img
       if (w <= maxDim && h <= maxDim) {
-        resolve(blob)
+        finish(blob)
         return
       }
       const scale = maxDim / Math.max(w, h)
@@ -314,15 +320,11 @@ export async function downscaleBlob(blob: Blob, maxDim = 768): Promise<Blob> {
       canvas.width = Math.round(w * scale)
       canvas.height = Math.round(h * scale)
       const ctx = canvas.getContext("2d")
-      if (!ctx) { resolve(blob); return }
+      if (!ctx) { finish(blob); return }
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-      canvas.toBlob(
-        (result) => resolve(result || blob),
-        "image/jpeg",
-        0.9
-      )
+      canvas.toBlob((result) => finish(result || blob), "image/jpeg", 0.88)
     }
-    img.onerror = () => resolve(blob)
-    img.src = URL.createObjectURL(blob)
+    img.onerror = () => finish(blob)
+    img.src = url
   })
 }

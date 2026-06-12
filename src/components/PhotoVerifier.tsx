@@ -23,6 +23,13 @@ type Props = {
 
 type CameraPermissionState = "prompt" | "granted" | "denied" | "unsupported" | "checking"
 
+const CAMERA_MAX_WIDTH = 720
+const CAMERA_MAX_HEIGHT = 960
+const PHOTO_OUTPUT_MAX_WIDTH = 720
+const PHOTO_OUTPUT_MIN_WIDTH = 600
+const PHOTO_ANALYSIS_MAX_DIM = 640
+const PHOTO_JPEG_QUALITY = 0.88
+
 export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, schoolBgColor }: Props) {
   const [preview, setPreview] = useState<string>(currentPhotoUrl || "")
   const [result, setResult] = useState<PhotoVerificationResult | null>(null)
@@ -65,18 +72,13 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
           setCameraPermission(permResult.state as CameraPermissionState)
         })
 
-        // If permission state is "prompt", proactively request it
-        if (permResult.state === "prompt") {
-          requestCameraPermission()
-        }
         return
       }
     } catch {
       // Permissions API not available for camera in some browsers
     }
 
-    // Fallback: proactively request camera to trigger browser permission dialog
-    requestCameraPermission()
+    setCameraPermission("prompt")
   }
 
   const requestCameraPermission = async () => {
@@ -141,7 +143,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
       try {
         // Use current facingMode (user = front, environment = back)
         s = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode, width: { ideal: 720 }, height: { ideal: 960 } },
+          video: { facingMode, width: { ideal: CAMERA_MAX_WIDTH }, height: { ideal: CAMERA_MAX_HEIGHT } },
           audio: false
         })
       } catch {
@@ -178,8 +180,11 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
     if (!videoRef.current) return
     const video = videoRef.current
     const canvas = document.createElement("canvas")
-    const w = video.videoWidth || 720
-    const h = video.videoHeight || 960
+    const srcW = video.videoWidth || CAMERA_MAX_WIDTH
+    const srcH = video.videoHeight || CAMERA_MAX_HEIGHT
+    const scale = Math.min(1, CAMERA_MAX_WIDTH / srcW, CAMERA_MAX_HEIGHT / srcH)
+    const w = Math.max(1, Math.round(srcW * scale))
+    const h = Math.max(1, Math.round(srcH * scale))
     canvas.width = w
     canvas.height = h
     const ctx = canvas.getContext("2d")
@@ -189,7 +194,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         ctx.translate(canvas.width, 0)
         ctx.scale(-1, 1)
       }
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+      ctx.drawImage(video, 0, 0, srcW, srcH, 0, 0, canvas.width, canvas.height)
 
       canvas.toBlob((blob) => {
         if (blob) {
@@ -197,7 +202,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
           stopCamera()
           handleFile(file)
         }
-      }, "image/jpeg", 0.95)
+      }, "image/jpeg", PHOTO_JPEG_QUALITY)
     }
   }
 
@@ -213,7 +218,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
 
     try {
       const s = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: newMode, width: { ideal: 720 }, height: { ideal: 960 } },
+        video: { facingMode: newMode, width: { ideal: CAMERA_MAX_WIDTH }, height: { ideal: CAMERA_MAX_HEIGHT } },
         audio: false
       })
       setStream(s)
@@ -254,9 +259,12 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         const ctx = canvas.getContext("2d")
         if (!ctx) { URL.revokeObjectURL(url); resolve(getFailResult()); return }
 
-        canvas.width = img.width
-        canvas.height = img.height
-        ctx.drawImage(img, 0, 0)
+        const analysisScale = Math.min(1, PHOTO_ANALYSIS_MAX_DIM / Math.max(img.width, img.height))
+        const analysisW = Math.max(1, Math.round(img.width * analysisScale))
+        const analysisH = Math.max(1, Math.round(img.height * analysisScale))
+        canvas.width = analysisW
+        canvas.height = analysisH
+        ctx.drawImage(img, 0, 0, analysisW, analysisH)
 
         const checks: CheckResult[] = []
 
@@ -311,7 +319,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         })
 
         // ── 6. Brightness Check ──
-        const brightness = analyzeBrightness(ctx, img.width, img.height)
+        const brightness = analyzeBrightness(ctx, analysisW, analysisH)
         const tooDark = brightness.avg < 50
         const tooBright = brightness.avg > 210
         checks.push({
@@ -337,7 +345,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         // denoised, which suppresses the high-frequency content the
         // Laplacian variance measures. We still flag genuinely smeared
         // images but no longer reject normal phone selfies.
-        const blurScore = detectBlur(ctx, img.width, img.height)
+        const blurScore = detectBlur(ctx, analysisW, analysisH)
         checks.push({
           passed: blurScore > 8,
           severity: "warning",
@@ -354,7 +362,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         // The decision is exposed via a custom property `_bgQualityGood` on
         // the check object so handleFile() can read it without re-running the
         // analysis.
-        const bg = analyzeBackgroundUniformity(ctx, img.width, img.height)
+        const bg = analyzeBackgroundUniformity(ctx, analysisW, analysisH)
         const target = parseColor(schoolBgColor)
         const detectedColorDistance = target ? Math.round(colorDistance(bg.dominantRgb, target)) : null
         // Uniform enough to call "plain": score >= 75 AND dominant bin > 60%.
@@ -1105,13 +1113,14 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
           }
         }
 
-        canvas.width = Math.max(600, Math.round(sw))
+        canvas.width = Math.min(PHOTO_OUTPUT_MAX_WIDTH, Math.max(PHOTO_OUTPUT_MIN_WIDTH, Math.round(sw)))
         canvas.height = Math.round(canvas.width / targetRatio)
 
         // Auto white-balance + brightness + contrast correction
         const tempCanvas = document.createElement("canvas")
-        tempCanvas.width = Math.round(sw)
-        tempCanvas.height = Math.round(sh)
+        const tempScale = Math.min(1, PHOTO_ANALYSIS_MAX_DIM / Math.max(sw, sh))
+        tempCanvas.width = Math.max(1, Math.round(sw * tempScale))
+        tempCanvas.height = Math.max(1, Math.round(sh * tempScale))
         const tempCtx = tempCanvas.getContext("2d")
         if (tempCtx) {
           tempCtx.drawImage(img, sx, sy, sw, sh, 0, 0, tempCanvas.width, tempCanvas.height)
@@ -1145,7 +1154,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
 
         canvas.toBlob((blob) => {
           resolve(blob ? new File([blob], "adjusted.jpg", { type: "image/jpeg" }) : file)
-        }, "image/jpeg", 0.95)
+        }, "image/jpeg", PHOTO_JPEG_QUALITY)
       }
       img.onerror = () => { URL.revokeObjectURL(url); resolve(file) }
       img.src = url

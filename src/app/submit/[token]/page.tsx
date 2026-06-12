@@ -299,9 +299,8 @@ export default function SubmitPage() {
   // localStorage keyed by the class's linkToken so different classes never
   // collide. The draft is cleared on successful submit.
   //
-  // We deliberately use localStorage instead of cookies: cookies are sent
-  // with every request (wasted bandwidth, especially with a base64 photo)
-  // and have a ~4 KB size limit, far too small for the photo data URL.
+  // We persist text/state only. Large base64 photo strings can exceed mobile
+  // storage quotas and block the main thread while the parent is filling data.
   // ───────────────────────────────────────────────────────────────────────────
   const DRAFT_KEY = `submit-draft:${token}`
   const SUBMITTED_KEY = `submit-done:${token}`
@@ -337,8 +336,6 @@ export default function SubmitPage() {
       if (!raw) { setDraftRestored(true); return }
       const draft = JSON.parse(raw) as {
         formData?: Record<string, string>
-        photoPreview?: string
-        croppedPhoto?: string
         bgSkippable?: boolean
         photoVerified?: boolean
         step?: typeof step
@@ -352,13 +349,10 @@ export default function SubmitPage() {
         return
       }
       if (draft.formData) setFormData(draft.formData)
-      if (draft.photoPreview) setPhotoPreview(draft.photoPreview)
-      if (draft.croppedPhoto) setCroppedPhoto(draft.croppedPhoto)
       if (draft.bgSkippable) setBgSkippable(true)
       if (draft.photoVerified) setPhotoVerified(true)
       const hasAnyData =
-        (draft.formData && Object.keys(draft.formData).some(k => k !== "class" && (draft.formData?.[k] || "").trim() !== "")) ||
-        !!draft.photoPreview
+        !!(draft.formData && Object.keys(draft.formData).some(k => k !== "class" && (draft.formData?.[k] || "").trim() !== ""))
       if (hasAnyData) setDraftBanner(true)
       if (draft.formData) {
         checkSubmissionStatus(draft.formData)
@@ -381,8 +375,6 @@ export default function SubmitPage() {
     if (step === "loading" || step === "error" || step === "success") return
     const draft = {
       formData,
-      photoPreview,
-      croppedPhoto,
       bgSkippable,
       photoVerified,
       step,
@@ -396,7 +388,7 @@ export default function SubmitPage() {
       } catch { /* give up silently — draft just won't survive this session */ }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formData, photoPreview, croppedPhoto, bgSkippable, photoVerified, step, draftRestored])
+  }, [formData, bgSkippable, photoVerified, step, draftRestored])
 
   const clearDraft = () => {
     if (typeof window === "undefined") return
