@@ -513,7 +513,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         const criticalFails = checks.filter(c => !c.passed && c.severity === "critical")
         const warningFails = checks.filter(c => !c.passed && c.severity === "warning")
         const valid = criticalFails.length === 0 && warningFails.length === 0
-        const canOverride = criticalFails.length === 0
+        const canOverride = true
 
         resolve({ valid, canOverride, checks })
       }
@@ -1504,7 +1504,21 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
                           ⚠️ Minor issues detected — they may affect ID card quality. Consider re-uploading a better photo.
                         </div>
                       )}
-                      <div style={{ display: 'flex', gap: 8 }}>
+                      {result.canOverride && (
+                        <div style={{
+                          padding: '10px 12px',
+                          borderRadius: 10,
+                          background: '#eff6ff',
+                          border: '1px solid #bfdbfe',
+                          marginBottom: 10,
+                          fontSize: 11,
+                          color: '#1e40af',
+                          lineHeight: 1.5
+                        }}>
+                          If this is the only available student photo, you can continue with it. The checks above will stay visible for review.
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); setPreview(""); setResult(null); lastAdjustedFileRef.current = null }}
@@ -1513,24 +1527,31 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
                             background: criticalFails.length > 0 ? '#ef4444' : '#f1f5f9',
                             color: criticalFails.length > 0 ? 'white' : '#64748b',
                             border: 'none', borderRadius: 8,
-                            cursor: 'pointer', fontWeight: 700, flex: 1
+                            cursor: 'pointer', fontWeight: 700, flex: '1 1 160px',
+                            minHeight: 42
                           }}
                         >
                           📷 {criticalFails.length > 0 ? "Upload a Proper ID Photo" : "Re-upload Photo"}
                         </button>
-                        {/* Only allow force-accept if no critical failures */}
-                        {result.canOverride && criticalFails.length === 0 && (
+                        {result.canOverride && (
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); handleForceAccept() }}
                             style={{
-                              fontSize: 12, padding: '8px 16px',
-                              background: '#f0fdf4', color: '#16a34a',
-                              border: '1px solid #bbf7d0', borderRadius: 8,
-                              cursor: 'pointer', fontWeight: 600
+                              fontSize: 13,
+                              padding: '10px 16px',
+                              background: 'linear-gradient(135deg, #2563eb, #4f46e5)',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: 8,
+                              cursor: 'pointer',
+                              fontWeight: 800,
+                              flex: '1.25 1 190px',
+                              minHeight: 42,
+                              boxShadow: '0 6px 16px rgba(37,99,235,0.22)'
                             }}
                           >
-                            Use Anyway
+                            Use photo anyway
                           </button>
                         )}
                       </div>

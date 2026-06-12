@@ -368,18 +368,7 @@ function SocialProof() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
           <div>
             <h2 className="font-serif text-3xl md:text-4xl font-medium tracking-tight text-[#111827]">Trusted by the best</h2>
-            <p className="mt-4 text-gray-600 mb-8">We partner with leading educational institutions and corporations to deliver excellence.</p>
-            
-            <div className="grid grid-cols-2 gap-8">
-              <div>
-                <p className="text-4xl font-serif font-medium text-[#0B1F3A]">1.2M+</p>
-                <p className="mt-2 text-sm font-medium text-gray-500 uppercase tracking-wider">Products Delivered</p>
-              </div>
-              <div>
-                <p className="text-4xl font-serif font-medium text-[#0B1F3A]">150+</p>
-                <p className="mt-2 text-sm font-medium text-gray-500 uppercase tracking-wider">Active Partners</p>
-              </div>
-            </div>
+            <p className="mt-4 text-gray-600">We partner with leading educational institutions and corporations to deliver excellence.</p>
           </div>
 
           <div className="rounded-[2rem] bg-white p-8 md:p-10 shadow-lg border border-gray-100 relative">
