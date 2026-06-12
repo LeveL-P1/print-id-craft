@@ -7,7 +7,8 @@ import { buildStudentExportRow, STUDENT_EXPORT_HEADERS } from "@/lib/export/stud
 
 export const maxDuration = 60; // Vercel function timeout config
 
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const session = await getServerSession(authOptions)
     if (!session) {

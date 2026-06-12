@@ -16,7 +16,8 @@ export const maxDuration = 300; // Vercel Pro function timeout config
 
 const QR_JOB_CHUNK_SIZE = 500
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const session = await getServerSession(authOptions)
     if (!session || session.user?.role !== "MANUFACTURER") {

@@ -5,7 +5,8 @@ import { migrateTemplateToPt } from "@/lib/font-size-units"
 import { getFieldRole, inferFieldRole, resolveFieldValue, sortFieldsByRole } from "@/lib/field-resolver"
 import { getTemplateForClass } from "@/lib/template-resolver"
 
-export async function GET(req: Request, { params }: { params: { token: string } }) {
+export async function GET(req: Request, props: { params: Promise<{ token: string }> }) {
+  const params = await props.params;
   try {
     const cls = await prisma.class.findUnique({
       where: { linkToken: params.token },

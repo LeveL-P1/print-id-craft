@@ -6,10 +6,8 @@ import { storageSignedUrl } from "@/lib/storage"
 
 export const dynamic = "force-dynamic"
 
-export async function GET(
-  _req: Request,
-  { params }: { params: { studentId: string } }
-) {
+export async function GET(_req: Request, props: { params: Promise<{ studentId: string }> }) {
+  const params = await props.params;
   const session = await getServerSession(authOptions)
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })

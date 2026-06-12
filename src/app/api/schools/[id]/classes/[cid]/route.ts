@@ -11,10 +11,8 @@ const updateClassSchema = z.object({
   templateId: z.string().nullable().optional(),
 })
 
-export async function PUT(
-  req: Request,
-  { params }: { params: { id: string; cid: string } }
-) {
+export async function PUT(req: Request, props: { params: Promise<{ id: string; cid: string }> }) {
+  const params = await props.params;
   try {
     const session = await getServerSession(authOptions)
     if (!session || session.user?.role !== "MANUFACTURER") {
@@ -50,10 +48,8 @@ export async function PUT(
   }
 }
 
-export async function DELETE(
-  req: Request,
-  { params }: { params: { id: string; cid: string } }
-) {
+export async function DELETE(req: Request, props: { params: Promise<{ id: string; cid: string }> }) {
+  const params = await props.params;
   try {
     const session = await getServerSession(authOptions)
     if (!session || session.user?.role !== "MANUFACTURER") {
