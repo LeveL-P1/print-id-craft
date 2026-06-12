@@ -12,14 +12,6 @@ type DashboardData = {
   recentSchools: any[]
 }
 
-type OpsEvent = {
-  id: string
-  type: string
-  severity: string
-  message: string
-  createdAt: string
-}
-
 type OpsJob = {
   id: string
   type: string
@@ -35,7 +27,6 @@ export default function ManufacturerDashboard() {
   const [statsLoaded, setStatsLoaded] = useState(false)
   const [schoolsLoaded, setSchoolsLoaded] = useState(false)
   const [health, setHealth] = useState<{ status: string; db: string; storage: string } | null>(null)
-  const [events, setEvents] = useState<OpsEvent[]>([])
   const [jobs, setJobs] = useState<OpsJob[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -115,12 +106,10 @@ export default function ManufacturerDashboard() {
 
     Promise.all([
       fetch("/api/health", { cache: "no-store" }).then((res) => res.json()).catch(() => null),
-      fetch("/api/admin/events?limit=5", { cache: "no-store" }).then((res) => res.ok ? res.json() : null).catch(() => null),
       fetch("/api/admin/jobs?limit=5", { cache: "no-store" }).then((res) => res.ok ? res.json() : null).catch(() => null),
-    ]).then(([healthJson, eventsJson, jobsJson]) => {
+    ]).then(([healthJson, jobsJson]) => {
       if (cancelled) return
       if (healthJson) setHealth({ status: healthJson.status, db: healthJson.db, storage: healthJson.storage })
-      if (eventsJson?.success) setEvents(eventsJson.data || [])
       if (jobsJson?.success) setJobs(jobsJson.data || [])
     })
 
@@ -297,26 +286,6 @@ export default function ManufacturerDashboard() {
                   </div>
                 ))}
               </div>
-            </div>
-
-            <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", textTransform: "uppercase", marginBottom: 12 }}>Recent Events</div>
-              {events.length > 0 ? (
-                <div style={{ display: "grid", gap: 10 }}>
-                  {events.map((event) => (
-                    <div key={event.id} style={{ borderBottom: "1px solid #f1f5f9", paddingBottom: 8 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{event.type}</span>
-                        <span style={{ fontSize: 11, color: event.severity === "ERROR" ? "#dc2626" : "#d97706", fontWeight: 700 }}>{event.severity}</span>
-                      </div>
-                      <div style={{ fontSize: 12, color: "#64748b", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{event.message}</div>
-                      <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>{formatTime(event.createdAt)}</div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ fontSize: 13, color: "#16a34a" }}>No recent backend failure events.</div>
-              )}
             </div>
 
             <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
