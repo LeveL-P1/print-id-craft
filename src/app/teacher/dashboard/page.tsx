@@ -321,6 +321,19 @@ export default function TeacherDashboard() {
     }) || []
   }, [data?.students, classFilter, statusFilter])
 
+  const classStatusCounts = useMemo(() => {
+    const counts = new Map<string, { total: number; approved: number; flagged: number }>()
+    for (const student of data?.students || []) {
+      const className = student.class?.name || ""
+      const current = counts.get(className) || { total: 0, approved: 0, flagged: 0 }
+      current.total += 1
+      if (student.status === "APPROVED") current.approved += 1
+      if (student.status === "FLAGGED") current.flagged += 1
+      counts.set(className, current)
+    }
+    return counts
+  }, [data?.students])
+
   if (loading) return (
     <div className="teacher-page">
       <div className="teacher-container">
@@ -519,17 +532,15 @@ export default function TeacherDashboard() {
                     </thead>
                     <tbody>
                       {data.classes.map((c: any) => {
-                        const classStudents = data.students.filter((s: any) => s.class?.name === c.name)
-                        const approved = classStudents.filter((s: any) => s.status === 'APPROVED').length
-                        const flagged = classStudents.filter((s: any) => s.status === 'FLAGGED').length
+                        const counts = classStatusCounts.get(c.name) || { total: 0, approved: 0, flagged: 0 }
                         const assignedTeacher = c.teachers?.find((t: any) => !t.isMainTeacher)
                         return (
                           <tr key={c.id}>
                             <td style={{ fontWeight: 600 }}>{c.name}</td>
                             <td style={{ fontSize: 12, color: '#64748b' }}>{assignedTeacher?.name || (isMain ? '—' : session?.user?.name)}</td>
-                            <td><span className="status-badge status-submitted">{classStudents.length}</span></td>
-                            <td><span className="status-badge status-approved">{approved}</span></td>
-                            <td><span className="status-badge status-flagged">{flagged}</span></td>
+                            <td><span className="status-badge status-submitted">{counts.total}</span></td>
+                            <td><span className="status-badge status-approved">{counts.approved}</span></td>
+                            <td><span className="status-badge status-flagged">{counts.flagged}</span></td>
                           </tr>
                         )
                       })}

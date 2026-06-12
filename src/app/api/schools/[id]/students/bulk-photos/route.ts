@@ -10,6 +10,7 @@ const BUCKET = "student-photos"
 const MAX_FILES = 500
 const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB per photo
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"]
+const PHOTO_UPLOAD_CONCURRENCY = 8
 
 let bucketReady = false
 
@@ -22,6 +23,7 @@ let bucketReady = false
 // keeping ~99% cache-hit rate during a single bulk-upload session.
 type StudentRow = { id: string; serialNumber: string; formData: any; photoUrl: string | null; photoPath?: string | null }
 type LookupMaps = {
+  byId: Map<string, StudentRow>
   byPhotoId: Map<string, StudentRow>
   bySerial: Map<string, StudentRow>
   byRollNo: Map<string, StudentRow>
@@ -43,6 +45,7 @@ async function getLookupMaps(schoolId: string): Promise<LookupMaps> {
   })
 
   const maps: LookupMaps = {
+    byId: new Map(),
     byPhotoId: new Map(),
     bySerial: new Map(),
     byRollNo: new Map(),
@@ -59,6 +62,7 @@ async function getLookupMaps(schoolId: string): Promise<LookupMaps> {
 }
 
 function buildIndexForStudent(s: StudentRow, maps: LookupMaps) {
+  maps.byId.set(s.id, s)
   maps.bySerial.set(s.serialNumber.toLowerCase().trim(), s)
 
   const fd = s.formData as Record<string, string>
@@ -113,6 +117,21 @@ function invalidateLookupCache(schoolId: string) {
   lookupCache.delete(schoolId)
 }
 
+async function runWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<void>
+) {
+  let next = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const item = items[next++]
+      await worker(item)
+    }
+  })
+  await Promise.all(workers)
+}
+
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   try {
     const session = await getServerSession(authOptions)
@@ -126,7 +145,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     if (maps.count === 0) {
       return NextResponse.json({ error: "No students found in this school. Import students first." }, { status: 400 })
     }
-    const { byPhotoId, bySerial, byRollNo, byName, byFather, byStudentName } = maps
+    const { byId, byPhotoId, bySerial, byRollNo, byName, byFather, byStudentName } = maps
 
     const formData = await req.formData()
     const files = formData.getAll("photos") as File[]
@@ -152,9 +171,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     // at the end of the request so we don't pay per-file round-trip latency.
     const pendingUpdates: Array<{ id: string; photoUrl: string; photoPath: string }> = []
 
-    // Process all files in a single Promise.all — storage uploads are I/O
-    // bound and Supabase handles concurrent puts well. DB writes are deferred.
-    await Promise.all(files.map(async (file) => {
+    // Storage uploads are I/O-bound, but unbounded parallelism can spike
+    // memory and outbound connections on large requests. DB writes are deferred.
+    await runWithConcurrency(files, PHOTO_UPLOAD_CONCURRENCY, async (file) => {
         const filename = file.name
         // Strip folder prefix (e.g., "Photos/IMG_2767.jpg" → "IMG_2767.jpg")
         const fileNameOnly = filename.includes("/") ? filename.split("/").pop()! : filename
@@ -299,7 +318,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         } catch (err: any) {
           errors.push({ filename, error: err?.message || "Upload failed" })
         }
-      }))
+      })
 
     // Batched DB writes: one transaction per chunk of 50 photo URLs.
     // This avoids the per-file round-trip cost that previously dominated
@@ -334,7 +353,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       // DB round-trip. We don't invalidate the whole cache because the
       // matching keys (Photo ID / serial / name) haven't changed.
       for (const u of pendingUpdates) {
-        const row = bySerial.get(u.id) // best-effort; not all rows indexed by id
+        const row = byId.get(u.id)
         if (row) {
           row.photoUrl = u.photoUrl
           row.photoPath = u.photoPath
