@@ -6,10 +6,14 @@ import { prisma } from "@/lib/prisma"
 import { randomUUID } from "crypto"
 import { durableRateLimit, getClientIp } from "@/lib/rate-limit"
 import { reportError } from "@/lib/observability"
+import sharp from "sharp"
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 const PUBLIC_MAX_FILE_SIZE = 2.5 * 1024 * 1024 // parent submit photos should already be compressed client-side
+const PUBLIC_NORMALIZED_MAX_DIMENSION = 768
+const MAX_IMAGE_PIXELS = 24_000_000
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"]
+const ALLOWED_SHARP_FORMATS = new Set(["jpeg", "png", "webp"])
 const BUCKET_NAME = "student-photos"
 const SAFE_FOLDER_RE = /^(students\/[a-zA-Z0-9_-]+|logos|templates|flags\/[a-zA-Z0-9_-]+)$/
 const EXT_BY_TYPE: Record<string, string> = {
@@ -20,6 +24,55 @@ const EXT_BY_TYPE: Record<string, string> = {
 
 // Track whether we've initialized the bucket
 let bucketInitialized = false
+
+async function validateAndPrepareImage(
+  buffer: Buffer,
+  options: { normalizePublicStudentPhoto: boolean }
+): Promise<{ buffer: Buffer; contentType: string; extension: string }> {
+  let metadata: sharp.Metadata
+  try {
+    metadata = await sharp(buffer, { limitInputPixels: MAX_IMAGE_PIXELS }).metadata()
+  } catch {
+    throw new Error("Invalid image file. Please upload a real JPEG, PNG, or WebP photo.")
+  }
+
+  if (!metadata.format || !ALLOWED_SHARP_FORMATS.has(metadata.format)) {
+    throw new Error("Invalid image content. Allowed: JPEG, PNG, WebP.")
+  }
+
+  if (!metadata.width || !metadata.height || metadata.width < 80 || metadata.height < 80) {
+    throw new Error("Image is too small. Please upload a clear student photo.")
+  }
+
+  if (!options.normalizePublicStudentPhoto) {
+    const contentType =
+      metadata.format === "png" ? "image/png" :
+      metadata.format === "webp" ? "image/webp" :
+      "image/jpeg"
+    const extension = metadata.format === "jpeg" ? "jpg" : metadata.format
+    return { buffer, contentType, extension }
+  }
+
+  const normalized = await sharp(buffer, { limitInputPixels: MAX_IMAGE_PIXELS })
+    .rotate()
+    .resize({
+      width: PUBLIC_NORMALIZED_MAX_DIMENSION,
+      height: PUBLIC_NORMALIZED_MAX_DIMENSION,
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .jpeg({
+      quality: 86,
+      mozjpeg: true,
+    })
+    .toBuffer()
+
+  if (normalized.length > PUBLIC_MAX_FILE_SIZE) {
+    throw new Error("Photo is still too large after compression. Please choose a smaller image.")
+  }
+
+  return { buffer: normalized, contentType: "image/jpeg", extension: "jpg" }
+}
 
 export async function POST(req: Request) {
   try {
@@ -100,16 +153,24 @@ export async function POST(req: Request) {
       bucketInitialized = true
     }
 
-    const ext = EXT_BY_TYPE[file.type] || "jpg"
+    const arrayBuffer = await file.arrayBuffer()
+    const buffer = Buffer.from(arrayBuffer)
+    let prepared: { buffer: Buffer; contentType: string; extension: string }
+    try {
+      prepared = await validateAndPrepareImage(buffer, {
+        normalizePublicStudentPhoto: !session && isPublicUpload,
+      })
+    } catch (imageError: any) {
+      return NextResponse.json({ error: imageError?.message || "Invalid image" }, { status: 400 })
+    }
+
+    const ext = prepared.extension || EXT_BY_TYPE[file.type] || "jpg"
     const safeName = `${Date.now()}-${randomUUID()}.${ext}`
     const filePath = `${folder}/${safeName}`
 
-    const arrayBuffer = await file.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
-
     // Upload with retry + auto-bucket-creation
-    const { data, error } = await storageUpload(BUCKET_NAME, filePath, buffer, {
-      contentType: file.type,
+    const { data, error } = await storageUpload(BUCKET_NAME, filePath, prepared.buffer, {
+      contentType: prepared.contentType,
       upsert: true,
     })
 
