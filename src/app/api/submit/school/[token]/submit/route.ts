@@ -22,8 +22,9 @@ const publicSchoolSubmitSchema = z.object({
   formData: z.record(z.string(), z.any()),
   photoUrl: z
     .string()
-    .min(1, "Photo is required. Please upload a student photo before submitting.")
-    .refine(photoUrlRefine, { message: "Invalid photo URL origin" }),
+    .optional()
+    .default("")
+    .refine((url) => !url || photoUrlRefine(url), { message: "Invalid photo URL origin" }),
   photoPath: z.string().optional().default(""),
   photoBgStatus: z
     .enum(["", "PLAIN", "PROCESSED", "SKIPPED", "REPROCESSED"])

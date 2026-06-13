@@ -19,6 +19,33 @@ async function studentPhotoFixture() {
   return sharp(Buffer.from(svg)).jpeg({ quality: 88 }).toBuffer()
 }
 
+async function fillAndReviewForm(page: import("@playwright/test").Page) {
+  await page.goto(`/submit/${token}`)
+
+  await page.getByPlaceholder("e.g. Darshan Sunil Choudhari").fill("Aarav Sunil Patil")
+  await page.getByPlaceholder("e.g. Ramesh Kumar Choudhari").fill("Sunil Patil")
+  await page.getByPlaceholder("9876543210").fill("9876543210")
+  await page.getByPlaceholder("e.g. House No 12, MG Road, Kothrud, Pune, 411038").fill(
+    "Flat 9 Lotus Residency Kothrud Pune 411038"
+  )
+  await page.locator('form button[type="submit"]').click()
+
+  const photo = await studentPhotoFixture()
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "student-photo.jpg",
+    mimeType: "image/jpeg",
+    buffer: photo,
+  })
+
+  const cropButton = page.getByRole("button", { name: /Apply Crop/ })
+  const forceButton = page.getByRole("button", { name: /Use photo anyway/ })
+  await expect(cropButton.or(forceButton)).toBeVisible({ timeout: 30_000 })
+  if (await forceButton.isVisible()) await forceButton.click()
+  await cropButton.click()
+
+  await expect(page.getByText("Card Preview")).toBeVisible()
+}
+
 test.beforeEach(async ({ page }) => {
   await page.route(`**/api/submit/${token}`, async (route) => {
     await route.fulfill({
@@ -84,30 +111,38 @@ test.beforeEach(async ({ page }) => {
 })
 
 test("mobile parent can fill, upload photo, preview template, and submit on slow upload", async ({ page }) => {
-  await page.goto(`/submit/${token}`)
-
-  await page.getByPlaceholder("e.g. Darshan Sunil Choudhari").fill("Aarav Sunil Patil")
-  await page.getByPlaceholder("e.g. Ramesh Kumar Choudhari").fill("Sunil Patil")
-  await page.getByPlaceholder("9876543210").fill("9876543210")
-  await page.getByPlaceholder("e.g. House No 12, MG Road, Kothrud, Pune, 411038").fill(
-    "Flat 9 Lotus Residency Kothrud Pune 411038"
-  )
-  await page.locator('form button[type="submit"]').click()
-
-  const photo = await studentPhotoFixture()
-  await page.locator('input[type="file"]').setInputFiles({
-    name: "student-photo.jpg",
-    mimeType: "image/jpeg",
-    buffer: photo,
-  })
-
-  const cropButton = page.getByRole("button", { name: /Apply Crop/ })
-  const forceButton = page.getByRole("button", { name: /Use photo anyway/ })
-  await expect(cropButton.or(forceButton)).toBeVisible({ timeout: 30_000 })
-  if (await forceButton.isVisible()) await forceButton.click()
-  await cropButton.click()
-
-  await expect(page.getByText("Card Preview")).toBeVisible()
+  await fillAndReviewForm(page)
   await page.getByRole("button", { name: /Submit Registration/ }).click()
   await expect(page.getByText("E2E-001")).toBeVisible({ timeout: 30_000 })
+})
+
+test("mobile parent data still submits when photo upload fails", async ({ page }) => {
+  await page.unroute("**/api/upload")
+  await page.route("**/api/upload", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      status: 500,
+      body: JSON.stringify({ error: "Image processing is temporarily unavailable. Please try again." }),
+    })
+  })
+
+  await page.unroute(`**/api/submit/${token}/submit`)
+  await page.route(`**/api/submit/${token}/submit`, async (route) => {
+    const body = route.request().postDataJSON()
+    expect(body.photoUrl).toBe("")
+    expect(body.photoPath).toBe("")
+    expect(body.formData.fullName).toBe("Aarav Sunil Patil")
+    await route.fulfill({
+      contentType: "application/json",
+      status: 201,
+      body: JSON.stringify({
+        success: true,
+        data: { studentId: "student_e2e_no_photo", serialNumber: "E2E-002" },
+      }),
+    })
+  })
+
+  await fillAndReviewForm(page)
+  await page.getByRole("button", { name: /Submit Registration/ }).click()
+  await expect(page.getByText("E2E-002")).toBeVisible({ timeout: 30_000 })
 })

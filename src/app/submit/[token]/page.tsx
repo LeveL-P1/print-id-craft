@@ -597,10 +597,9 @@ export default function SubmitPage() {
           setUploadProgress(80)
         } catch (photoErr) {
           console.error("Photo upload failed:", photoErr)
-          setAlertMsg(photoErr instanceof Error ? photoErr.message : "Photo upload failed. Please check your internet and try again.")
-          setSubmitting(false)
-          setUploadProgress(0)
-          return
+          photoUrl = ""
+          photoPath = ""
+          setUploadProgress(80)
         }
       } else {
         setUploadProgress(80)
