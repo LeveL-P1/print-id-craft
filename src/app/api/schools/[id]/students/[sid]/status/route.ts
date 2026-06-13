@@ -8,10 +8,8 @@ const statusSchema = z.object({
   status: z.enum(["PENDING", "SUBMITTED", "FLAGGED", "APPROVED", "PRINTED"]),
 })
 
-export async function PUT(
-  req: Request,
-  { params }: { params: { id: string; sid: string } }
-) {
+export async function PUT(req: Request, props: { params: Promise<{ id: string; sid: string }> }) {
+  const params = await props.params;
   try {
     const session = await getServerSession(authOptions)
     if (!session) {

@@ -31,7 +31,8 @@ const publicSchoolSubmitSchema = z.object({
     .default(""),
 })
 
-export async function POST(req: Request, { params }: { params: { token: string } }) {
+export async function POST(req: Request, props: { params: Promise<{ token: string }> }) {
+  const params = await props.params;
   try {
     // Rate limiting
     const ip = getClientIp(req)

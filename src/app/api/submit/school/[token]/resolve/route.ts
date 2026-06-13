@@ -8,7 +8,8 @@ import { prisma } from "@/lib/prisma"
  * without requiring us to expose every class token in the public
  * GET payload.
  */
-export async function GET(req: Request, { params }: { params: { token: string } }) {
+export async function GET(req: Request, props: { params: Promise<{ token: string }> }) {
+  const params = await props.params;
   try {
     const { searchParams } = new URL(req.url)
     const classId = searchParams.get("classId") || ""

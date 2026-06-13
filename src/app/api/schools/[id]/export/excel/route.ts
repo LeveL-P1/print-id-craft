@@ -24,7 +24,8 @@ async function addPhotoToZip(zip: JSZip, zipPath: string, storagePath: string) {
   return true
 }
 
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const session = await getServerSession(authOptions)
     if (!session) {

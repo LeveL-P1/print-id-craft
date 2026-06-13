@@ -5,10 +5,8 @@ import { prisma } from "@/lib/prisma"
 import { withStudentPhotoUrl } from "@/lib/student-photo-url"
 import { buildStudentIndexData } from "@/lib/student-index"
 
-export async function GET(
-  req: Request,
-  { params }: { params: { id: string; sid: string } }
-) {
+export async function GET(req: Request, props: { params: Promise<{ id: string; sid: string }> }) {
+  const params = await props.params;
   try {
     const session = await getServerSession(authOptions)
     if (!session) {
@@ -43,10 +41,8 @@ export async function GET(
   }
 }
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: { id: string; sid: string } }
-) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string; sid: string }> }) {
+  const params = await props.params;
   try {
     const session = await getServerSession(authOptions)
     if (!session) {
@@ -106,10 +102,8 @@ export async function PATCH(
   }
 }
 
-export async function DELETE(
-  req: Request,
-  { params }: { params: { id: string; sid: string } }
-) {
+export async function DELETE(req: Request, props: { params: Promise<{ id: string; sid: string }> }) {
+  const params = await props.params;
   try {
     const session = await getServerSession(authOptions)
     if (!session) {
