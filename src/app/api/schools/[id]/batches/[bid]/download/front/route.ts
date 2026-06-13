@@ -4,10 +4,8 @@ import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { supabase } from "@/lib/supabase"
 
-export async function GET(
-  req: Request,
-  { params }: { params: { id: string; bid: string } }
-) {
+export async function GET(req: Request, props: { params: Promise<{ id: string; bid: string }> }) {
+  const params = await props.params;
   try {
     const session = await getServerSession(authOptions)
     if (!session || session.user?.role !== "MANUFACTURER") {

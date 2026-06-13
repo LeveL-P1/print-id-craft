@@ -31,6 +31,8 @@ const publicSubmitSchema = z.object({
     .default(""),
 })
 
+export async function POST(req: Request, props: { params: Promise<{ token: string }> }) {
+  const params = await props.params;
 export async function POST(req: Request, { params }: { params: { token: string } }) {
   const startedAt = Date.now()
   let schoolId: string | null = null

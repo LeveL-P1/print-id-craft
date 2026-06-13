@@ -8,6 +8,8 @@ import { PHOTO_BG_STATUS } from "@/lib/photo-bg-status"
 
 export const maxDuration = 30
 
+export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
 const PHOTO_BG_MODES = new Set(["skipped", "unprocessed", "all"])
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/
 
@@ -76,7 +78,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   }
 }
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const session = await getServerSession(authOptions)
     if (!session || session.user?.role !== "MANUFACTURER") {

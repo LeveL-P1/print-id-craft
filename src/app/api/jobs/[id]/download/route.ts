@@ -8,7 +8,8 @@ import { EXPORT_BUCKET } from "@/lib/jobs/types"
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await getServerSession(authOptions)
   if (!session || session.user?.role !== "MANUFACTURER") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })

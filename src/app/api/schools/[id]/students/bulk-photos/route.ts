@@ -139,6 +139,8 @@ function invalidateLookupCache(schoolId: string) {
   lookupCache.delete(schoolId)
 }
 
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
 async function runWithConcurrency<T>(
   items: T[],
   limit: number,

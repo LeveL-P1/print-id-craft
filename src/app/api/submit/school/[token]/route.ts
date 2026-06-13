@@ -10,7 +10,8 @@ import { getDefaultTemplate } from "@/lib/template-resolver"
  * and the same field/template metadata the per-class submit endpoint
  * exposes. Replaces per-class link sharing.
  */
-export async function GET(req: Request, { params }: { params: { token: string } }) {
+export async function GET(req: Request, props: { params: Promise<{ token: string }> }) {
+  const params = await props.params;
   try {
     const school = await prisma.school.findUnique({
       where: { linkToken: params.token },

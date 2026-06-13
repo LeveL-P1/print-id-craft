@@ -11,6 +11,8 @@ import { reportSlowOperation } from "@/lib/observability"
 // Optimize: prefer longer-running function for connection reuse
 export const maxDuration = 10
 
+export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   const startedAt = Date.now()
   try {
@@ -97,7 +99,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
  * POST — create a single student manually (manufacturer / main-teacher only).
  * Body: { formData: Record<string,string>, classId: string, photoUrl?: string }
  */
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const session = await getServerSession(authOptions)
     if (!session || session.user?.role !== "MANUFACTURER") {
@@ -149,10 +152,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
  *    accidental wipes from a misrouted request.
  *  - Returns the count of deleted rows so the UI can show a toast.
  */
-export async function DELETE(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function DELETE(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const session = await getServerSession(authOptions)
     if (!session || session.user?.role !== "MANUFACTURER") {

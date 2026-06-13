@@ -60,10 +60,8 @@ function canAccessSchoolTemplate(session: any, schoolId: string): boolean {
   return !!(session && (isManufacturer || isMainTeacher))
 }
 
-export async function GET(
-  req: Request,
-  { params }: { params: { id: string; tid: string } }
-) {
+export async function GET(req: Request, props: { params: Promise<{ id: string; tid: string }> }) {
+  const params = await props.params;
   try {
     const session = await getServerSession(authOptions)
     if (!canAccessSchoolTemplate(session, params.id)) {
@@ -104,10 +102,8 @@ export async function GET(
   }
 }
 
-export async function PUT(
-  req: Request,
-  { params }: { params: { id: string; tid: string } }
-) {
+export async function PUT(req: Request, props: { params: Promise<{ id: string; tid: string }> }) {
+  const params = await props.params;
   try {
     const session = await getServerSession(authOptions)
     if (!canAccessSchoolTemplate(session, params.id)) {
@@ -173,10 +169,8 @@ export async function PUT(
   }
 }
 
-export async function DELETE(
-  req: Request,
-  { params }: { params: { id: string; tid: string } }
-) {
+export async function DELETE(req: Request, props: { params: Promise<{ id: string; tid: string }> }) {
+  const params = await props.params;
   try {
     const session = await getServerSession(authOptions)
     if (!session || session.user?.role !== "MANUFACTURER") {

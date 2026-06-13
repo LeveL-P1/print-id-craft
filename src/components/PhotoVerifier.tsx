@@ -349,6 +349,10 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         })
 
         // ── 8. Blur Detection ──
+        // Never block on blur — parents on phone cameras often get slightly
+        // soft JPEGs. We only surface a friendly warning when the score is low.
+        const blurScore = detectBlur(ctx, img.width, img.height)
+        const isBlurry = blurScore <= 8
         // Threshold lowered (15 → 8) because the previous value rejected
         // many in-focus phone-camera shots — phone JPEGs are heavily
         // denoised, which suppresses the high-frequency content the
@@ -356,11 +360,11 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         // images but no longer reject normal phone selfies.
         const blurScore = detectBlur(ctx, analysisW, analysisH)
         checks.push({
-          passed: blurScore > 8,
+          passed: !isBlurry,
           severity: "warning",
           label: "Sharpness",
-          detail: blurScore > 20 ? "Sharp" : blurScore > 8 ? "Acceptable" : "Blurry",
-          tip: "Hold the camera steady and ensure the subject is in focus"
+          detail: blurScore > 20 ? "Sharp" : blurScore > 8 ? "Acceptable" : "A little blurry — may look soft on the ID card",
+          tip: isBlurry ? "Hold the camera steady and ensure the subject is in focus" : undefined,
         })
 
         // ── 9. Background Uniformity ──
@@ -399,52 +403,80 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
           ...(({ _bgQualityGood: bgQualityGood } as any)),
         })
 
-        // ── 10. Face Detection (CRITICAL for ID cards) ──
+        // ── 10–13. Face / person detection ──
+        // Only a complete miss blocks upload. Rough or partial detection
+        // proceeds with a warning suggesting a clearer photo.
         const faceResult = await detectFace(img)
-        checks.push({
-          passed: faceResult.detected,
-          severity: "critical",
-          label: "Face Detected",
-          detail: faceResult.detail,
-          tip: faceResult.tip || "Upload a clear front-facing photo of your face for the ID card"
-        })
+        const hasPerson = faceResult.detected || faceResult.rough
 
-        // ── 11. Face Count ──
-        if (faceResult.detected) {
+        if (!hasPerson) {
           checks.push({
-            passed: faceResult.count === 1,
+            passed: false,
             severity: "critical",
-            label: "Single Face",
-            detail: faceResult.count === 1 ? "1 face found" : `${faceResult.count} faces found`,
-            tip: "Only the student's face should be in the photo — no group photos"
+            label: "Face Detected",
+            detail: faceResult.detail,
+            tip: faceResult.tip || "Upload a clear front-facing photo of your face for the ID card",
+          })
+        } else if (faceResult.rough) {
+          checks.push({
+            passed: false,
+            severity: "warning",
+            label: "Face Detected",
+            detail: "Face/person roughly detected",
+            tip: "We suggest uploading a clearer photo with your face centred and well lit",
+          })
+        } else {
+          checks.push({
+            passed: true,
+            severity: "info",
+            label: "Face Detected",
+            detail: faceResult.detail,
           })
         }
 
-        // ── 12. Face Centering ──
-        if (faceResult.detected && faceResult.bounds) {
+        // ── 11. Face Count (warning only — group photos get a nudge, not a block) ──
+        if (hasPerson) {
+          checks.push({
+            passed: faceResult.count === 1,
+            severity: faceResult.count === 1 ? "info" : "warning",
+            label: "Single Face",
+            detail: faceResult.count === 1 ? "1 face found" : `${faceResult.count} faces found`,
+            tip: faceResult.count === 1 ? undefined : "Only the student's face should be in the photo — no group photos",
+          })
+        }
+
+        // ── 12–13. Face Centering & Size (warning only, lenient thresholds) ──
+        if (hasPerson && faceResult.bounds) {
           const faceCenterX = (faceResult.bounds.x + faceResult.bounds.width / 2) / img.width
           const faceCenterY = (faceResult.bounds.y + faceResult.bounds.height / 2) / img.height
           const offCenterX = Math.abs(faceCenterX - 0.5)
           const offCenterY = Math.abs(faceCenterY - 0.4)
+          const centered = offCenterX < 0.28 && offCenterY < 0.32
 
           checks.push({
-            passed: offCenterX < 0.2 && offCenterY < 0.25,
-            severity: "critical",
+            passed: centered,
+            severity: centered ? "info" : "warning",
             label: "Face Centering",
-            detail: offCenterX < 0.15 && offCenterY < 0.2 ? "Centered" : "Face is off-center",
-            tip: "Position your face in the center of the frame"
+            detail: centered ? "Centered" : "Face is a little off-centre",
+            tip: centered ? undefined : "Position your face in the centre of the frame",
           })
 
-          // ── 13. Face Size Ratio ──
           const faceHeightRatio = faceResult.bounds.height / img.height
+          const sizeOk = faceHeightRatio >= 0.12 && faceHeightRatio <= 0.82
           checks.push({
-            passed: faceHeightRatio >= 0.20 && faceHeightRatio <= 0.75,
-            severity: "critical",
+            passed: sizeOk,
+            severity: sizeOk ? "info" : "warning",
             label: "Face Size",
-            detail: faceHeightRatio < 0.20 ? "Too far / no face visible" : faceHeightRatio > 0.75 ? "Too close" : "Good",
-            tip: faceHeightRatio < 0.20
-              ? "Move closer — your face should fill 30-60% of the frame"
-              : "Move further from the camera"
+            detail: sizeOk
+              ? "Good"
+              : faceHeightRatio < 0.12
+                ? "Face looks small / far away"
+                : "Face looks very close",
+            tip: sizeOk
+              ? undefined
+              : faceHeightRatio < 0.12
+                ? "Move a little closer if you can"
+                : "Move a little further from the camera",
           })
         }
 
@@ -474,39 +506,33 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
           tip: colorCast.tip
         })
 
-        // ── 16. Occlusion Check (eyes/face visible) ──
-        if (faceResult.detected && faceResult.bounds) {
+        // ── 16. Occlusion / eyes / attire — advisory only (never block upload) ──
+        if (hasPerson && faceResult.bounds && !faceResult.rough) {
           const occlusion = analyzeOcclusion(ctx, img.width, img.height, faceResult.bounds)
           checks.push({
             passed: occlusion.passed,
-            severity: "critical",
+            severity: occlusion.passed ? "info" : "warning",
             label: "Face Visible",
             detail: occlusion.detail,
-            tip: occlusion.tip || "Eyes, nose, and mouth must be clearly visible"
+            tip: occlusion.passed ? undefined : (occlusion.tip || "Eyes, nose, and mouth should be clearly visible"),
           })
-        }
 
-        // ── 16b. Eyes Visible (no dark/reflective sunglasses) ──
-        if (faceResult.detected && faceResult.bounds) {
           const eyes = analyzeEyesVisible(ctx, img.width, img.height, faceResult.bounds)
           checks.push({
             passed: eyes.passed,
-            severity: "critical",
+            severity: eyes.passed ? "info" : "warning",
             label: "Eyes Visible",
             detail: eyes.detail,
-            tip: eyes.tip || "Remove sunglasses or dark/reflective glasses — eyes must be clearly visible"
+            tip: eyes.passed ? undefined : (eyes.tip || "Remove sunglasses if possible — eyes should be visible"),
           })
-        }
 
-        // ── 16c. Proper Attire (no bare shoulders / sleeveless) ──
-        if (faceResult.detected && faceResult.bounds) {
           const attire = analyzeAttire(ctx, img.width, img.height, faceResult.bounds)
           checks.push({
             passed: attire.passed,
-            severity: "critical",
+            severity: attire.passed ? "info" : "warning",
             label: "Proper Attire",
             detail: attire.detail,
-            tip: attire.tip || "Wear a proper shirt or school uniform — sleeveless / bare-shoulder photos are not accepted"
+            tip: attire.passed ? undefined : (attire.tip || "School uniform or a proper shirt is recommended"),
           })
         }
 
@@ -528,6 +554,9 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
 
         URL.revokeObjectURL(url)
         const criticalFails = checks.filter(c => !c.passed && c.severity === "critical")
+        // Warnings are advisory — only true critical failures block upload.
+        const valid = criticalFails.length === 0
+        const canOverride = criticalFails.length === 0
         const warningFails = checks.filter(c => !c.passed && c.severity === "warning")
         const valid = criticalFails.length === 0 && warningFails.length === 0
         const canOverride = true
@@ -944,12 +973,18 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
   // ── Content Appropriateness: ensures photo is a proper head-and-shoulders portrait ──
   const analyzeContentAppropriateness = (
     ctx: CanvasRenderingContext2D, w: number, h: number,
-    faceResult: { detected: boolean; count: number; bounds?: { x: number; y: number; width: number; height: number } }
+    faceResult: { detected: boolean; rough?: boolean; count: number; bounds?: { x: number; y: number; width: number; height: number } }
   ) => {
     try {
-      // Check 1: If no face detected at all, this is likely not a person photo
-      if (!faceResult.detected) {
+      if (!faceResult.detected && !faceResult.rough) {
         return { passed: false, detail: "No person detected", tip: "Upload a clear photo of your face — ID cards require a front-facing portrait photo" }
+      }
+      if (faceResult.rough) {
+        return {
+          passed: true,
+          detail: "Person roughly detected",
+          tip: "We suggest uploading a clearer head-and-shoulders photo if you can",
+        }
       }
 
       // Check 2: Face should be in the upper half of image (head-and-shoulders portrait)
@@ -1018,28 +1053,49 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
   }
 
   const detectFace = async (img: HTMLImageElement): Promise<{
-    detected: boolean; count: number; detail: string; tip: string;
+    detected: boolean
+    rough: boolean
+    count: number
+    detail: string
+    tip: string
     bounds?: { x: number; y: number; width: number; height: number }
   }> => {
+    const roughBounds = {
+      x: Math.floor(img.width * 0.3),
+      y: Math.floor(img.height * 0.08),
+      width: Math.floor(img.width * 0.4),
+      height: Math.floor(img.height * 0.45),
+    }
+
     if (typeof window !== "undefined" && "FaceDetector" in window) {
       try {
         // @ts-ignore
         const detector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 5 })
         const faces = await detector.detect(img)
-        if (faces.length === 0) return { detected: false, count: 0, detail: "No face detected", tip: "Ensure your face is clearly visible and well-lit" }
-        if (faces.length === 1) {
+        if (faces.length >= 1) {
           const b = faces[0].boundingBox
-          return { detected: true, count: 1, detail: "Face detected ✓", tip: "", bounds: { x: b.x, y: b.y, width: b.width, height: b.height } }
+          const bounds = { x: b.x, y: b.y, width: b.width, height: b.height }
+          if (faces.length === 1) {
+            return { detected: true, rough: false, count: 1, detail: "Face detected ✓", tip: "", bounds }
+          }
+          return {
+            detected: true,
+            rough: false,
+            count: faces.length,
+            detail: `${faces.length} faces found`,
+            tip: "Only the student should be in the photo",
+            bounds,
+          }
         }
-        const b = faces[0].boundingBox
-        return { detected: true, count: faces.length, detail: `${faces.length} faces found`, tip: "Only the student should be in the photo", bounds: { x: b.x, y: b.y, width: b.width, height: b.height } }
-      } catch { /* FaceDetector might fail */ }
+        // FaceDetector found nothing — fall through to skin heuristic below.
+      } catch { /* FaceDetector might fail — use heuristic fallback */ }
     }
+
     // Canvas-based heuristic fallback with broader skin-tone support
     const canvas = canvasRef.current
-    if (!canvas) return { detected: true, count: 1, detail: "Basic check passed", tip: "" }
+    if (!canvas) return { detected: true, rough: false, count: 1, detail: "Basic check passed", tip: "" }
     const ctx = canvas.getContext("2d")
-    if (!ctx) return { detected: true, count: 1, detail: "Basic check passed", tip: "" }
+    if (!ctx) return { detected: true, rough: false, count: 1, detail: "Basic check passed", tip: "" }
     const cx = Math.floor(img.width * 0.25), cy = Math.floor(img.height * 0.05)
     const cw = Math.floor(img.width * 0.5), ch = Math.floor(img.height * 0.55)
     try {
@@ -1047,29 +1103,45 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
       let skinPixels = 0, totalSampled = 0
       for (let i = 0; i < data.length; i += 16) {
         const r = data[i], g = data[i + 1], b = data[i + 2]
-        // Broader skin-tone detection supporting diverse skin colors
         const isSkin =
-          // Light to medium skin tones
           (r > 60 && g > 40 && b > 20 && r > g && r > b && Math.abs(r - g) > 10 && r - b > 15)
-          // Medium to olive skin tones
           || (r > 40 && g > 30 && b > 15 && r > b && g > b && r - b > 5)
-          // Darker skin tones
           || (r > 30 && g > 20 && b > 10 && r > b && g > b && (r - b) > 3 && r < 120 && g < 100)
-          // Very light / fair skin (avoiding pure white bg)
           || (r > 160 && g > 130 && b > 100 && r < 250 && r > g && Math.abs(r - g) < 40 && r - b > 20)
         if (isSkin) skinPixels++
         totalSampled++
       }
-      // Require at least 18% skin pixels in the face region for a valid face
-      // (up from 8% — the old threshold was accepting random body parts and colored objects)
-      if (skinPixels / totalSampled > 0.18) {
+      const skinRatio = totalSampled > 0 ? skinPixels / totalSampled : 0
+      if (skinRatio > 0.12) {
         return {
-          detected: true, count: 1, detail: "Face likely present", tip: "",
-          bounds: { x: Math.floor(img.width * 0.3), y: Math.floor(img.height * 0.08), width: Math.floor(img.width * 0.4), height: Math.floor(img.height * 0.45) }
+          detected: true,
+          rough: false,
+          count: 1,
+          detail: "Face likely present",
+          tip: "",
+          bounds: roughBounds,
         }
       }
-      return { detected: false, count: 0, detail: "No clear face found", tip: "Ensure face is visible, well-lit, and facing the camera" }
-    } catch { return { detected: true, count: 1, detail: "Basic check passed", tip: "" } }
+      if (skinRatio > 0.05) {
+        return {
+          detected: false,
+          rough: true,
+          count: 1,
+          detail: "Face/person roughly detected",
+          tip: "We suggest uploading a clearer photo with your face centred and well lit",
+          bounds: roughBounds,
+        }
+      }
+      return {
+        detected: false,
+        rough: false,
+        count: 0,
+        detail: "No face or person detected",
+        tip: "Ensure your face is visible, well-lit, and facing the camera",
+      }
+    } catch {
+      return { detected: true, rough: false, count: 1, detail: "Basic check passed", tip: "" }
+    }
   }
 
   const getFailResult = (): PhotoVerificationResult => ({
@@ -1396,10 +1468,12 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
                     color: result.valid ? '#16a34a' : criticalFails.length > 0 ? '#dc2626' : '#d97706'
                   }}>
                     {result.valid
-                      ? '✅ All Checks Passed!'
+                      ? failedChecks.length > 0
+                        ? "✅ Photo accepted — see suggestions below"
+                        : "✅ All Checks Passed!"
                       : criticalFails.length > 0
-                        ? `❌ ${criticalFails.length} Critical Issue${criticalFails.length > 1 ? 's' : ''}`
-                        : `⚠️ ${failedChecks.length} Warning${failedChecks.length > 1 ? 's' : ''} — auto-adjusted`
+                        ? `❌ ${criticalFails.length} Critical Issue${criticalFails.length > 1 ? "s" : ""}`
+                        : `⚠️ ${failedChecks.length} Warning${failedChecks.length > 1 ? "s" : ""} — auto-adjusted`
                     }
                   </div>
 
@@ -1579,10 +1653,15 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
                   {result.valid && (
                     <div style={{
                       marginTop: 10, padding: '6px 10px', borderRadius: 6,
-                      background: '#f0fdf4', border: '1px solid #bbf7d0',
-                      fontSize: 11, color: '#16a34a', fontWeight: 600
+                      background: failedChecks.length > 0 ? '#fffbeb' : '#f0fdf4',
+                      border: `1px solid ${failedChecks.length > 0 ? '#fde68a' : '#bbf7d0'}`,
+                      fontSize: 11,
+                      color: failedChecks.length > 0 ? '#92400e' : '#16a34a',
+                      fontWeight: 600
                     }}>
-                      ✓ Photo accepted — meets ID card requirements
+                      {failedChecks.length > 0
+                        ? "✓ Photo accepted — you can continue, but a clearer photo is recommended"
+                        : "✓ Photo accepted — meets ID card requirements"}
                     </div>
                   )}
                 </div>
