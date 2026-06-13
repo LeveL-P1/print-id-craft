@@ -224,37 +224,9 @@ export default function JpgTemplateMapper({
   const [imageDragOver, setImageDragOver] = useState(false)
 
   // ── ID Maker Dialog State ──
-  // Auto-open only once per browser session per school, and only when the
-  // template doesn't yet have an image (true first-time setup). After the
-  // user dismisses or saves, the flag prevents re-opening on tab switches.
+  // Opened only from the explicit "ID Size..." action. Auto-opening this modal
+  // on mobile interrupts scrolling through the template setup flow.
   const [showIdSizeDialog, setShowIdSizeDialog] = useState(false)
-  const idSizeAutoOpenedRef = useRef(false)
-  useEffect(() => {
-    if (idSizeAutoOpenedRef.current) return
-    if (typeof window === "undefined") return
-    const key = `idsize-shown-${schoolId}`
-    try {
-      if (sessionStorage.getItem(key)) {
-        idSizeAutoOpenedRef.current = true
-        return
-      }
-      if (initialImageUrl) {
-        // Existing template — never auto-open
-        sessionStorage.setItem(key, "1")
-        idSizeAutoOpenedRef.current = true
-        return
-      }
-      // First-time setup → open once and remember
-      idSizeAutoOpenedRef.current = true
-      sessionStorage.setItem(key, "1")
-      setShowIdSizeDialog(true)
-    } catch {
-      // sessionStorage may be unavailable (e.g., privacy mode) — fall back to
-      // simple "no image = open" check, but only on first effect run.
-      idSizeAutoOpenedRef.current = true
-      if (!initialImageUrl) setShowIdSizeDialog(true)
-    }
-  }, [schoolId, initialImageUrl])
   const [showFontDialog, setShowFontDialog] = useState(false)
   const [showPhotoSizeDialog, setShowPhotoSizeDialog] = useState(false)
   const [showPhotoBorderDialog, setShowPhotoBorderDialog] = useState(false)
@@ -641,6 +613,22 @@ export default function JpgTemplateMapper({
   }
 
   const lastMoveTimeRef = useRef(0)
+  const dragFrameRef = useRef<number | null>(null)
+  const pendingDragUpdateRef = useRef<{ id: string; updates: Partial<FieldMapping> } | null>(null)
+
+  const queueDragMappingUpdate = useCallback((id: string, updates: Partial<FieldMapping>) => {
+    pendingDragUpdateRef.current = { id, updates }
+    if (dragFrameRef.current !== null) return
+    dragFrameRef.current = window.requestAnimationFrame(() => {
+      const pending = pendingDragUpdateRef.current
+      pendingDragUpdateRef.current = null
+      dragFrameRef.current = null
+      if (!pending) return
+      setMappings((prev) =>
+        prev.map((m) => (m.id === pending.id ? { ...m, ...pending.updates } : m))
+      )
+    })
+  }, [])
 
   const handleMouseMove = useCallback(
     (e: MouseEvent) => {
@@ -655,7 +643,7 @@ export default function JpgTemplateMapper({
       const dy = ((e.clientY - dragState.startY) / rect.height) * 100
 
       if (dragState.mode === "move") {
-        updateMapping(dragState.id, {
+        queueDragMappingUpdate(dragState.id, {
           x: Math.max(0, Math.min(95, dragState.origX + dx)),
           y: Math.max(0, Math.min(95, dragState.origY + dy)),
         })
@@ -683,7 +671,7 @@ export default function JpgTemplateMapper({
             newH = dragState.origH - actualDy
         }
 
-        updateMapping(dragState.id, {
+        queueDragMappingUpdate(dragState.id, {
           x: snapValue(newX),
           y: snapValue(newY),
           width: snapValue(newW),
@@ -691,11 +679,22 @@ export default function JpgTemplateMapper({
         })
       }
     },
-    [dragState, mappings, snapValue]
+    [dragState, mappings, queueDragMappingUpdate, snapValue]
   )
 
   const handleMouseUp = useCallback(() => {
     if (dragState) {
+      if (dragFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragFrameRef.current)
+        dragFrameRef.current = null
+      }
+      const pending = pendingDragUpdateRef.current
+      if (pending) {
+        setMappings((prev) =>
+          prev.map((m) => (m.id === pending.id ? { ...m, ...pending.updates } : m))
+        )
+        pendingDragUpdateRef.current = null
+      }
       // Save undo state when drag ends
       pushToHistory(mappings.map(m => {
         if (m.id === dragState.id) {
@@ -792,6 +791,14 @@ export default function JpgTemplateMapper({
     }
   }, [dragState, handleMouseMove, handleMouseUp])
 
+  useEffect(() => {
+    return () => {
+      if (dragFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragFrameRef.current)
+      }
+    }
+  }, [])
+
   const handleSave = async () => {
     if (!imageUrl) return
     setSaving(true)
@@ -823,41 +830,6 @@ export default function JpgTemplateMapper({
   if (!imageUrl) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-      {/* ID Size Dialog shown on first load */}
-      {showIdSizeDialog && (
-        <IdSizeDialog
-          initial={{ preset: cardSizePreset, width: cardWidth, height: cardHeight, orientation: cardOrientation === "landscape" ? "horizontal" : "vertical", sides: printSides === "both" ? "both" : "one" }}
-          onOk={(cfg: IdSizeConfig) => {
-            if (!cardSizeLocked) {
-              const orient = cfg.orientation === "horizontal" ? "landscape" : "portrait" as const
-              setCardWidth(cfg.width)
-              setCardHeight(cfg.height)
-              setCardWidthStr(String(cfg.width))
-              setCardHeightStr(String(cfg.height))
-              setCardOrientation(orient)
-              setPrintSides(cfg.sides === "both" ? "both" : "front")
-              setCardSizePreset(cfg.preset)
-              autoSaveCardSize(cfg.width, cfg.height, orient)
-            }
-            setShowIdSizeDialog(false)
-          }}
-          onLoadTemplate={(cfg: IdSizeConfig) => {
-            if (!cardSizeLocked) {
-              const orient = cfg.orientation === "horizontal" ? "landscape" : "portrait" as const
-              setCardWidth(cfg.width)
-              setCardHeight(cfg.height)
-              setCardWidthStr(String(cfg.width))
-              setCardHeightStr(String(cfg.height))
-              setCardOrientation(orient)
-              setPrintSides(cfg.sides === "both" ? "both" : "front")
-              setCardSizePreset(cfg.preset)
-              autoSaveCardSize(cfg.width, cfg.height, orient)
-            }
-            setShowIdSizeDialog(false)
-          }}
-          onClose={() => setShowIdSizeDialog(false)}
-        />
-      )}
         <div
           style={{
             background: "white",
@@ -1040,7 +1012,16 @@ export default function JpgTemplateMapper({
   // MAIN MAPPER UI — image loaded, map fields
   // ---------------------------------------------------------------
   return (
-    <div className="mapper-root" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+    <div
+      className="mapper-root"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        touchAction: "pan-y",
+        overscrollBehavior: "auto",
+      }}
+    >
       {/* Top Bar */}
       <div
         style={{
@@ -1181,6 +1162,8 @@ export default function JpgTemplateMapper({
             padding: 0,
             overflow: "hidden",
             boxSizing: "border-box",
+            contain: "layout paint",
+            touchAction: "pan-y",
           }}
         >
           {/* ── Professional Canvas Toolbar ── */}
@@ -1348,7 +1331,21 @@ export default function JpgTemplateMapper({
           </div>
 
           {/* Canvas Area with Zoom */}
-          <div style={{ overflowX: "auto", overflowY: "visible", padding: showRulers && !showPreview ? "36px 36px 36px 40px" : "16px", background: "#0f172a", display: "flex", justifyContent: "center", alignItems: "flex-start" }}>
+          <div
+            style={{
+              overflowX: "auto",
+              overflowY: "visible",
+              WebkitOverflowScrolling: "touch",
+              overscrollBehaviorX: "contain",
+              overscrollBehaviorY: "auto",
+              touchAction: "pan-x pan-y",
+              padding: showRulers && !showPreview ? "36px 36px 36px 40px" : "16px",
+              background: "#0f172a",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "flex-start",
+            }}
+          >
           <div
             ref={containerRef}
             style={{
@@ -1637,6 +1634,7 @@ export default function JpgTemplateMapper({
                       : "none",
                     transition: "box-shadow 0.15s",
                     zIndex: isSelected ? 10 : 1,
+                    touchAction: "pan-y",
                   }}
                 >
                   {m.type === "photo" ? (
@@ -1822,7 +1820,14 @@ export default function JpgTemplateMapper({
         {/* Right: Sidebar */}
         <div
           className="mapper-sidebar"
-          style={{ display: "flex", flexDirection: "column", gap: 10 }}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+            WebkitOverflowScrolling: "touch",
+            touchAction: "pan-y",
+            contain: "layout paint",
+          }}
         >
 
           {/* Card Settings Panel */}

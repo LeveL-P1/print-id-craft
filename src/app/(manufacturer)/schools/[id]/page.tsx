@@ -75,6 +75,8 @@ type SchoolTemplateSummary = {
   templateImageUrl: string | null
   hasBackSide: boolean
   _count?: { classes: number }
+  frontLayout?: any
+  backLayout?: any
   fieldMappings?: any
   fieldConfig?: any
   photoBgColor?: string
@@ -176,6 +178,21 @@ export default function SchoolDetailPage() {
 
   // Batch generation
   const [generatingBatch, setGeneratingBatch] = useState(false)
+  const batchPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const batchPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearBatchPolling = useCallback(() => {
+    if (batchPollIntervalRef.current) {
+      clearInterval(batchPollIntervalRef.current)
+      batchPollIntervalRef.current = null
+    }
+    if (batchPollTimeoutRef.current) {
+      clearTimeout(batchPollTimeoutRef.current)
+      batchPollTimeoutRef.current = null
+    }
+  }, [])
+
+  useEffect(() => clearBatchPolling, [clearBatchPolling])
 
   // Student detail modal
   const [selectedStudent, setSelectedStudent] = useState<StudentData | null>(null)
@@ -211,11 +228,13 @@ export default function SchoolDetailPage() {
 
   // Batch reprocess skipped photo backgrounds
   const [reprocessOpen, setReprocessOpen] = useState(false)
-  const [reprocessMode, setReprocessMode] = useState<"skipped" | "all">("skipped")
+  const [reprocessMode, setReprocessMode] = useState<"skipped" | "unprocessed" | "all">("skipped")
+  const [reprocessBgColor, setReprocessBgColor] = useState("#FFFFFF")
   const [reprocessLoading, setReprocessLoading] = useState(false)
   const [reprocessStarting, setReprocessStarting] = useState(false)
   const [reprocessInfo, setReprocessInfo] = useState<{
     skippedCount: number
+    bgColor?: string
     rembgAvailable: boolean
     activeJob: any | null
   } | null>(null)
@@ -248,6 +267,9 @@ export default function SchoolDetailPage() {
   const [flagColors, setFlagColors] = useState<string[]>([])
   const [flagImages, setFlagImages] = useState<Record<string, string>>({})
   const [flagUploading, setFlagUploading] = useState<string>('')
+  const schoolTemplatesLoadedRef = useRef(false)
+  const templateLoadedRef = useRef(false)
+  const flagsLoadedRef = useRef(false)
 
   const fetchSchool = async () => {
     try {
@@ -261,7 +283,10 @@ export default function SchoolDetailPage() {
     try {
       const res = await fetch(`/api/schools/${schoolId}/templates`, { cache: 'no-store' })
       const data = await res.json()
-      if (data.success) setSchoolTemplates(data.data || [])
+      if (data.success) {
+        setSchoolTemplates(data.data || [])
+        schoolTemplatesLoadedRef.current = true
+      }
     } catch (err) { console.error(err) }
   }
 
@@ -352,7 +377,10 @@ export default function SchoolDetailPage() {
       // cached template (e.g. previous photoBorderRadius value).
       const res = await fetch(`/api/schools/${schoolId}/template`, { cache: 'no-store' })
       const data = await res.json()
-      if (data.success) setTemplateData(data.data)
+      if (data.success) {
+        setTemplateData(data.data)
+        templateLoadedRef.current = true
+      }
     } catch (err) { console.error(err) }
   }
 
@@ -365,12 +393,11 @@ export default function SchoolDetailPage() {
     setStudents([])
     setStudentTotal(0)
     filtersInitialized.current = false
-    // Load only essential data first (school info, classes, template) for fast initial render
-    Promise.all([fetchSchool(), fetchClasses(false), fetchTemplate(), fetchSchoolTemplates()]).finally(() => setLoading(false))
-    // Defer heavier data fetches slightly to avoid blocking initial render
-    setTimeout(() => { fetchStudents(1, { status: "", classId: "", search: "" }) }, 100)
-    // Always fetch flags on load so house-based flag images persist across refreshes
-    fetchFlags()
+    schoolTemplatesLoadedRef.current = false
+    templateLoadedRef.current = false
+    flagsLoadedRef.current = false
+    // Keep the first paint light; tab-specific data loads when that workflow opens.
+    Promise.all([fetchSchool(), fetchClasses(false)]).finally(() => setLoading(false))
   }, [schoolId])
 
   // Re-fetch students when filters/search change (but not on initial tab switch)
@@ -390,7 +417,20 @@ export default function SchoolDetailPage() {
   useEffect(() => {
     if (tab === "students" && students.length === 0 && !loading) {
       setTabLoading(true)
-      fetchStudents().finally(() => setTabLoading(false))
+      Promise.all([
+        fetchStudents(),
+        templateLoadedRef.current ? Promise.resolve() : fetchTemplate(),
+        schoolTemplatesLoadedRef.current ? Promise.resolve() : fetchSchoolTemplates(),
+        flagsLoadedRef.current ? Promise.resolve() : fetchFlags(),
+      ]).finally(() => setTabLoading(false))
+    }
+    if (tab === "classes" && !loading && !schoolTemplatesLoadedRef.current) {
+      fetchSchoolTemplates()
+    }
+    if (tab === "template" && !loading) {
+      if (!templateLoadedRef.current) fetchTemplate()
+      if (!schoolTemplatesLoadedRef.current) fetchSchoolTemplates()
+      if (!flagsLoadedRef.current) fetchFlags()
     }
     if (tab === "batches" && batches.length === 0 && !loading) {
       setTabLoading(true)
@@ -523,6 +563,61 @@ export default function SchoolDetailPage() {
     const tpl = schoolTemplates.find(t => t.id === tid) || cls.template
     if (!tpl) return "No template"
     return cls.templateId ? tpl.name : `${tpl.name} (default)`
+  }
+
+  const normalizeTemplateLookupName = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/\b(template|school|id|card|class|standard|std)\b/g, " ")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim()
+
+  const hasTemplateContent = (template: any) => {
+    if (!template) return false
+    const frontMappings = Array.isArray(template.fieldMappings) ? template.fieldMappings : []
+    const frontLayout = Array.isArray(template.frontLayout) ? template.frontLayout : []
+    return Boolean(template.templateImageUrl || frontMappings.length > 0 || frontLayout.length > 0)
+  }
+
+  const resolveStudentTemplate = (
+    studentClass: ClassData | undefined,
+    student: StudentData,
+    fallbackTemplate: any,
+  ) => {
+    const explicitTemplate = studentClass?.templateId
+      ? schoolTemplates.find(t => t.id === studentClass.templateId) || studentClass.template
+      : null
+
+    if (hasTemplateContent(explicitTemplate)) return explicitTemplate
+
+    const className =
+      studentClass?.name ||
+      student.class?.name ||
+      student.formData?.class ||
+      student.formData?.Class ||
+      student.formData?.className ||
+      student.formData?.["Class Name"] ||
+      ""
+    const normalizedClassName = normalizeTemplateLookupName(String(className))
+
+    if (normalizedClassName) {
+      const classMatchedTemplate = schoolTemplates
+        .map((template) => {
+          const normalizedTemplateName = normalizeTemplateLookupName(template.name || "")
+          if (!normalizedTemplateName || !hasTemplateContent(template)) return { template, score: 0 }
+          if (normalizedTemplateName === normalizedClassName) return { template, score: 100 }
+          if (normalizedTemplateName.startsWith(`${normalizedClassName} `)) return { template, score: 80 }
+          if (normalizedTemplateName.endsWith(` ${normalizedClassName}`)) return { template, score: 70 }
+          if (normalizedTemplateName.includes(normalizedClassName)) return { template, score: 50 }
+          return { template, score: 0 }
+        })
+        .sort((a, b) => b.score - a.score)[0]
+
+      if (classMatchedTemplate?.score > 0) return classMatchedTemplate.template
+    }
+
+    const defaultTemplate = schoolTemplates.find(hasTemplateContent)
+    return defaultTemplate || explicitTemplate || fallbackTemplate
   }
 
   const handleAssignClassTemplate = async (classId: string, templateId: string) => {
@@ -744,6 +839,7 @@ export default function SchoolDetailPage() {
   const handleGenerateBatch = async () => {
     if (!confirm(`Generate print batch for all submitted/approved students in ${school?.name}?`)) return
     setGeneratingBatch(true)
+    clearBatchPolling()
     try {
       const res = await fetch(`/api/schools/${schoolId}/batches`, { method: "POST" })
       const data = await res.json()
@@ -751,18 +847,22 @@ export default function SchoolDetailPage() {
         toast.success(`Batch generation started! ${data.data.studentCount} students included.`)
         // Poll for completion
         const batchId = data.data.batchId
-        const poll = setInterval(async () => {
+        batchPollIntervalRef.current = setInterval(async () => {
           const r = await fetch(`/api/schools/${schoolId}/batches/${batchId}`)
           const d = await r.json()
           if (d.success && d.data.status === "READY") {
-            clearInterval(poll)
+            clearBatchPolling()
             toast.success("Batch is ready for download!")
             fetchBatches()
             setGeneratingBatch(false)
           }
         }, 3000)
         // Safety timeout
-        setTimeout(() => { clearInterval(poll); setGeneratingBatch(false); fetchBatches() }, 120000)
+        batchPollTimeoutRef.current = setTimeout(() => {
+          clearBatchPolling()
+          setGeneratingBatch(false)
+          fetchBatches()
+        }, 120000)
       } else {
         toast.error(data.error)
         setGeneratingBatch(false)
@@ -1230,16 +1330,17 @@ export default function SchoolDetailPage() {
     setAllStudentsList([])
   }
 
-  const fetchReprocessInfo = async (mode: "skipped" | "all" = reprocessMode) => {
+  const fetchReprocessInfo = async (mode: "skipped" | "unprocessed" | "all" = reprocessMode) => {
     setReprocessLoading(true)
     try {
       const params = new URLSearchParams()
       if (classFilter) params.set("classId", classFilter)
-      if (mode === "all") params.set("mode", "all")
+      params.set("mode", mode)
       const res = await fetch(`/api/schools/${schoolId}/students/reprocess-photos?${params.toString()}`)
       const data = await res.json()
       if (data.success) {
         setReprocessInfo(data.data)
+        if (data.data.bgColor) setReprocessBgColor(data.data.bgColor)
       } else {
         toast.error(data.error || "Failed to load reprocess info")
       }
@@ -1250,13 +1351,17 @@ export default function SchoolDetailPage() {
     }
   }
 
-  const openReprocessModal = async (mode: "skipped" | "all") => {
+  const openReprocessModal = async (mode: "skipped" | "unprocessed" | "all") => {
     setReprocessMode(mode)
     setReprocessOpen(true)
     await fetchReprocessInfo(mode)
   }
 
-  const startReprocessJob = async () => {
+  const startReprocessJob = async (studentIds?: string[]) => {
+    if (!/^#[0-9a-fA-F]{6}$/.test(reprocessBgColor)) {
+      toast.error("Enter a valid background color like #FFFFFF")
+      return
+    }
     setReprocessStarting(true)
     try {
       const res = await fetch(`/api/schools/${schoolId}/students/reprocess-photos`, {
@@ -1264,8 +1369,10 @@ export default function SchoolDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           classId: classFilter || null,
-          maxStudents: 5000,
+          studentIds,
+          maxStudents: studentIds?.length || 5000,
           mode: reprocessMode,
+          bgColor: reprocessBgColor,
         }),
       })
       const data = await res.json()
@@ -1274,9 +1381,13 @@ export default function SchoolDetailPage() {
         return
       }
       toast.success(
-        reprocessMode === "all"
-          ? "Background AI background processing started for all unprocessed photos — this may take a while."
-          : "Background reprocess started for skipped photos — this may take a while for large schools."
+        studentIds?.length
+          ? "Single photo background processing started."
+          : reprocessMode === "all"
+            ? "Background processing started for the entire selected scope."
+            : reprocessMode === "unprocessed"
+              ? "Background processing started for unprocessed photos."
+              : "Background reprocess started for skipped photos."
       )
       await fetchReprocessInfo(reprocessMode)
     } catch {
@@ -1298,6 +1409,7 @@ export default function SchoolDetailPage() {
           if (f.imageUrl) imgMap[f.color] = f.imageUrl
         }
         setFlagImages(imgMap)
+        flagsLoadedRef.current = true
       }
     } catch (err) { console.error(err) }
   }
@@ -2207,9 +2319,13 @@ export default function SchoolDetailPage() {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
                 Reprocess Skipped Photos
               </button>
+              <button className="btn btn-outline" onClick={() => openReprocessModal("unprocessed")} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#0ea5e9', color: '#0284c7' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 3v3"/><path d="M18.36 5.64l-2.12 2.12"/><path d="M21 12h-3"/><path d="M18.36 18.36l-2.12-2.12"/><path d="M12 21v-3"/><path d="M5.64 18.36l2.12-2.12"/><path d="M3 12h3"/><path d="M5.64 5.64l2.12 2.12"/></svg>
+                Process Unprocessed
+              </button>
               <button className="btn btn-outline" onClick={() => openReprocessModal("all")} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#d946ef', color: '#c026d3' }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="m5 3 1 2.5L8.5 6 6 7 5 9.5 4 7 1.5 6 4 5.5Z"/><path d="m19 17 1 2.5 2.5.5-2.5 1-1 2.5-1-2.5-2.5-1 2.5-1Z"/></svg>
-                Apply AI Background
+                Process Entire Scope
               </button>
               <button className="btn btn-outline" onClick={openAddStudent} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#22c55e', color: '#16a34a' }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
@@ -3191,11 +3307,13 @@ export default function SchoolDetailPage() {
                 <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>
-                      {reprocessMode === "all" ? "🤖 Apply AI Background" : "🎨 Reprocess Skipped Photos"}
+                      {reprocessMode === "all" ? "AI Background: Entire Scope" : reprocessMode === "unprocessed" ? "AI Background: Unprocessed Photos" : "Reprocess Skipped Photos"}
                     </h2>
                     <p style={{ fontSize: 13, color: '#64748b' }}>
                       {reprocessMode === "all"
-                        ? "Run background removal on all student photos that haven't been AI-processed yet."
+                        ? "Run background removal on every photo in the current scope, including photos processed before."
+                        : reprocessMode === "unprocessed"
+                          ? "Run background removal on photos that have not been AI-processed yet."
                         : "Re-run background removal on photos where parents skipped AI cleanup."}
                     </p>
                   </div>
@@ -3210,7 +3328,7 @@ export default function SchoolDetailPage() {
                         <div style={{ padding: 16, background: '#eef2ff', borderRadius: 12, textAlign: 'center' }}>
                           <div style={{ fontSize: 28, fontWeight: 700, color: '#4f46e5' }}>{reprocessInfo.skippedCount}</div>
                           <div style={{ fontSize: 12, color: '#6366f1' }}>
-                            {reprocessMode === "all" ? "Unprocessed photos" : "Skipped photos"}
+                            {reprocessMode === "all" ? "Total photos" : reprocessMode === "unprocessed" ? "Unprocessed photos" : "Skipped photos"}
                             {classFilter ? ' (filtered class)' : ''}
                           </div>
                         </div>
@@ -3219,6 +3337,24 @@ export default function SchoolDetailPage() {
                             {reprocessInfo.rembgAvailable ? 'Server ready' : 'Server not configured'}
                           </div>
                           <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>REMBG_SERVICE_URL</div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 12, alignItems: 'center', padding: 12, background: '#f8fafc', borderRadius: 10, border: '1px solid #e2e8f0', marginBottom: 16 }}>
+                        <input
+                          type="color"
+                          value={reprocessBgColor}
+                          onChange={(e) => setReprocessBgColor(e.target.value.toUpperCase())}
+                          style={{ width: 44, height: 36, border: '1px solid #cbd5e1', borderRadius: 8, background: 'white', padding: 2 }}
+                        />
+                        <div>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>Background color after removal</div>
+                          <input
+                            value={reprocessBgColor}
+                            onChange={(e) => setReprocessBgColor(e.target.value.toUpperCase())}
+                            placeholder="#FFFFFF"
+                            maxLength={7}
+                            style={{ marginTop: 6, width: 110, padding: '7px 9px', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: 12, fontWeight: 600, color: '#0f172a' }}
+                          />
                         </div>
                       </div>
                       {!reprocessInfo.rembgAvailable && (
@@ -3238,7 +3374,7 @@ export default function SchoolDetailPage() {
                         <button className="btn btn-outline" onClick={() => fetchReprocessInfo(reprocessMode)} disabled={reprocessLoading}>Refresh</button>
                         <button
                           className="btn btn-primary"
-                          onClick={startReprocessJob}
+                          onClick={() => startReprocessJob()}
                           disabled={
                             reprocessStarting ||
                             !reprocessInfo.rembgAvailable ||
@@ -3247,7 +3383,7 @@ export default function SchoolDetailPage() {
                           }
                           style={{ background: 'linear-gradient(135deg, #6366f1, #4f46e5)' }}
                         >
-                          {reprocessStarting ? 'Starting…' : reprocessMode === "all" ? `Process ${reprocessInfo.skippedCount} Photos` : `Reprocess ${reprocessInfo.skippedCount} Photos`}
+                          {reprocessStarting ? 'Starting…' : reprocessMode === "skipped" ? `Reprocess ${reprocessInfo.skippedCount} Photos` : `Process ${reprocessInfo.skippedCount} Photos`}
                         </button>
                       </div>
                     </>
@@ -3669,6 +3805,9 @@ export default function SchoolDetailPage() {
         const fatherVal = editFd.fatherName || editFd["Father"] || editFd["Father Name"] || editFd.father || ""
         const motherVal = editFd.motherName || editFd["Mother"] || editFd["Mother Name"] || editFd.mother || ""
 
+        const studentClass = classes.find(c => c.id === selectedStudent.classId)
+        const studentTemplate = resolveStudentTemplate(studentClass, selectedStudent, templateData)
+
         // Determine critical missing fields
         const missingItems: string[] = []
         if (!selectedStudent.photoUrl) missingItems.push("Photo")
@@ -3787,37 +3926,37 @@ export default function SchoolDetailPage() {
                 </div>
               )}
 
-              {templateData?.templateImageUrl && templateData?.fieldMappings && (templateData.fieldMappings as any[]).length > 0 && (
+              {studentTemplate?.templateImageUrl && studentTemplate?.fieldMappings && (studentTemplate.fieldMappings as any[]).length > 0 && (
                 <div style={{ marginBottom: 24 }}>
                   <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 16 }}>ID Card Preview (JPG Template)</h3>
                   <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', justifyContent: 'center' }}>
                     <div>
                       <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>FRONT SIDE</div>
                       <JpgCardPreview
-                        templateImageUrl={templateData.templateImageUrl}
-                        fieldMappings={templateData.fieldMappings as any[]}
+                        templateImageUrl={studentTemplate.templateImageUrl}
+                        fieldMappings={studentTemplate.fieldMappings as any[]}
                         formData={selectedStudent.formData as Record<string, string>}
                         studentPhoto={selectedStudent.photoUrl}
                         flagImageUrl={resolveFlagImageUrl(selectedStudent.formData as Record<string, string>, flagImages)}
                         scale={1}
                         watermark="PREVIEW"
-                        cardWidthMm={(templateData as any).cardWidthMm}
-                        cardHeightMm={(templateData as any).cardHeightMm}
+                        cardWidthMm={(studentTemplate as any).cardWidthMm}
+                        cardHeightMm={(studentTemplate as any).cardHeightMm}
                       />
                     </div>
-                    {templateData.hasBackSide && templateData.backTemplateImageUrl && (
+                    {studentTemplate.hasBackSide && studentTemplate.backTemplateImageUrl && (
                       <div>
                         <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>BACK SIDE</div>
                         <JpgCardPreview
-                          templateImageUrl={templateData.backTemplateImageUrl}
-                          fieldMappings={templateData.backFieldMappings as any[] || []}
+                          templateImageUrl={studentTemplate.backTemplateImageUrl}
+                          fieldMappings={studentTemplate.backFieldMappings as any[] || []}
                           formData={selectedStudent.formData as Record<string, string>}
                           studentPhoto={selectedStudent.photoUrl}
                           flagImageUrl={resolveFlagImageUrl(selectedStudent.formData as Record<string, string>, flagImages)}
                           scale={1}
                           watermark="PREVIEW"
-                          cardWidthMm={(templateData as any).cardWidthMm}
-                          cardHeightMm={(templateData as any).cardHeightMm}
+                          cardWidthMm={(studentTemplate as any).cardWidthMm}
+                          cardHeightMm={(studentTemplate as any).cardHeightMm}
                         />
                       </div>
                     )}
@@ -3826,16 +3965,16 @@ export default function SchoolDetailPage() {
               )}
 
               {/* ID Card Preview (Canvas-based, fallback) */}
-              {templateData && !templateData.templateImageUrl && (
+              {studentTemplate && !studentTemplate.templateImageUrl && (
                 <div>
                   <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 16 }}>ID Card Preview</h3>
                   <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', justifyContent: 'center' }}>
                     <div>
                       <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 8, textAlign: 'center' }}>FRONT</div>
                       <IDCardPreview
-                        layout={templateData.frontLayout || []}
-                        widthMm={templateData.cardWidthMm || 85.6}
-                        heightMm={templateData.cardHeightMm || 54.0}
+                        layout={studentTemplate.frontLayout || []}
+                        widthMm={studentTemplate.cardWidthMm || 85.6}
+                        heightMm={studentTemplate.cardHeightMm || 54.0}
                         formData={selectedStudent.formData as Record<string, string>}
                         studentPhoto={selectedStudent.photoUrl}
                         schoolLogo={school?.logoUrl || undefined}
@@ -3843,17 +3982,19 @@ export default function SchoolDetailPage() {
                         scale={3.5}
                       />
                     </div>
-                    <div>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 8, textAlign: 'center' }}>BACK</div>
-                      <IDCardPreview
-                        layout={templateData.backLayout || []}
-                        widthMm={templateData.cardWidthMm || 85.6}
-                        heightMm={templateData.cardHeightMm || 54.0}
-                        formData={selectedStudent.formData as Record<string, string>}
-                        serialNumber={selectedStudent.serialNumber}
-                        scale={3.5}
-                      />
-                    </div>
+                    {studentTemplate.hasBackSide && (
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 8, textAlign: 'center' }}>BACK</div>
+                        <IDCardPreview
+                          layout={studentTemplate.backLayout || []}
+                          widthMm={studentTemplate.cardWidthMm || 85.6}
+                          heightMm={studentTemplate.cardHeightMm || 54.0}
+                          formData={selectedStudent.formData as Record<string, string>}
+                          serialNumber={selectedStudent.serialNumber}
+                          scale={3.5}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -3861,6 +4002,17 @@ export default function SchoolDetailPage() {
               {/* Actions */}
               <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', marginTop: 24, borderTop: '1px solid #e2e8f0', paddingTop: 20, flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    className="btn btn-outline"
+                    style={{ fontSize: 13, borderColor: '#8b5cf6', color: '#7c3aed' }}
+                    disabled={reprocessStarting || !selectedStudent.photoPath}
+                    onClick={async () => {
+                      setReprocessMode("all")
+                      await startReprocessJob([selectedStudent.id])
+                    }}
+                  >
+                    AI Background
+                  </button>
                   <button className="btn btn-outline" style={{ fontSize: 13, borderColor: '#22c55e', color: '#16a34a' }} onClick={() => { handleStatusUpdate(selectedStudent.id, "APPROVED"); setSelectedStudent(null) }}>✓ Approve</button>
                   {selectedStudent.status === "FLAGGED" ? (
                     <button className="btn btn-outline" style={{ fontSize: 13, borderColor: '#3b82f6', color: '#2563eb' }} onClick={() => { handleUnflag(selectedStudent.id); setSelectedStudent(null) }}>Unflag</button>

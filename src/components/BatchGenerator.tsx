@@ -69,6 +69,9 @@ type BatchGeneratorProps = {
 const TEMPLATE_HINT = "/template" // URLs containing this are treated as long-lived
 const PHOTO_CACHE_MAX = 80        // recent N student photos kept in memory
 const DATA_URL_CACHE_MAX = 40     // recent N data URLs
+const IMAGE_PREFETCH_CONCURRENCY = 8
+const DATA_URL_MAX_DIM = 900
+const DATA_URL_JPEG_QUALITY = 0.9
 
 const imageCache = new Map<string, HTMLImageElement>()
 const dataUrlCache = new Map<string, string>()
@@ -114,6 +117,25 @@ async function getCachedImage(url: string): Promise<HTMLImageElement | null> {
   } catch { return null }
 }
 
+async function prefetchImageUrls<T>(
+  urls: string[],
+  loader: (url: string) => Promise<T>,
+  concurrency = IMAGE_PREFETCH_CONCURRENCY
+) {
+  const uniqueUrls = Array.from(new Set(urls.filter(Boolean)))
+  let next = 0
+  const workers = Array.from(
+    { length: Math.min(concurrency, uniqueUrls.length) },
+    async () => {
+      while (next < uniqueUrls.length) {
+        const url = uniqueUrls[next++]
+        await loader(url).catch(() => null)
+      }
+    }
+  )
+  await Promise.all(workers)
+}
+
 /** Convert an image URL to a base64 data URL (needed for SVG embedding) */
 async function imageToDataUrl(url: string): Promise<string> {
   if (url.startsWith("data:")) return url
@@ -126,12 +148,13 @@ async function imageToDataUrl(url: string): Promise<string> {
   const img = await getCachedImage(url)
   if (!img) return url
   const canvas = document.createElement("canvas")
-  canvas.width = img.naturalWidth
-  canvas.height = img.naturalHeight
+  const scale = Math.min(1, DATA_URL_MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight))
+  canvas.width = Math.max(1, Math.round(img.naturalWidth * scale))
+  canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
   const ctx = canvas.getContext("2d")
   if (!ctx) return url
-  ctx.drawImage(img, 0, 0)
-  const dataUrl = canvas.toDataURL("image/jpeg", 1.0)
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+  const dataUrl = canvas.toDataURL("image/jpeg", DATA_URL_JPEG_QUALITY)
   lruSet(dataUrlCache, url, dataUrl, DATA_URL_CACHE_MAX)
   return dataUrl
 }
@@ -1272,11 +1295,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
         // loads inside renderIdCard which block each chunk). Fire all fetches
         // concurrently — the LRU cache captures them for the render loop.
         const photoUrls = students.map((s: any) => s.photoUrl).filter(Boolean)
-        await Promise.all(photoUrls.slice(0, 50).map((u: string) => getCachedImage(u).catch(() => null)))
-        // Continue fetching rest in background while rendering starts
-        if (photoUrls.length > 50) {
-          Promise.all(photoUrls.slice(50).map((u: string) => getCachedImage(u).catch(() => null)))
-        }
+        await prefetchImageUrls(photoUrls.slice(0, 50), getCachedImage)
 
         for (let i = 0; i < students.length; i += CHUNK_SIZE) {
           const chunk = students.slice(i, i + CHUNK_SIZE)
@@ -1377,10 +1396,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
 
         // Prefetch student photos as data URLs for SVG embedding
         const svgPhotoUrls = students.map((s: any) => s.photoUrl).filter(Boolean)
-        await Promise.all(svgPhotoUrls.slice(0, 30).map((u: string) => imageToDataUrl(u).catch(() => null)))
-        if (svgPhotoUrls.length > 30) {
-          Promise.all(svgPhotoUrls.slice(30).map((u: string) => imageToDataUrl(u).catch(() => null)))
-        }
+        await prefetchImageUrls(svgPhotoUrls.slice(0, 30), imageToDataUrl, 4)
 
         for (let i = 0; i < students.length; i += CHUNK_SIZE) {
           const chunk = students.slice(i, i + CHUNK_SIZE)
@@ -1461,10 +1477,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
 
         // Prefetch student photos
         const bmpPhotoUrls = students.map((s: any) => s.photoUrl).filter(Boolean)
-        await Promise.all(bmpPhotoUrls.slice(0, 50).map((u: string) => getCachedImage(u).catch(() => null)))
-        if (bmpPhotoUrls.length > 50) {
-          Promise.all(bmpPhotoUrls.slice(50).map((u: string) => getCachedImage(u).catch(() => null)))
-        }
+        await prefetchImageUrls(bmpPhotoUrls.slice(0, 50), getCachedImage)
 
         for (let i = 0; i < students.length; i += CHUNK_SIZE) {
           const chunk = students.slice(i, i + CHUNK_SIZE)
@@ -1570,10 +1583,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
 
         // Prefetch student photos
         const jpgPhotoUrls = students.map((s: any) => s.photoUrl).filter(Boolean)
-        await Promise.all(jpgPhotoUrls.slice(0, 50).map((u: string) => getCachedImage(u).catch(() => null)))
-        if (jpgPhotoUrls.length > 50) {
-          Promise.all(jpgPhotoUrls.slice(50).map((u: string) => getCachedImage(u).catch(() => null)))
-        }
+        await prefetchImageUrls(jpgPhotoUrls.slice(0, 50), getCachedImage)
 
         for (let i = 0; i < students.length; i += CHUNK_SIZE) {
           const chunk = students.slice(i, i + CHUNK_SIZE)

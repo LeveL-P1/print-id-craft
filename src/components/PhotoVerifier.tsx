@@ -23,6 +23,13 @@ type Props = {
 
 type CameraPermissionState = "prompt" | "granted" | "denied" | "unsupported" | "checking"
 
+const CAMERA_MAX_WIDTH = 720
+const CAMERA_MAX_HEIGHT = 960
+const PHOTO_OUTPUT_MAX_WIDTH = 720
+const PHOTO_OUTPUT_MIN_WIDTH = 600
+const PHOTO_ANALYSIS_MAX_DIM = 640
+const PHOTO_JPEG_QUALITY = 0.88
+
 export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, schoolBgColor }: Props) {
   const [preview, setPreview] = useState<string>(currentPhotoUrl || "")
   const [result, setResult] = useState<PhotoVerificationResult | null>(null)
@@ -32,6 +39,9 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const lastAdjustedFileRef = useRef<File | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const permissionStatusRef = useRef<PermissionStatus | null>(null)
+  const permissionChangeHandlerRef = useRef<(() => void) | null>(null)
 
   const [cameraActive, setCameraActive] = useState(false)
   const [cameraError, setCameraError] = useState("")
@@ -45,6 +55,15 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
   // ──────────────────────────────────────────────────────
   useEffect(() => {
     checkCameraPermission()
+    return () => {
+      const status = permissionStatusRef.current
+      const handler = permissionChangeHandlerRef.current
+      if (status && handler) {
+        status.removeEventListener("change", handler)
+      }
+      streamRef.current?.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+    }
   }, [])
 
   const checkCameraPermission = async () => {
@@ -61,22 +80,20 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         setCameraPermission(permResult.state as CameraPermissionState)
 
         // Listen for changes
-        permResult.addEventListener("change", () => {
+        const handlePermissionChange = () => {
           setCameraPermission(permResult.state as CameraPermissionState)
-        })
-
-        // If permission state is "prompt", proactively request it
-        if (permResult.state === "prompt") {
-          requestCameraPermission()
         }
+        permissionStatusRef.current = permResult
+        permissionChangeHandlerRef.current = handlePermissionChange
+        permResult.addEventListener("change", handlePermissionChange)
+
         return
       }
     } catch {
       // Permissions API not available for camera in some browsers
     }
 
-    // Fallback: proactively request camera to trigger browser permission dialog
-    requestCameraPermission()
+    setCameraPermission("prompt")
   }
 
   const requestCameraPermission = async () => {
@@ -108,18 +125,10 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
   // Camera helpers
   // ──────────────────────────────────────────────────────
   const stopCamera = useCallback(() => {
-    if (stream) {
-      stream.getTracks().forEach(t => t.stop())
-      setStream(null)
-    }
+    streamRef.current?.getTracks().forEach(t => t.stop())
+    streamRef.current = null
+    setStream(null)
     setCameraActive(false)
-  }, [stream])
-
-  useEffect(() => {
-    return () => {
-      if (stream) stream.getTracks().forEach(t => t.stop())
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const startCamera = async (e: React.MouseEvent) => {
@@ -141,7 +150,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
       try {
         // Use current facingMode (user = front, environment = back)
         s = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode, width: { ideal: 720 }, height: { ideal: 960 } },
+          video: { facingMode, width: { ideal: CAMERA_MAX_WIDTH }, height: { ideal: CAMERA_MAX_HEIGHT } },
           audio: false
         })
       } catch {
@@ -149,6 +158,8 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
       }
 
+      streamRef.current?.getTracks().forEach(t => t.stop())
+      streamRef.current = s
       setStream(s)
       setCameraActive(true)
       setCameraPermission("granted")
@@ -178,8 +189,11 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
     if (!videoRef.current) return
     const video = videoRef.current
     const canvas = document.createElement("canvas")
-    const w = video.videoWidth || 720
-    const h = video.videoHeight || 960
+    const srcW = video.videoWidth || CAMERA_MAX_WIDTH
+    const srcH = video.videoHeight || CAMERA_MAX_HEIGHT
+    const scale = Math.min(1, CAMERA_MAX_WIDTH / srcW, CAMERA_MAX_HEIGHT / srcH)
+    const w = Math.max(1, Math.round(srcW * scale))
+    const h = Math.max(1, Math.round(srcH * scale))
     canvas.width = w
     canvas.height = h
     const ctx = canvas.getContext("2d")
@@ -189,7 +203,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         ctx.translate(canvas.width, 0)
         ctx.scale(-1, 1)
       }
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+      ctx.drawImage(video, 0, 0, srcW, srcH, 0, 0, canvas.width, canvas.height)
 
       canvas.toBlob((blob) => {
         if (blob) {
@@ -197,7 +211,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
           stopCamera()
           handleFile(file)
         }
-      }, "image/jpeg", 0.95)
+      }, "image/jpeg", PHOTO_JPEG_QUALITY)
     }
   }
 
@@ -213,7 +227,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
 
     try {
       const s = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: newMode, width: { ideal: 720 }, height: { ideal: 960 } },
+        video: { facingMode: newMode, width: { ideal: CAMERA_MAX_WIDTH }, height: { ideal: CAMERA_MAX_HEIGHT } },
         audio: false
       })
       setStream(s)
@@ -254,9 +268,12 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         const ctx = canvas.getContext("2d")
         if (!ctx) { URL.revokeObjectURL(url); resolve(getFailResult()); return }
 
-        canvas.width = img.width
-        canvas.height = img.height
-        ctx.drawImage(img, 0, 0)
+        const analysisScale = Math.min(1, PHOTO_ANALYSIS_MAX_DIM / Math.max(img.width, img.height))
+        const analysisW = Math.max(1, Math.round(img.width * analysisScale))
+        const analysisH = Math.max(1, Math.round(img.height * analysisScale))
+        canvas.width = analysisW
+        canvas.height = analysisH
+        ctx.drawImage(img, 0, 0, analysisW, analysisH)
 
         const checks: CheckResult[] = []
 
@@ -311,7 +328,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         })
 
         // ── 6. Brightness Check ──
-        const brightness = analyzeBrightness(ctx, img.width, img.height)
+        const brightness = analyzeBrightness(ctx, analysisW, analysisH)
         const tooDark = brightness.avg < 50
         const tooBright = brightness.avg > 210
         checks.push({
@@ -336,6 +353,12 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         // soft JPEGs. We only surface a friendly warning when the score is low.
         const blurScore = detectBlur(ctx, img.width, img.height)
         const isBlurry = blurScore <= 8
+        // Threshold lowered (15 → 8) because the previous value rejected
+        // many in-focus phone-camera shots — phone JPEGs are heavily
+        // denoised, which suppresses the high-frequency content the
+        // Laplacian variance measures. We still flag genuinely smeared
+        // images but no longer reject normal phone selfies.
+        const blurScore = detectBlur(ctx, analysisW, analysisH)
         checks.push({
           passed: !isBlurry,
           severity: "warning",
@@ -352,7 +375,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         // The decision is exposed via a custom property `_bgQualityGood` on
         // the check object so handleFile() can read it without re-running the
         // analysis.
-        const bg = analyzeBackgroundUniformity(ctx, img.width, img.height)
+        const bg = analyzeBackgroundUniformity(ctx, analysisW, analysisH)
         const target = parseColor(schoolBgColor)
         const detectedColorDistance = target ? Math.round(colorDistance(bg.dominantRgb, target)) : null
         // Uniform enough to call "plain": score >= 75 AND dominant bin > 60%.
@@ -534,6 +557,9 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         // Warnings are advisory — only true critical failures block upload.
         const valid = criticalFails.length === 0
         const canOverride = criticalFails.length === 0
+        const warningFails = checks.filter(c => !c.passed && c.severity === "warning")
+        const valid = criticalFails.length === 0 && warningFails.length === 0
+        const canOverride = true
 
         resolve({ valid, canOverride, checks })
       }
@@ -1168,13 +1194,14 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
           }
         }
 
-        canvas.width = Math.max(600, Math.round(sw))
+        canvas.width = Math.min(PHOTO_OUTPUT_MAX_WIDTH, Math.max(PHOTO_OUTPUT_MIN_WIDTH, Math.round(sw)))
         canvas.height = Math.round(canvas.width / targetRatio)
 
         // Auto white-balance + brightness + contrast correction
         const tempCanvas = document.createElement("canvas")
-        tempCanvas.width = Math.round(sw)
-        tempCanvas.height = Math.round(sh)
+        const tempScale = Math.min(1, PHOTO_ANALYSIS_MAX_DIM / Math.max(sw, sh))
+        tempCanvas.width = Math.max(1, Math.round(sw * tempScale))
+        tempCanvas.height = Math.max(1, Math.round(sh * tempScale))
         const tempCtx = tempCanvas.getContext("2d")
         if (tempCtx) {
           tempCtx.drawImage(img, sx, sy, sw, sh, 0, 0, tempCanvas.width, tempCanvas.height)
@@ -1208,7 +1235,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
 
         canvas.toBlob((blob) => {
           resolve(blob ? new File([blob], "adjusted.jpg", { type: "image/jpeg" }) : file)
-        }, "image/jpeg", 0.95)
+        }, "image/jpeg", PHOTO_JPEG_QUALITY)
       }
       img.onerror = () => { URL.revokeObjectURL(url); resolve(file) }
       img.src = url
@@ -1569,7 +1596,21 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
                           ⚠️ Minor issues detected — they may affect ID card quality. Consider re-uploading a better photo.
                         </div>
                       )}
-                      <div style={{ display: 'flex', gap: 8 }}>
+                      {result.canOverride && (
+                        <div style={{
+                          padding: '10px 12px',
+                          borderRadius: 10,
+                          background: '#eff6ff',
+                          border: '1px solid #bfdbfe',
+                          marginBottom: 10,
+                          fontSize: 11,
+                          color: '#1e40af',
+                          lineHeight: 1.5
+                        }}>
+                          If this is the only available student photo, you can continue with it. The checks above will stay visible for review.
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); setPreview(""); setResult(null); lastAdjustedFileRef.current = null }}
@@ -1578,24 +1619,31 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
                             background: criticalFails.length > 0 ? '#ef4444' : '#f1f5f9',
                             color: criticalFails.length > 0 ? 'white' : '#64748b',
                             border: 'none', borderRadius: 8,
-                            cursor: 'pointer', fontWeight: 700, flex: 1
+                            cursor: 'pointer', fontWeight: 700, flex: '1 1 160px',
+                            minHeight: 42
                           }}
                         >
                           📷 {criticalFails.length > 0 ? "Upload a Proper ID Photo" : "Re-upload Photo"}
                         </button>
-                        {/* Only allow force-accept if no critical failures */}
-                        {result.canOverride && criticalFails.length === 0 && (
+                        {result.canOverride && (
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); handleForceAccept() }}
                             style={{
-                              fontSize: 12, padding: '8px 16px',
-                              background: '#f0fdf4', color: '#16a34a',
-                              border: '1px solid #bbf7d0', borderRadius: 8,
-                              cursor: 'pointer', fontWeight: 600
+                              fontSize: 13,
+                              padding: '10px 16px',
+                              background: 'linear-gradient(135deg, #2563eb, #4f46e5)',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: 8,
+                              cursor: 'pointer',
+                              fontWeight: 800,
+                              flex: '1.25 1 190px',
+                              minHeight: 42,
+                              boxShadow: '0 6px 16px rgba(37,99,235,0.22)'
                             }}
                           >
-                            Use Anyway
+                            Use photo anyway
                           </button>
                         )}
                       </div>

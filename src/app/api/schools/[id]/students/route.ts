@@ -6,12 +6,15 @@ import { getNextStudentSerial } from "@/lib/student-serial"
 import { withStudentPhotoUrl } from "@/lib/student-photo-url"
 import { buildStudentIndexData } from "@/lib/student-index"
 import { normalizeFormValue } from "@/lib/field-resolver"
+import { reportSlowOperation } from "@/lib/observability"
 
 // Optimize: prefer longer-running function for connection reuse
 export const maxDuration = 10
 
 export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
+export async function GET(req: Request, { params }: { params: { id: string } }) {
+  const startedAt = Date.now()
   try {
     const session = await getServerSession(authOptions)
     if (!session || (session.user?.role !== "MANUFACTURER" && session.user?.role !== "TEACHER")) {
@@ -77,6 +80,14 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
 
     // Cache for 10 seconds, serve stale for 30s while revalidating
     response.headers.set("Cache-Control", "private, max-age=10, stale-while-revalidate=30")
+    await reportSlowOperation({
+      name: "api.students.list",
+      durationMs: Date.now() - startedAt,
+      thresholdMs: 1_500,
+      schoolId: params.id,
+      userId: session.user?.id,
+      metadata: { page, limit, status, classId, hasSearch: Boolean(search?.trim()), total },
+    })
     return response
   } catch (error) {
     console.error("GET students error:", error)

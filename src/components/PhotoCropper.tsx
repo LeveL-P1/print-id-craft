@@ -14,6 +14,9 @@ type Props = {
 
 type Rect = { x: number; y: number; w: number; h: number }
 
+const CROP_OUTPUT_MAX_WIDTH = 720
+const CROP_JPEG_QUALITY = 0.88
+
 /**
  * PhotoCropper — interactive crop UI with a fixed aspect ratio.
  *
@@ -178,13 +181,16 @@ export default function PhotoCropper({
     const sh = Math.max(1, Math.round(crop.h * scaleY))
     const img = imgRef.current
     if (!img) return
+    const outputScale = Math.min(1, CROP_OUTPUT_MAX_WIDTH / sw)
+    const outputW = Math.max(1, Math.round(sw * outputScale))
+    const outputH = Math.max(1, Math.round(sh * outputScale))
     const canvas = document.createElement("canvas")
-    canvas.width = sw
-    canvas.height = sh
+    canvas.width = outputW
+    canvas.height = outputH
     const ctx = canvas.getContext("2d")
     if (!ctx) return
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.95)
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outputW, outputH)
+    const dataUrl = canvas.toDataURL("image/jpeg", CROP_JPEG_QUALITY)
     onCropped(dataUrl)
   }
 

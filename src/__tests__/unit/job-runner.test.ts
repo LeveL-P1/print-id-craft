@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { runPendingJobs } from "@/lib/jobs/runner"
 import { prisma } from "@/lib/prisma"
+import { processExportArchive } from "@/lib/jobs/processors/export-archive"
 
 vi.mock("@/lib/jobs/processors/export-archive", () => ({
   processExportArchive: vi.fn().mockResolvedValue({
@@ -49,7 +50,14 @@ describe("runPendingJobs", () => {
       type: "EXPORT_SCHOOL_ARCHIVE",
       status: "PENDING",
       schoolId: "s1",
-      payload: { maxStudents: 100 },
+      payload: {
+        classId: null,
+        status: null,
+        includePhotos: true,
+        maxStudents: 100,
+        totalStudents: 1,
+        format: "archive",
+      },
       attempts: 0,
     }
 
@@ -90,5 +98,29 @@ describe("runPendingJobs", () => {
 
     expect(processed).toHaveLength(1)
     expect(processed[0]).toMatchObject({ jobId: "job-backup", status: "COMPLETED" })
+  })
+
+  it("rejects malformed job payloads before running processors", async () => {
+    const job = {
+      id: "job-bad",
+      type: "EXPORT_SCHOOL_ARCHIVE",
+      status: "PENDING",
+      schoolId: "s1",
+      payload: { maxStudents: 100 },
+      attempts: 1,
+    }
+
+    ;(prisma.job.findFirst as any).mockResolvedValueOnce(job)
+    ;(prisma.job.updateMany as any)
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 })
+    ;(prisma.job.findUnique as any).mockResolvedValueOnce({ ...job, status: "RUNNING", attempts: 2 })
+    ;(prisma.job.update as any).mockResolvedValue({})
+
+    const processed = await runPendingJobs(1)
+
+    expect(processed).toEqual([{ jobId: "job-bad", type: "EXPORT_SCHOOL_ARCHIVE", status: "FAILED" }])
+    expect(processExportArchive).not.toHaveBeenCalled()
   })
 })

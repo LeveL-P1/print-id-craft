@@ -12,14 +12,6 @@ type DashboardData = {
   recentSchools: any[]
 }
 
-type OpsEvent = {
-  id: string
-  type: string
-  severity: string
-  message: string
-  createdAt: string
-}
-
 type OpsJob = {
   id: string
   type: string
@@ -29,14 +21,25 @@ type OpsJob = {
   updatedAt: string
 }
 
+type OpsSummary = {
+  pending: number
+  running: number
+  failed: number
+  completedRecently: number
+  failedRecently: number
+  staleRunning: number
+  oldestPendingAgeSeconds: number
+  alerts: Array<{ level: string; message: string }>
+}
+
 export default function ManufacturerDashboard() {
   const router = useRouter()
   const [data, setData] = useState<DashboardData | null>(null)
   const [statsLoaded, setStatsLoaded] = useState(false)
   const [schoolsLoaded, setSchoolsLoaded] = useState(false)
   const [health, setHealth] = useState<{ status: string; db: string; storage: string } | null>(null)
-  const [events, setEvents] = useState<OpsEvent[]>([])
   const [jobs, setJobs] = useState<OpsJob[]>([])
+  const [jobSummary, setJobSummary] = useState<OpsSummary | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -115,13 +118,13 @@ export default function ManufacturerDashboard() {
 
     Promise.all([
       fetch("/api/health", { cache: "no-store" }).then((res) => res.json()).catch(() => null),
-      fetch("/api/admin/events?limit=5", { cache: "no-store" }).then((res) => res.ok ? res.json() : null).catch(() => null),
       fetch("/api/admin/jobs?limit=5", { cache: "no-store" }).then((res) => res.ok ? res.json() : null).catch(() => null),
-    ]).then(([healthJson, eventsJson, jobsJson]) => {
+      fetch("/api/admin/jobs?summary=1&minutes=60", { cache: "no-store" }).then((res) => res.ok ? res.json() : null).catch(() => null),
+    ]).then(([healthJson, jobsJson, jobsSummaryJson]) => {
       if (cancelled) return
       if (healthJson) setHealth({ status: healthJson.status, db: healthJson.db, storage: healthJson.storage })
-      if (eventsJson?.success) setEvents(eventsJson.data || [])
       if (jobsJson?.success) setJobs(jobsJson.data || [])
+      if (jobsSummaryJson?.success) setJobSummary(jobsSummaryJson.data || null)
     })
 
     return () => { cancelled = true }
@@ -225,9 +228,20 @@ export default function ManufacturerDashboard() {
   ]
 
   const healthColor = health?.status === "ok" ? "#16a34a" : health?.status === "degraded" ? "#d97706" : "#dc2626"
+  const queueHealthColor =
+    (jobSummary?.staleRunning || 0) > 0 || (jobSummary?.failedRecently || 0) > 0
+      ? "#dc2626"
+      : (jobSummary?.pending || 0) > 0 || (jobSummary?.running || 0) > 0
+        ? "#2563eb"
+        : "#16a34a"
   const formatTime = (value: string) => {
     const time = new Date(value).getTime()
     return Number.isFinite(time) ? new Date(value).toLocaleString() : "-"
+  }
+  const formatAge = (seconds: number) => {
+    if (seconds < 60) return `${seconds}s`
+    if (seconds < 3600) return `${Math.round(seconds / 60)}m`
+    return `${Math.round(seconds / 3600)}h`
   }
 
   return (
@@ -300,23 +314,37 @@ export default function ManufacturerDashboard() {
             </div>
 
             <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", textTransform: "uppercase", marginBottom: 12 }}>Recent Events</div>
-              {events.length > 0 ? (
-                <div style={{ display: "grid", gap: 10 }}>
-                  {events.map((event) => (
-                    <div key={event.id} style={{ borderBottom: "1px solid #f1f5f9", paddingBottom: 8 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{event.type}</span>
-                        <span style={{ fontSize: 11, color: event.severity === "ERROR" ? "#dc2626" : "#d97706", fontWeight: 700 }}>{event.severity}</span>
-                      </div>
-                      <div style={{ fontSize: 12, color: "#64748b", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{event.message}</div>
-                      <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>{formatTime(event.createdAt)}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>Queue Health</div>
+                <span className="status-badge" style={{ background: `${queueHealthColor}18`, color: queueHealthColor }}>
+                  {jobSummary ? ((jobSummary.staleRunning || jobSummary.failedRecently) ? "needs attention" : "healthy") : "checking"}
+                </span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 12 }}>
+                {[
+                  ["Pending", jobSummary?.pending ?? "-"],
+                  ["Running", jobSummary?.running ?? "-"],
+                  ["Done 1h", jobSummary?.completedRecently ?? "-"],
+                  ["Failed 1h", jobSummary?.failedRecently ?? "-"],
+                ].map(([label, value]) => (
+                  <div key={label} style={{ background: "#f8fafc", borderRadius: 10, padding: "10px 8px", textAlign: "center" }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>{value}</div>
+                    <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>{label}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 12, color: "#64748b" }}>
+                Oldest wait: {jobSummary ? formatAge(jobSummary.oldestPendingAgeSeconds) : "-"}
+              </div>
+              {jobSummary?.alerts?.length ? (
+                <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+                  {jobSummary.alerts.slice(0, 2).map((alert) => (
+                    <div key={alert.message} style={{ fontSize: 12, color: alert.level === "critical" ? "#dc2626" : "#b45309", fontWeight: 700 }}>
+                      {alert.message}
                     </div>
                   ))}
                 </div>
-              ) : (
-                <div style={{ fontSize: 13, color: "#16a34a" }}>No recent backend failure events.</div>
-              )}
+              ) : null}
             </div>
 
             <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>

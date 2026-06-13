@@ -1,5 +1,15 @@
 const { withSentryConfig } = require('@sentry/nextjs')
 
+const supabaseImageHost = (() => {
+  try {
+    return process.env.NEXT_PUBLIC_SUPABASE_URL
+      ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname
+      : null
+  } catch {
+    return null
+  }
+})()
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Disable SWC Minify due to SyntaxError in onnxruntime-web pre-compiled code
@@ -12,12 +22,9 @@ const nextConfig = {
   poweredByHeader: false,
   // Performance: optimize images
   images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: '**.supabase.co',
-      },
-    ],
+    remotePatterns: supabaseImageHost
+      ? [{ protocol: 'https', hostname: supabaseImageHost }]
+      : [],
     formats: ['image/avif', 'image/webp'],
     minimumCacheTTL: 86400,
   },

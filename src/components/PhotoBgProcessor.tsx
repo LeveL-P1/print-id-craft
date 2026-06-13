@@ -22,6 +22,9 @@ type Props = {
   onStatus?: (status: PhotoBgStatus) => void
 }
 
+const BG_WORK_MAX_DIM = 768
+const BG_JPEG_QUALITY = 0.88
+
 /**
  * Robustly convert any photo URL (data URL, blob URL, or remote URL) to a Blob.
  * fetch() works for data URLs in modern browsers, but we fall back to manual
@@ -63,7 +66,7 @@ async function urlToBlob(url: string): Promise<Blob> {
       canvas.toBlob((blob) => {
         if (blob) resolve(blob)
         else reject(new Error("Canvas toBlob failed"))
-      }, "image/jpeg", 0.95)
+      }, "image/jpeg", BG_JPEG_QUALITY)
     }
     img.onerror = () => reject(new Error("Image load failed"))
     img.src = url
@@ -118,12 +121,13 @@ export default function PhotoBgProcessor({
       } else {
         // Convert blob/remote URL to data URL for stable display
         const canvas = document.createElement("canvas")
-        canvas.width = img.naturalWidth
-        canvas.height = img.naturalHeight
+        const scale = Math.min(1, BG_WORK_MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight))
+        canvas.width = Math.max(1, Math.round(img.naturalWidth * scale))
+        canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
         const ctx = canvas.getContext("2d")
         if (ctx) {
-          ctx.drawImage(img, 0, 0)
-          setPhotoDataUrl(canvas.toDataURL("image/jpeg", 0.92))
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+          setPhotoDataUrl(canvas.toDataURL("image/jpeg", BG_JPEG_QUALITY))
         } else {
           setPhotoDataUrl(photoUrl)
         }
@@ -152,14 +156,14 @@ export default function PhotoBgProcessor({
 
     try {
       // Tier 2: plain wall with wrong colour — instant flood-fill (no AI).
-      const { canvas, ctx } = await loadImageToCanvas(sourceUrl)
+      const { canvas, ctx } = await loadImageToCanvas(sourceUrl, BG_WORK_MAX_DIM)
       const recolored = recolorPlainBackgroundOnCanvas(
         ctx, canvas.width, canvas.height, schoolBgColor
       )
       if (recolored) {
         setProgress(100)
         setProgressMsg("Background updated!")
-        const resultUrl = canvas.toDataURL("image/jpeg", 0.95)
+        const resultUrl = canvas.toDataURL("image/jpeg", BG_JPEG_QUALITY)
         setBgStatus(PHOTO_BG_STATUS.PLAIN)
         setProcessedUrl(resultUrl)
         setProcessing(false)
@@ -167,7 +171,7 @@ export default function PhotoBgProcessor({
       }
 
       let blob = await urlToBlob(sourceUrl)
-      blob = await downscaleBlob(blob, 768)
+      blob = await downscaleBlob(blob, BG_WORK_MAX_DIM)
 
       const applyTransparentBlob = (resultBlob: Blob) => {
         if (autoSkippedRef.current) return
@@ -184,41 +188,40 @@ export default function PhotoBgProcessor({
         }
         reader.readAsDataURL(resultBlob)
       }
-
-      // Tier 3a: in-browser AI (free, runs on parent's device).
-      setProgress(20)
-      setProgressMsg("Cleaning background with AI…")
-      try {
-        const resultBlob = await removeBackgroundWithBestModel(blob, (msg, pct) => {
-          setProgress(30 + pct * 0.5)
-          setProgressMsg(msg)
-        })
-        applyTransparentBlob(resultBlob)
-        return
-      } catch (clientErr) {
-        console.warn("Client background removal failed, trying server fallback:", clientErr)
-      }
-
-      // Tier 3b: server rembg fallback (retries / messy photos only).
+      // Tier 3a: server cleanup first so heavy AI does not run on phones.
       if (!serverAttemptedRef.current) {
         serverAttemptedRef.current = true
-        setProgress(55)
-        setProgressMsg("Trying backup server cleanup…")
+        setProgress(20)
+        setProgressMsg("Cleaning background on server...")
         try {
           const resultBlob = await removeBackgroundViaServer(blob, {
             bgColor: schoolBgColor,
             submitToken,
             schoolId,
             onProgress: (msg, pct) => {
-              setProgress(55 + pct * 0.35)
+              setProgress(20 + pct * 0.65)
               setProgressMsg(msg)
             },
           })
           applyTransparentBlob(resultBlob)
           return
         } catch (serverErr) {
-          console.error("Server background removal failed:", serverErr)
+          console.warn("Server background removal failed, trying device fallback:", serverErr)
         }
+      }
+
+      // Tier 3b: device fallback when server cleanup is unavailable.
+      setProgress(35)
+      setProgressMsg("Cleaning background with device fallback...")
+      try {
+        const resultBlob = await removeBackgroundWithBestModel(blob, (msg, pct) => {
+          setProgress(40 + pct * 0.45)
+          setProgressMsg(msg)
+        })
+        applyTransparentBlob(resultBlob)
+        return
+      } catch (clientErr) {
+        console.error("Client background removal failed:", clientErr)
       }
 
       throw new Error("All background removal methods failed")
@@ -456,8 +459,8 @@ export default function PhotoBgProcessor({
       }
 
       const resultUrl = fCtx
-        ? finalCanvas.toDataURL("image/jpeg", 0.95)
-        : canvas.toDataURL("image/jpeg", 0.95)
+        ? finalCanvas.toDataURL("image/jpeg", BG_JPEG_QUALITY)
+        : canvas.toDataURL("image/jpeg", BG_JPEG_QUALITY)
       setProcessedUrl(resultUrl)
     }
     img.src = transparentUrl

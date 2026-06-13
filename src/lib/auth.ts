@@ -3,6 +3,14 @@ import CredentialsProvider from "next-auth/providers/credentials"
 import { prisma } from "@/lib/prisma"
 import bcrypt from "bcryptjs"
 
+const AUTH_DEBUG = process.env.AUTH_DEBUG === "1"
+const authDebug = (message: string) => {
+  if (AUTH_DEBUG) console.log(message)
+}
+const authWarn = (message: string, debugMessage?: string) => {
+  console.error(AUTH_DEBUG && debugMessage ? debugMessage : message)
+}
+
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
@@ -14,40 +22,39 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
-          console.error("[AUTH] Missing credentials")
+          authWarn("[AUTH] Missing credentials")
           throw new Error("Invalid credentials")
         }
 
-        console.log(`[AUTH] Attempting login for: ${credentials.email} (Expected Role: ${credentials.expectedRole})`)
-
         const email = credentials.email.toLowerCase()
+        authDebug(`[AUTH] Attempting login for: ${email} (Expected Role: ${credentials.expectedRole})`)
 
         const user = await prisma.user.findUnique({
           where: { email },
         })
 
         if (!user) {
-          console.error(`[AUTH] User not found: ${email}`)
+          authWarn("[AUTH] User not found", `[AUTH] User not found: ${email}`)
           throw new Error("User not found")
         }
 
         if (!user.password) {
-          console.error(`[AUTH] User has no password set: ${credentials.email}`)
+          authWarn("[AUTH] User has no password set", `[AUTH] User has no password set: ${email}`)
           throw new Error("User not found")
         }
 
         const isMatch = await bcrypt.compare(credentials.password, user.password)
 
         if (!isMatch) {
-          console.error(`[AUTH] Incorrect password for: ${credentials.email}`)
+          authWarn("[AUTH] Incorrect password", `[AUTH] Incorrect password for: ${email}`)
           throw new Error("Incorrect password")
         }
 
-        console.log(`[AUTH] User authenticated: ${credentials.email} (Actual Role: ${user.role})`)
+        authDebug(`[AUTH] User authenticated: ${email} (Actual Role: ${user.role})`)
 
         // Strict role validation — block cross-portal login
         if (credentials.expectedRole && user.role !== credentials.expectedRole) {
-          console.error(`[AUTH] Role mismatch. Expected: ${credentials.expectedRole}, Actual: ${user.role}`)
+          authWarn("[AUTH] Role mismatch", `[AUTH] Role mismatch for ${email}. Expected: ${credentials.expectedRole}, Actual: ${user.role}`)
           if (credentials.expectedRole === "TEACHER" && user.role === "MANUFACTURER") {
             throw new Error("This is the Teacher Login portal. Manufacturer accounts cannot login here.")
           }
@@ -57,7 +64,7 @@ export const authOptions: NextAuthOptions = {
           throw new Error("Invalid login portal for this account type")
         }
 
-        console.log(`[AUTH] Login successful for: ${credentials.email}`)
+        authDebug(`[AUTH] Login successful for: ${email}`)
 
         return {
           id: user.id,
