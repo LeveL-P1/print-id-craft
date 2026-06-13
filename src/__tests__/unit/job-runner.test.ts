@@ -120,7 +120,7 @@ describe("runPendingJobs", () => {
 
     const processed = await runPendingJobs(1)
 
-    expect(processed).toEqual([{ jobId: "job-bad", type: "EXPORT_SCHOOL_ARCHIVE", status: "RETRY" }])
+    expect(processed).toEqual([{ jobId: "job-bad", type: "EXPORT_SCHOOL_ARCHIVE", status: "FAILED" }])
     expect(processExportArchive).not.toHaveBeenCalled()
   })
 })

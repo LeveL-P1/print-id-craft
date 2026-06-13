@@ -1,17 +1,18 @@
 import type { Job, Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { reportError } from "@/lib/observability"
-import { JOB_MAX_ATTEMPTS, JOB_RUN_TIME_BUDGET_MS, JOB_STALE_RUNNING_MINUTES, MAX_JOBS_PER_RUN, validateJobPayload } from "./types"
-import type {
-  ExportArchivePayload,
-  GeneratePrintBatchPayload,
-  GenerateQrPayload,
-  ReprocessPhotosPayload,
+import {
+  JOB_MAX_ATTEMPTS,
+  JOB_RUN_TIME_BUDGET_MS,
+  JOB_STALE_RUNNING_MINUTES,
+  JobValidationError,
+  MAX_JOBS_PER_RUN,
+  isJobValidationError,
+  validateJobPayload,
 } from "./types"
 import { processExportArchive } from "./processors/export-archive"
 import { processGenerateQr } from "./processors/generate-qr"
 import { processExportPlatformBackup } from "./processors/export-platform-backup"
-import type { PlatformBackupPayload } from "./types"
 import { failPrintBatch, processGeneratePrintBatch } from "./processors/generate-print-batch"
 import { processReprocessPhotos } from "./processors/reprocess-photos"
 
@@ -78,9 +79,11 @@ async function completeJob(jobId: string, result: Prisma.InputJsonValue) {
   })
 }
 
-async function failJob(job: Job, error: unknown) {
+async function failJob(job: Job, error: unknown): Promise<"FAILED" | "RETRY"> {
   const message = error instanceof Error ? error.message : String(error)
-  const shouldRetry = job.attempts < JOB_MAX_ATTEMPTS
+  const isValidationFailure = isJobValidationError(error)
+  const shouldRetry = !isValidationFailure && job.attempts < JOB_MAX_ATTEMPTS
+  const status = shouldRetry ? "RETRY" : "FAILED"
 
   await prisma.job.update({
     where: { id: job.id },
@@ -96,19 +99,20 @@ async function failJob(job: Job, error: unknown) {
       type: "JOB_FAILED",
       schoolId: job.schoolId,
       message: `Job ${job.type} failed`,
-      metadata: { jobId: job.id, attempts: job.attempts },
+      metadata: { jobId: job.id, attempts: job.attempts, retryable: !isValidationFailure },
     })
   }
+
+  return status
 }
 
 async function executeJob(job: Job) {
-  const payload = validateJobPayload(job.type, job.payload || {})
-
   switch (job.type) {
     case "EXPORT_PLATFORM_BACKUP": {
+      const payload = validateJobPayload("EXPORT_PLATFORM_BACKUP", job.payload || {})
       const result = await processExportPlatformBackup(
         job.id,
-        payload as PlatformBackupPayload
+        payload
       )
       await completeJob(job.id, result)
       return result
@@ -116,22 +120,24 @@ async function executeJob(job: Job) {
     default: {
       const schoolId = job.schoolId
       if (!schoolId) {
-        throw new Error("Job missing schoolId")
+        throw new JobValidationError(`Job ${job.type} missing schoolId`)
       }
 
       switch (job.type) {
         case "EXPORT_SCHOOL_ARCHIVE": {
-          const result = await processExportArchive(job.id, schoolId, payload as ExportArchivePayload)
+          const payload = validateJobPayload("EXPORT_SCHOOL_ARCHIVE", job.payload || {})
+          const result = await processExportArchive(job.id, schoolId, payload)
           await completeJob(job.id, result)
           return result
         }
         case "GENERATE_QR": {
-          const result = await processGenerateQr(schoolId, payload as GenerateQrPayload)
+          const payload = validateJobPayload("GENERATE_QR", job.payload || {})
+          const result = await processGenerateQr(schoolId, payload)
           await completeJob(job.id, result)
           return result
         }
         case "GENERATE_PRINT_BATCH": {
-          const printPayload = payload as GeneratePrintBatchPayload
+          const printPayload = validateJobPayload("GENERATE_PRINT_BATCH", job.payload || {})
           try {
             const result = await processGeneratePrintBatch(schoolId, printPayload)
             await completeJob(job.id, result)
@@ -142,16 +148,17 @@ async function executeJob(job: Job) {
           }
         }
         case "REPROCESS_PHOTOS": {
+          const payload = validateJobPayload("REPROCESS_PHOTOS", job.payload || {})
           const result = await processReprocessPhotos(
             job.id,
             schoolId,
-            payload as ReprocessPhotosPayload
+            payload
           )
           await completeJob(job.id, result)
           return result
         }
         default:
-          throw new Error(`Unsupported job type: ${job.type}`)
+          throw new JobValidationError(`Unsupported job type: ${job.type}`)
       }
     }
   }
@@ -171,11 +178,11 @@ export async function runPendingJobs(limit = MAX_JOBS_PER_RUN) {
       await executeJob(job)
       processed.push({ jobId: job.id, type: job.type, status: "COMPLETED" })
     } catch (error) {
-      await failJob(job, error)
+      const status = await failJob(job, error)
       processed.push({
         jobId: job.id,
         type: job.type,
-        status: job.attempts >= JOB_MAX_ATTEMPTS ? "FAILED" : "RETRY",
+        status,
       })
     }
 

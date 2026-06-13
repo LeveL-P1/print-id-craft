@@ -6,6 +6,19 @@ import { JOB_STALE_RUNNING_MINUTES } from "@/lib/jobs/types"
 
 export const dynamic = "force-dynamic"
 
+const JOB_STATUSES = ["PENDING", "RUNNING", "COMPLETED", "FAILED"] as const
+const JOB_TYPES = [
+  "IMPORT_STUDENTS",
+  "GENERATE_QR",
+  "GENERATE_PRINT_BATCH",
+  "EXPORT_SCHOOL_ARCHIVE",
+  "EXPORT_PLATFORM_BACKUP",
+  "REPROCESS_PHOTOS",
+] as const
+
+const parseEnumParam = <T extends readonly string[]>(value: string | null, allowed: T): T[number] | undefined =>
+  value && (allowed as readonly string[]).includes(value) ? value : undefined
+
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session || session.user?.role !== "MANUFACTURER") {
@@ -14,8 +27,8 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url)
   const limit = Math.min(Number(url.searchParams.get("limit") || 100), 500)
-  const status = url.searchParams.get("status") || undefined
-  const type = url.searchParams.get("type") || undefined
+  const status = parseEnumParam(url.searchParams.get("status"), JOB_STATUSES)
+  const type = parseEnumParam(url.searchParams.get("type"), JOB_TYPES)
   const schoolId = url.searchParams.get("schoolId") || undefined
   const summary = url.searchParams.get("summary") === "1"
 
@@ -98,8 +111,8 @@ export async function GET(req: Request) {
 
   const jobs = await prisma.job.findMany({
     where: {
-      ...(status ? { status: status as any } : {}),
-      ...(type ? { type: type as any } : {}),
+      ...(status ? { status } : {}),
+      ...(type ? { type } : {}),
       ...(schoolId ? { schoolId } : {}),
     },
     orderBy: { createdAt: "desc" },

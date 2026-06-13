@@ -101,6 +101,8 @@ const wordCount = (s: string): number =>
   (s || "").trim().split(/\s+/).filter(Boolean).length
 
 const ADDRESS_MIN_WORDS = 5
+const PHOTO_UPLOAD_TIMEOUT_MS = 45_000
+const PHOTO_UPLOAD_RETRY_TIMEOUT_MS = 60_000
 
 async function parseApiError(res: Response, fallback: string) {
   const contentType = res.headers.get("content-type") || ""
@@ -116,7 +118,7 @@ async function parseApiError(res: Response, fallback: string) {
   return fallback
 }
 
-async function uploadFormWithTimeout(formData: FormData, timeoutMs = 45_000) {
+async function uploadFormWithTimeout(formData: FormData, timeoutMs = PHOTO_UPLOAD_TIMEOUT_MS) {
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
   try {
@@ -128,6 +130,16 @@ async function uploadFormWithTimeout(formData: FormData, timeoutMs = 45_000) {
   } finally {
     window.clearTimeout(timeout)
   }
+}
+
+const isAbortError = (error: unknown) =>
+  error instanceof DOMException && error.name === "AbortError"
+
+function getUploadNetworkErrorMessage(error: unknown) {
+  if (isAbortError(error)) {
+    return "Photo upload is taking too long. Please try again on a stronger network."
+  }
+  return error instanceof Error ? error.message : "Photo upload failed. Please check your internet and try again."
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -560,22 +572,16 @@ export default function SubmitPage() {
           }
           let uploadRes: Response
           try {
-            uploadRes = await uploadFormWithTimeout(fd)
+            uploadRes = await uploadFormWithTimeout(fd, PHOTO_UPLOAD_TIMEOUT_MS)
           } catch (error) {
-            if (error instanceof DOMException && error.name === "AbortError") {
-              throw new Error("Photo upload is taking too long. Please try again on a stronger network.")
-            }
-            throw error
+            throw new Error(getUploadNetworkErrorMessage(error))
           }
           if (!uploadRes.ok && uploadRes.status >= 500) {
             setUploadProgress(45)
             try {
-              uploadRes = await uploadFormWithTimeout(fd, 60_000)
+              uploadRes = await uploadFormWithTimeout(fd, PHOTO_UPLOAD_RETRY_TIMEOUT_MS)
             } catch (error) {
-              if (error instanceof DOMException && error.name === "AbortError") {
-                throw new Error("Photo upload is taking too long. Please try again on a stronger network.")
-              }
-              throw error
+              throw new Error(getUploadNetworkErrorMessage(error))
             }
           }
           const uploadData = uploadRes.ok
