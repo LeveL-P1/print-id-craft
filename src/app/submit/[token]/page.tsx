@@ -1,7 +1,6 @@
 "use client"
 import { useState, useEffect, useCallback } from "react"
 import { useParams } from "next/navigation"
-import SharedIDCardPreview from "@/components/IDCardPreview"
 import dynamic from "next/dynamic"
 import PhotoVerifier from "@/components/PhotoVerifier"
 import {
@@ -10,6 +9,7 @@ import {
   type FieldRole,
 } from "@/lib/field-resolver"
 import { PHOTO_BG_STATUS, type PhotoBgStatus } from "@/lib/photo-bg-status"
+import { prepareStudentPhotoForUpload } from "@/lib/client-photo-upload"
 
 const JpgCardPreview = dynamic(() => import("@/components/JpgCardPreview"), { ssr: false })
 const PhotoBgProcessor = dynamic(() => import("@/components/PhotoBgProcessor"), { ssr: false })
@@ -101,6 +101,46 @@ const wordCount = (s: string): number =>
   (s || "").trim().split(/\s+/).filter(Boolean).length
 
 const ADDRESS_MIN_WORDS = 5
+const PHOTO_UPLOAD_TIMEOUT_MS = 45_000
+const PHOTO_UPLOAD_RETRY_TIMEOUT_MS = 60_000
+
+async function parseApiError(res: Response, fallback: string) {
+  const contentType = res.headers.get("content-type") || ""
+  if (contentType.includes("application/json")) {
+    const data = await res.json().catch(() => null)
+    return data?.error || data?.detail || fallback
+  }
+
+  const text = await res.text().catch(() => "")
+  if (text && !text.trim().startsWith("<!DOCTYPE")) {
+    return text.slice(0, 180)
+  }
+  return fallback
+}
+
+async function uploadFormWithTimeout(formData: FormData, timeoutMs = PHOTO_UPLOAD_TIMEOUT_MS) {
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch("/api/upload", {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+    })
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}
+
+const isAbortError = (error: unknown) =>
+  error instanceof DOMException && error.name === "AbortError"
+
+function getUploadNetworkErrorMessage(error: unknown) {
+  if (isAbortError(error)) {
+    return "Photo upload is taking too long. Please try again on a stronger network."
+  }
+  return error instanceof Error ? error.message : "Photo upload failed. Please check your internet and try again."
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SampleReferencePhoto — shows a clear illustration of "what a good ID photo
@@ -111,6 +151,21 @@ const ADDRESS_MIN_WORDS = 5
 // ─────────────────────────────────────────────────────────────────────────────
 const SampleReferencePhoto = () => {
   const [hasRealPhoto, setHasRealPhoto] = useState<boolean | null>(null) // null = loading
+
+  useEffect(() => {
+    let cancelled = false
+    fetch("/sample-id-photo.jpg", { method: "HEAD" })
+      .then((res) => {
+        if (!cancelled) setHasRealPhoto(res.ok)
+      })
+      .catch(() => {
+        if (!cancelled) setHasRealPhoto(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   return (
     <div style={{ flex: '0 0 110px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       <div style={{
@@ -122,16 +177,17 @@ const SampleReferencePhoto = () => {
       }}>
         {/* Probe image — hidden if it fails to load. We rely on onLoad/onError
             to decide whether to render the silhouette fallback. */}
-        <img
-          src="/sample-id-photo.jpg"
-          alt="Sample ID photo"
-          onLoad={() => setHasRealPhoto(true)}
-          onError={() => setHasRealPhoto(false)}
-          style={{
-            width: '100%', height: '100%', objectFit: 'cover',
-            display: hasRealPhoto ? 'block' : 'none',
-          }}
-        />
+        {hasRealPhoto === true && (
+          <img
+            src="/sample-id-photo.jpg"
+            alt="Sample ID photo"
+            onError={() => setHasRealPhoto(false)}
+            style={{
+              width: '100%', height: '100%', objectFit: 'cover',
+              display: 'block',
+            }}
+          />
+        )}
 
         {/* Silhouette fallback — drawn only when there is no real photo. */}
         {hasRealPhoto === false && (
@@ -299,9 +355,8 @@ export default function SubmitPage() {
   // localStorage keyed by the class's linkToken so different classes never
   // collide. The draft is cleared on successful submit.
   //
-  // We deliberately use localStorage instead of cookies: cookies are sent
-  // with every request (wasted bandwidth, especially with a base64 photo)
-  // and have a ~4 KB size limit, far too small for the photo data URL.
+  // We persist text/state only. Large base64 photo strings can exceed mobile
+  // storage quotas and block the main thread while the parent is filling data.
   // ───────────────────────────────────────────────────────────────────────────
   const DRAFT_KEY = `submit-draft:${token}`
   const SUBMITTED_KEY = `submit-done:${token}`
@@ -337,8 +392,6 @@ export default function SubmitPage() {
       if (!raw) { setDraftRestored(true); return }
       const draft = JSON.parse(raw) as {
         formData?: Record<string, string>
-        photoPreview?: string
-        croppedPhoto?: string
         bgSkippable?: boolean
         photoVerified?: boolean
         step?: typeof step
@@ -352,13 +405,10 @@ export default function SubmitPage() {
         return
       }
       if (draft.formData) setFormData(draft.formData)
-      if (draft.photoPreview) setPhotoPreview(draft.photoPreview)
-      if (draft.croppedPhoto) setCroppedPhoto(draft.croppedPhoto)
       if (draft.bgSkippable) setBgSkippable(true)
       if (draft.photoVerified) setPhotoVerified(true)
       const hasAnyData =
-        (draft.formData && Object.keys(draft.formData).some(k => k !== "class" && (draft.formData?.[k] || "").trim() !== "")) ||
-        !!draft.photoPreview
+        !!(draft.formData && Object.keys(draft.formData).some(k => k !== "class" && (draft.formData?.[k] || "").trim() !== ""))
       if (hasAnyData) setDraftBanner(true)
       if (draft.formData) {
         checkSubmissionStatus(draft.formData)
@@ -381,8 +431,6 @@ export default function SubmitPage() {
     if (step === "loading" || step === "error" || step === "success") return
     const draft = {
       formData,
-      photoPreview,
-      croppedPhoto,
       bgSkippable,
       photoVerified,
       step,
@@ -396,7 +444,7 @@ export default function SubmitPage() {
       } catch { /* give up silently — draft just won't survive this session */ }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formData, photoPreview, croppedPhoto, bgSkippable, photoVerified, step, draftRestored])
+  }, [formData, bgSkippable, photoVerified, step, draftRestored])
 
   const clearDraft = () => {
     if (typeof window === "undefined") return
@@ -432,14 +480,6 @@ export default function SubmitPage() {
       })
       .catch(() => { setErrorMsg("Failed to load form"); setStep("error") })
   }, [token])
-
-  // Pre-warm the in-browser AI model while parents fill in the Details form.
-  useEffect(() => {
-    if (step !== "form" || !config) return
-    import("@/lib/photo-background").then(({ preloadBgRemovalModel }) => {
-      preloadBgRemovalModel().catch(() => { /* offline or unsupported */ })
-    })
-  }, [step, config])
 
   useEffect(() => {
     if (!config || step === "loading" || step === "error" || step === "success") return
@@ -520,25 +560,46 @@ export default function SubmitPage() {
       if (croppedPhoto) {
         try {
           setUploadProgress(10)
-          const blob = await fetch(croppedPhoto).then(r => r.blob())
+          const uploadFile = await prepareStudentPhotoForUpload(croppedPhoto)
           setUploadProgress(25)
           const fd = new FormData()
-          fd.append("file", new File([blob], `photo-${Date.now()}.jpg`, { type: "image/jpeg" }))
+          fd.append("file", uploadFile)
           fd.append("folder", `students/${config.schoolId}`)
           fd.append("submitToken", token)
           setUploadProgress(30)
-          const uploadRes = await fetch("/api/upload", { method: "POST", body: fd })
-          const uploadData = await uploadRes.json()
+          if (typeof navigator !== "undefined" && navigator.onLine === false) {
+            throw new Error("You appear to be offline. Please reconnect and submit again.")
+          }
+          let uploadRes: Response
+          try {
+            uploadRes = await uploadFormWithTimeout(fd, PHOTO_UPLOAD_TIMEOUT_MS)
+          } catch (error) {
+            throw new Error(getUploadNetworkErrorMessage(error))
+          }
+          if (!uploadRes.ok && uploadRes.status >= 500) {
+            setUploadProgress(45)
+            try {
+              uploadRes = await uploadFormWithTimeout(fd, PHOTO_UPLOAD_RETRY_TIMEOUT_MS)
+            } catch (error) {
+              throw new Error(getUploadNetworkErrorMessage(error))
+            }
+          }
+          const uploadData = uploadRes.ok
+            ? await uploadRes.json().catch(() => null)
+            : null
           setUploadProgress(70)
-          if (uploadRes.ok && uploadData.success) {
+          if (uploadRes.ok && uploadData?.success) {
             photoUrl = uploadData.url
             photoPath = uploadData.path || ""
           } else {
-            console.error("Photo upload error:", uploadData.error)
+            throw new Error(await parseApiError(uploadRes, "Photo upload failed. Please try again."))
           }
           setUploadProgress(80)
         } catch (photoErr) {
           console.error("Photo upload failed:", photoErr)
+          photoUrl = ""
+          photoPath = ""
+          setUploadProgress(80)
         }
       } else {
         setUploadProgress(80)

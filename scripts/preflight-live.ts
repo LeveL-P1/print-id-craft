@@ -27,6 +27,14 @@ const REQUIRED_STUDENT_COLUMNS = [
   "duplicateFingerprint",
 ]
 
+const REQUIRED_STUDENT_INDEX_COLUMNS = [
+  ['"schoolId"', '"status"'],
+  ['"schoolId"', '"classId"'],
+  ['"schoolId"', '"classId"', '"status"'],
+  ['"schoolId"', '"submittedAt"'],
+  ['"schoolId"', '"normalizedSearchText"'],
+]
+
 function mask(value: string) {
   if (value.length <= 8) return "***"
   return `${value.slice(0, 4)}...${value.slice(-4)}`
@@ -102,6 +110,43 @@ async function checkDatabase(prisma: PrismaClient): Promise<Check[]> {
     })
   } catch (error: any) {
     checks.push({ name: "database:counts", ok: false, detail: error?.message || String(error) })
+  }
+
+  try {
+    const migrations = await prisma.$queryRaw<Array<{ exists: boolean }>>`
+      SELECT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_name = '_prisma_migrations'
+      ) AS exists
+    `
+    checks.push({
+      name: "database:prisma-migrations-table",
+      ok: Boolean(migrations[0]?.exists),
+      detail: migrations[0]?.exists ? "ready" : "missing - use prisma migrate deploy for production changes",
+    })
+  } catch (error: any) {
+    checks.push({ name: "database:prisma-migrations-table", ok: false, detail: error?.message || String(error) })
+  }
+
+  try {
+    const indexes = await prisma.$queryRaw<Array<{ indexdef: string }>>`
+      SELECT indexdef
+      FROM pg_indexes
+      WHERE tablename = 'Student'
+    `
+    const definitions = indexes.map((index) => index.indexdef)
+    const missing = REQUIRED_STUDENT_INDEX_COLUMNS.filter((columns) =>
+      !definitions.some((definition) => columns.every((column) => definition.includes(column)))
+    )
+    checks.push({
+      name: "database:student-query-indexes",
+      ok: missing.length === 0,
+      detail: missing.length
+        ? `missing index coverage for: ${missing.map((columns) => columns.join("+")).join(", ")}`
+        : "ready",
+    })
+  } catch (error: any) {
+    checks.push({ name: "database:student-query-indexes", ok: false, detail: error?.message || String(error) })
   }
 
   return checks

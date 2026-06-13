@@ -29,18 +29,22 @@ export async function processReprocessPhotos(
     orderBy: { updatedAt: "desc" },
     select: { photoBgColor: true },
   })
-  const bgColor = template?.photoBgColor || "#FFFFFF"
+  const bgColor = payload.bgColor || template?.photoBgColor || "#FFFFFF"
 
   const where: any = {
     schoolId,
     photoPath: { not: "" },
   }
-  // "all" mode: target photos with empty OR skipped bg status
-  // "skipped" mode (default): only photos explicitly marked SKIPPED
-  if (payload.mode === "all") {
-    where.photoBgStatus = { in: ["", PHOTO_BG_STATUS.SKIPPED] }
-  } else {
-    where.photoBgStatus = PHOTO_BG_STATUS.SKIPPED
+  // Explicit studentIds are a force-run path for one-by-one fixes; do not
+  // filter them by prior background status.
+  if (!payload.studentIds?.length) {
+    if (payload.mode === "all") {
+      // Entire selected scope, including photos already processed before.
+    } else if (payload.mode === "unprocessed") {
+      where.photoBgStatus = { in: ["", PHOTO_BG_STATUS.SKIPPED] }
+    } else {
+      where.photoBgStatus = PHOTO_BG_STATUS.SKIPPED
+    }
   }
   if (payload.classId) where.classId = payload.classId
   if (payload.studentIds?.length) where.id = { in: payload.studentIds }
@@ -53,10 +57,21 @@ export async function processReprocessPhotos(
   }
 
   let remaining = payload.maxStudents || 5000
+  const attemptedIds: string[] = []
 
   while (remaining > 0) {
+    const queryWhere = attemptedIds.length
+      ? {
+          ...where,
+          id: {
+            ...(typeof where.id === "object" && where.id ? where.id : {}),
+            notIn: attemptedIds,
+          },
+        }
+      : where
+
     const students = await prisma.student.findMany({
-      where,
+      where: queryWhere,
       select: {
         id: true,
         serialNumber: true,
@@ -107,6 +122,8 @@ export async function processReprocessPhotos(
             error: message,
           })
         }
+      } finally {
+        attemptedIds.push(student.id)
       }
 
       remaining--

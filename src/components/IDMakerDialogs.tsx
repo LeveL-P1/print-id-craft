@@ -273,8 +273,8 @@ export function IdSizeDialog({
   onClose: () => void
 }) {
   const [preset, setPreset] = useState(initial?.preset || "School ID (100×58)")
-  const [width, setWidth] = useState(initial?.width ?? 100)
-  const [height, setHeight] = useState(initial?.height ?? 58)
+  const [width, setWidth] = useState<number | string>(initial?.width ?? 100)
+  const [height, setHeight] = useState<number | string>(initial?.height ?? 58)
   const [orientation, setOrientation] = useState<"horizontal" | "vertical">(
     initial?.orientation || "horizontal"
   )
@@ -291,7 +291,7 @@ export function IdSizeDialog({
     }
   }
 
-  const cfg = (): IdSizeConfig => ({ preset, width, height, orientation, sides })
+  const cfg = (): IdSizeConfig => ({ preset, width: Number(width) || 0, height: Number(height) || 0, orientation, sides })
 
   return (
     <DialogShell title="Id Size" onClose={onClose} width={370}>
@@ -328,7 +328,7 @@ export function IdSizeDialog({
         <WinInput
           type="number"
           value={width}
-          onChange={(v) => { setWidth(Number(v)); setPreset("Custom") }}
+          onChange={(v) => { setWidth(v); setPreset("Custom") }}
           style={{ width: 70 }}
           min={10}
           max={500}
@@ -343,7 +343,7 @@ export function IdSizeDialog({
         <WinInput
           type="number"
           value={height}
-          onChange={(v) => { setHeight(Number(v)); setPreset("Custom") }}
+          onChange={(v) => { setHeight(v); setPreset("Custom") }}
           style={{ width: 70 }}
           min={10}
           max={500}

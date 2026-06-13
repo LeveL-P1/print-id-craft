@@ -66,6 +66,7 @@ export async function GET(req: NextRequest) {
             : { schoolId: schoolId as string },
         include: {
           _count: { select: { students: true } },
+          template: true,
           teachers: {
             where: { role: "TEACHER" },
             select: { id: true, name: true, email: true, isMainTeacher: true },

@@ -6,7 +6,7 @@ import { storageUpload, storagePublicUrl } from "@/lib/storage"
 import QRCode from "qrcode"
 import { computeAutoAssignedFields } from "@/lib/submit-fields"
 import { getNextStudentSerial } from "@/lib/student-serial"
-import { reportError } from "@/lib/observability"
+import { reportError, reportSlowOperation } from "@/lib/observability"
 import { checkDuplicateSubmission } from "@/lib/submit-fields"
 import { buildStudentIndexData } from "@/lib/student-index"
 
@@ -22,8 +22,9 @@ const publicSchoolSubmitSchema = z.object({
   formData: z.record(z.string(), z.any()),
   photoUrl: z
     .string()
-    .min(1, "Photo is required. Please upload a student photo before submitting.")
-    .refine(photoUrlRefine, { message: "Invalid photo URL origin" }),
+    .optional()
+    .default("")
+    .refine((url) => !url || photoUrlRefine(url), { message: "Invalid photo URL origin" }),
   photoPath: z.string().optional().default(""),
   photoBgStatus: z
     .enum(["", "PLAIN", "PROCESSED", "SKIPPED", "REPROCESSED"])
@@ -33,6 +34,10 @@ const publicSchoolSubmitSchema = z.object({
 
 export async function POST(req: Request, props: { params: Promise<{ token: string }> }) {
   const params = await props.params;
+export async function POST(req: Request, { params }: { params: { token: string } }) {
+  const startedAt = Date.now()
+  let schoolId: string | null = null
+  let classId: string | null = null
   try {
     // Rate limiting
     const ip = getClientIp(req)
@@ -48,6 +53,7 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
     if (!school) {
       return NextResponse.json({ error: "Invalid link" }, { status: 404 })
     }
+    schoolId = school.id
     if (!school.linkActive) {
       return NextResponse.json({ error: "This link is closed" }, { status: 410 })
     }
@@ -66,6 +72,7 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
     if (!cls) {
       return NextResponse.json({ error: "Selected class is not available." }, { status: 400 })
     }
+    classId = cls.id
     if (cls.expiresAt && new Date() > cls.expiresAt) {
       return NextResponse.json({ error: "Selected class is closed for registration." }, { status: 410 })
     }
@@ -156,12 +163,21 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
     await reportError(error, {
       type: "SUBMIT_FAILED",
       message: "Public school submit failed",
-      metadata: { token: params.token },
+      schoolId,
+      metadata: { token: params.token, classId, durationMs: Date.now() - startedAt },
     })
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.issues }, { status: 400 })
     }
     const message = error?.message || (typeof error === "string" ? error : "Internal Server Error")
     return NextResponse.json({ error: message }, { status: 500 })
+  } finally {
+    await reportSlowOperation({
+      name: "api.submit.school",
+      durationMs: Date.now() - startedAt,
+      thresholdMs: 4_000,
+      schoolId,
+      metadata: { token: params.token, classId },
+    })
   }
 }

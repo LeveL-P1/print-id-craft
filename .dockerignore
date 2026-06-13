@@ -1,0 +1,14 @@
+.git/
+.next/
+node_modules/
+coverage/
+public/uploads/
+dist/
+release/
+compiled_installer/
+*.log
+*.py[cod]
+__pycache__/
+.env
+.env.*
+!.env.example

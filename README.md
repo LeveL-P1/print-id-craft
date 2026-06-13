@@ -19,11 +19,13 @@ NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 CRON_SECRET=
+JOB_WORKER_URL=
 SENTRY_DSN=
 NEXT_PUBLIC_SENTRY_DSN=
 ```
 
 `CRON_SECRET` secures cron and worker calls (`Authorization: Bearer ...`). Required in production when Vercel crons are enabled.
+`JOB_WORKER_URL` is optional. Set it to a dedicated Node worker host when heavy PDF/ZIP/photo jobs should run outside Vercel; otherwise the app wakes its own `/api/jobs/process` route.
 
 ## Vercel Pro + Supabase Pro (recommended for season)
 

@@ -54,6 +54,7 @@ vi.mock('@/lib/prisma', () => {
       findMany: vi.fn(),
     },
     job: {
+      count: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),

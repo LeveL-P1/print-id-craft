@@ -38,6 +38,7 @@ export default function SchoolsPage() {
   const [newEmail, setNewEmail] = useState("")
   const [newAddress, setNewAddress] = useState("")
   const [newLogo, setNewLogo] = useState<File | null>(null)
+  const [newLogoPreviewUrl, setNewLogoPreviewUrl] = useState("")
   const [creating, setCreating] = useState(false)
   const [classNames, setClassNames] = useState<string[]>([])
   const [newClassInput, setNewClassInput] = useState("")
@@ -78,6 +79,17 @@ export default function SchoolsPage() {
   }, [page, searchQuery])
 
   useEffect(() => { fetchSchools() }, [fetchSchools])
+
+  useEffect(() => {
+    if (!newLogo) {
+      setNewLogoPreviewUrl("")
+      return
+    }
+
+    const previewUrl = URL.createObjectURL(newLogo)
+    setNewLogoPreviewUrl(previewUrl)
+    return () => URL.revokeObjectURL(previewUrl)
+  }, [newLogo])
 
   // Cleanup
   useEffect(() => {
@@ -305,7 +317,7 @@ export default function SchoolsPage() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   {newLogo ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <img src={URL.createObjectURL(newLogo)} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover', border: '1px solid #e2e8f0' }} />
+                      {newLogoPreviewUrl && <img src={newLogoPreviewUrl} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover', border: '1px solid #e2e8f0' }} />}
                       <span style={{ fontSize: 12, color: '#64748b' }}>{newLogo.name}</span>
                       <button type="button" onClick={() => setNewLogo(null)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 14 }}>✕</button>
                     </div>
