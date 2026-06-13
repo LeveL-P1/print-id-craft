@@ -43,8 +43,9 @@ export type ReprocessPhotosPayload = {
   classId?: string | null
   studentIds?: string[]
   maxStudents?: number
-  /** "skipped" (default) = only SKIPPED status; "all" = empty + SKIPPED */
-  mode?: "skipped" | "all"
+  /** skipped = only skipped; unprocessed = empty + skipped; all = entire selected scope */
+  mode?: "skipped" | "unprocessed" | "all"
+  bgColor?: string
 }
 
 const nullableIdSchema = z.string().min(1).nullable()
@@ -92,7 +93,8 @@ export const reprocessPhotosPayloadSchema = z.object({
   classId: z.string().min(1).nullable().optional(),
   studentIds: z.array(z.string().min(1)).max(5000).optional(),
   maxStudents: z.number().int().positive().max(5000).optional(),
-  mode: z.enum(["skipped", "all"]).optional(),
+  mode: z.enum(["skipped", "unprocessed", "all"]).optional(),
+  bgColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
 }).strict()
 
 export type JobPayloadByType = {

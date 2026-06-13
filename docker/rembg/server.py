@@ -9,7 +9,7 @@ from rembg import new_session, remove
 
 
 MAX_FILE_SIZE = 10 * 1024 * 1024
-MODEL_NAME = os.environ.get("REMBG_MODEL", "u2net_human_seg")
+MODEL_NAME = os.environ.get("REMBG_MODEL", "isnet-general-use")
 
 app = FastAPI(title="WiseMelon rembg")
 

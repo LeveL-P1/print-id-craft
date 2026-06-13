@@ -3,6 +3,14 @@
 This service runs a small FastAPI wrapper around `rembg` for AI photo background removal.
 The main Next.js app calls this service through `REMBG_SERVICE_URL`.
 
+Default model: `isnet-general-use`. It is slower than `u2net_human_seg`, but gives cleaner edges for manufacturing-side batch cleanup where quality matters more than parent-side speed.
+
+Optional override:
+
+```env
+REMBG_MODEL=u2net_human_seg
+```
+
 ## Local Docker
 
 ```powershell
