@@ -1,7 +1,7 @@
 import type { Job, Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { reportError } from "@/lib/observability"
-import { JOB_MAX_ATTEMPTS, JOB_RUN_TIME_BUDGET_MS, JOB_STALE_RUNNING_MINUTES, MAX_JOBS_PER_RUN } from "./types"
+import { JOB_MAX_ATTEMPTS, JOB_RUN_TIME_BUDGET_MS, JOB_STALE_RUNNING_MINUTES, MAX_JOBS_PER_RUN, validateJobPayload } from "./types"
 import type {
   ExportArchivePayload,
   GeneratePrintBatchPayload,
@@ -102,11 +102,13 @@ async function failJob(job: Job, error: unknown) {
 }
 
 async function executeJob(job: Job) {
+  const payload = validateJobPayload(job.type, job.payload || {})
+
   switch (job.type) {
     case "EXPORT_PLATFORM_BACKUP": {
       const result = await processExportPlatformBackup(
         job.id,
-        (job.payload || {}) as unknown as PlatformBackupPayload
+        payload as PlatformBackupPayload
       )
       await completeJob(job.id, result)
       return result
@@ -119,23 +121,23 @@ async function executeJob(job: Job) {
 
       switch (job.type) {
         case "EXPORT_SCHOOL_ARCHIVE": {
-          const result = await processExportArchive(job.id, schoolId, job.payload as unknown as ExportArchivePayload)
+          const result = await processExportArchive(job.id, schoolId, payload as ExportArchivePayload)
           await completeJob(job.id, result)
           return result
         }
         case "GENERATE_QR": {
-          const result = await processGenerateQr(schoolId, job.payload as unknown as GenerateQrPayload)
+          const result = await processGenerateQr(schoolId, payload as GenerateQrPayload)
           await completeJob(job.id, result)
           return result
         }
         case "GENERATE_PRINT_BATCH": {
-          const payload = job.payload as unknown as GeneratePrintBatchPayload
+          const printPayload = payload as GeneratePrintBatchPayload
           try {
-            const result = await processGeneratePrintBatch(schoolId, payload)
+            const result = await processGeneratePrintBatch(schoolId, printPayload)
             await completeJob(job.id, result)
             return result
           } catch (error) {
-            await failPrintBatch(payload.batchId, error)
+            await failPrintBatch(printPayload.batchId, error)
             throw error
           }
         }
@@ -143,7 +145,7 @@ async function executeJob(job: Job) {
           const result = await processReprocessPhotos(
             job.id,
             schoolId,
-            (job.payload || {}) as unknown as ReprocessPhotosPayload
+            payload as ReprocessPhotosPayload
           )
           await completeJob(job.id, result)
           return result

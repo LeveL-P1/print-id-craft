@@ -116,6 +116,20 @@ async function parseApiError(res: Response, fallback: string) {
   return fallback
 }
 
+async function uploadFormWithTimeout(formData: FormData, timeoutMs = 45_000) {
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch("/api/upload", {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+    })
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SampleReferencePhoto — shows a clear illustration of "what a good ID photo
 // looks like". If an admin places a real image at /public/sample-id-photo.jpg
@@ -541,9 +555,28 @@ export default function SubmitPage() {
           fd.append("folder", `students/${config.schoolId}`)
           fd.append("submitToken", token)
           setUploadProgress(30)
-          let uploadRes = await fetch("/api/upload", { method: "POST", body: fd })
+          if (typeof navigator !== "undefined" && navigator.onLine === false) {
+            throw new Error("You appear to be offline. Please reconnect and submit again.")
+          }
+          let uploadRes: Response
+          try {
+            uploadRes = await uploadFormWithTimeout(fd)
+          } catch (error) {
+            if (error instanceof DOMException && error.name === "AbortError") {
+              throw new Error("Photo upload is taking too long. Please try again on a stronger network.")
+            }
+            throw error
+          }
           if (!uploadRes.ok && uploadRes.status >= 500) {
-            uploadRes = await fetch("/api/upload", { method: "POST", body: fd })
+            setUploadProgress(45)
+            try {
+              uploadRes = await uploadFormWithTimeout(fd, 60_000)
+            } catch (error) {
+              if (error instanceof DOMException && error.name === "AbortError") {
+                throw new Error("Photo upload is taking too long. Please try again on a stronger network.")
+              }
+              throw error
+            }
           }
           const uploadData = uploadRes.ok
             ? await uploadRes.json().catch(() => null)
