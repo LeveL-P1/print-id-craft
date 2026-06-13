@@ -27,6 +27,36 @@ const EXT_BY_TYPE: Record<string, string> = {
 // Track whether we've initialized the bucket
 let bucketInitialized = false
 
+function detectImageType(buffer: Buffer): { contentType: string; extension: string } | null {
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return { contentType: "image/jpeg", extension: "jpg" }
+  }
+
+  if (
+    buffer.length >= 8 &&
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0d &&
+    buffer[5] === 0x0a &&
+    buffer[6] === 0x1a &&
+    buffer[7] === 0x0a
+  ) {
+    return { contentType: "image/png", extension: "png" }
+  }
+
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString("ascii") === "RIFF" &&
+    buffer.subarray(8, 12).toString("ascii") === "WEBP"
+  ) {
+    return { contentType: "image/webp", extension: "webp" }
+  }
+
+  return null
+}
+
 async function validateAndPrepareImage(
   buffer: Buffer,
   options: { normalizePublicStudentPhoto: boolean }
@@ -35,6 +65,13 @@ async function validateAndPrepareImage(
   try {
     sharp = (await import("sharp")).default
   } catch {
+    if (options.normalizePublicStudentPhoto) {
+      const detected = detectImageType(buffer)
+      if (!detected) {
+        throw new Error("Invalid image file. Please upload a real JPEG, PNG, or WebP photo.")
+      }
+      return { buffer, ...detected }
+    }
     throw new Error("Image processing is temporarily unavailable. Please try again.")
   }
 
