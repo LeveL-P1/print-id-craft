@@ -39,6 +39,9 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const lastAdjustedFileRef = useRef<File | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const permissionStatusRef = useRef<PermissionStatus | null>(null)
+  const permissionChangeHandlerRef = useRef<(() => void) | null>(null)
 
   const [cameraActive, setCameraActive] = useState(false)
   const [cameraError, setCameraError] = useState("")
@@ -52,6 +55,15 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
   // ──────────────────────────────────────────────────────
   useEffect(() => {
     checkCameraPermission()
+    return () => {
+      const status = permissionStatusRef.current
+      const handler = permissionChangeHandlerRef.current
+      if (status && handler) {
+        status.removeEventListener("change", handler)
+      }
+      streamRef.current?.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+    }
   }, [])
 
   const checkCameraPermission = async () => {
@@ -68,9 +80,12 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         setCameraPermission(permResult.state as CameraPermissionState)
 
         // Listen for changes
-        permResult.addEventListener("change", () => {
+        const handlePermissionChange = () => {
           setCameraPermission(permResult.state as CameraPermissionState)
-        })
+        }
+        permissionStatusRef.current = permResult
+        permissionChangeHandlerRef.current = handlePermissionChange
+        permResult.addEventListener("change", handlePermissionChange)
 
         return
       }
@@ -110,18 +125,10 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
   // Camera helpers
   // ──────────────────────────────────────────────────────
   const stopCamera = useCallback(() => {
-    if (stream) {
-      stream.getTracks().forEach(t => t.stop())
-      setStream(null)
-    }
+    streamRef.current?.getTracks().forEach(t => t.stop())
+    streamRef.current = null
+    setStream(null)
     setCameraActive(false)
-  }, [stream])
-
-  useEffect(() => {
-    return () => {
-      if (stream) stream.getTracks().forEach(t => t.stop())
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const startCamera = async (e: React.MouseEvent) => {
@@ -151,6 +158,8 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
       }
 
+      streamRef.current?.getTracks().forEach(t => t.stop())
+      streamRef.current = s
       setStream(s)
       setCameraActive(true)
       setCameraPermission("granted")

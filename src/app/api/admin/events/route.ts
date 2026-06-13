@@ -5,6 +5,20 @@ import { prisma } from "@/lib/prisma"
 
 export const dynamic = "force-dynamic"
 
+const EVENT_SEVERITIES = ["INFO", "WARNING", "ERROR", "CRITICAL"] as const
+const EVENT_TYPES = [
+  "SUBMIT_FAILED",
+  "UPLOAD_FAILED",
+  "EXPORT_FAILED",
+  "IMPORT_FAILED",
+  "JOB_FAILED",
+  "SECURITY",
+  "MAINTENANCE",
+] as const
+
+const parseEnumParam = <T extends readonly string[]>(value: string | null, allowed: T): T[number] | undefined =>
+  value && (allowed as readonly string[]).includes(value) ? value : undefined
+
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session || session.user?.role !== "MANUFACTURER") {
@@ -13,8 +27,8 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url)
   const limit = Math.min(Number(url.searchParams.get("limit") || 100), 500)
-  const severity = url.searchParams.get("severity") || undefined
-  const type = url.searchParams.get("type") || undefined
+  const severity = parseEnumParam(url.searchParams.get("severity"), EVENT_SEVERITIES)
+  const type = parseEnumParam(url.searchParams.get("type"), EVENT_TYPES)
   const schoolId = url.searchParams.get("schoolId") || undefined
   const summary = url.searchParams.get("summary") === "1"
 
@@ -71,8 +85,8 @@ export async function GET(req: Request) {
 
   const events = await prisma.systemEvent.findMany({
     where: {
-      ...(severity ? { severity: severity as any } : {}),
-      ...(type ? { type: type as any } : {}),
+      ...(severity ? { severity } : {}),
+      ...(type ? { type } : {}),
       ...(schoolId ? { schoolId } : {}),
     },
     orderBy: { createdAt: "desc" },

@@ -33,9 +33,30 @@ type LookupMaps = {
   count: number
 }
 const LOOKUP_TTL_MS = 60_000
+const MAX_LOOKUP_CACHE_ENTRIES = 20
 const lookupCache = new Map<string, { maps: LookupMaps; ts: number }>()
 
+function pruneLookupCache(now = Date.now()) {
+  lookupCache.forEach((entry, key) => {
+    if (now - entry.ts >= LOOKUP_TTL_MS) lookupCache.delete(key)
+  })
+
+  while (lookupCache.size > MAX_LOOKUP_CACHE_ENTRIES) {
+    let oldestKey: string | null = null
+    let oldestTs = Infinity
+    lookupCache.forEach((entry, key) => {
+      if (entry.ts < oldestTs) {
+        oldestTs = entry.ts
+        oldestKey = key
+      }
+    })
+    if (!oldestKey) break
+    lookupCache.delete(oldestKey)
+  }
+}
+
 async function getLookupMaps(schoolId: string): Promise<LookupMaps> {
+  pruneLookupCache()
   const hit = lookupCache.get(schoolId)
   if (hit && Date.now() - hit.ts < LOOKUP_TTL_MS) return hit.maps
 
@@ -58,6 +79,7 @@ async function getLookupMaps(schoolId: string): Promise<LookupMaps> {
   for (const s of students) buildIndexForStudent(s, maps)
 
   lookupCache.set(schoolId, { maps, ts: Date.now() })
+  pruneLookupCache()
   return maps
 }
 

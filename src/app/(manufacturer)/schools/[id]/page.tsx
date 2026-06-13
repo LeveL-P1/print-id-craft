@@ -178,6 +178,21 @@ export default function SchoolDetailPage() {
 
   // Batch generation
   const [generatingBatch, setGeneratingBatch] = useState(false)
+  const batchPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const batchPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearBatchPolling = useCallback(() => {
+    if (batchPollIntervalRef.current) {
+      clearInterval(batchPollIntervalRef.current)
+      batchPollIntervalRef.current = null
+    }
+    if (batchPollTimeoutRef.current) {
+      clearTimeout(batchPollTimeoutRef.current)
+      batchPollTimeoutRef.current = null
+    }
+  }, [])
+
+  useEffect(() => clearBatchPolling, [clearBatchPolling])
 
   // Student detail modal
   const [selectedStudent, setSelectedStudent] = useState<StudentData | null>(null)
@@ -822,6 +837,7 @@ export default function SchoolDetailPage() {
   const handleGenerateBatch = async () => {
     if (!confirm(`Generate print batch for all submitted/approved students in ${school?.name}?`)) return
     setGeneratingBatch(true)
+    clearBatchPolling()
     try {
       const res = await fetch(`/api/schools/${schoolId}/batches`, { method: "POST" })
       const data = await res.json()
@@ -829,18 +845,22 @@ export default function SchoolDetailPage() {
         toast.success(`Batch generation started! ${data.data.studentCount} students included.`)
         // Poll for completion
         const batchId = data.data.batchId
-        const poll = setInterval(async () => {
+        batchPollIntervalRef.current = setInterval(async () => {
           const r = await fetch(`/api/schools/${schoolId}/batches/${batchId}`)
           const d = await r.json()
           if (d.success && d.data.status === "READY") {
-            clearInterval(poll)
+            clearBatchPolling()
             toast.success("Batch is ready for download!")
             fetchBatches()
             setGeneratingBatch(false)
           }
         }, 3000)
         // Safety timeout
-        setTimeout(() => { clearInterval(poll); setGeneratingBatch(false); fetchBatches() }, 120000)
+        batchPollTimeoutRef.current = setTimeout(() => {
+          clearBatchPolling()
+          setGeneratingBatch(false)
+          fetchBatches()
+        }, 120000)
       } else {
         toast.error(data.error)
         setGeneratingBatch(false)
