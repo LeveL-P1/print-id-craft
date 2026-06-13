@@ -6,7 +6,9 @@ import { prisma } from "@/lib/prisma"
 import { randomUUID } from "crypto"
 import { durableRateLimit, getClientIp } from "@/lib/rate-limit"
 import { reportError, reportSlowOperation } from "@/lib/observability"
-import sharp from "sharp"
+
+export const runtime = "nodejs"
+export const maxDuration = 60
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 const PUBLIC_MAX_FILE_SIZE = 2.5 * 1024 * 1024 // parent submit photos should already be compressed client-side
@@ -29,7 +31,14 @@ async function validateAndPrepareImage(
   buffer: Buffer,
   options: { normalizePublicStudentPhoto: boolean }
 ): Promise<{ buffer: Buffer; contentType: string; extension: string }> {
-  let metadata: sharp.Metadata
+  let sharp: typeof import("sharp").default
+  try {
+    sharp = (await import("sharp")).default
+  } catch {
+    throw new Error("Image processing is temporarily unavailable. Please try again.")
+  }
+
+  let metadata: Awaited<ReturnType<ReturnType<typeof sharp>["metadata"]>>
   try {
     metadata = await sharp(buffer, { limitInputPixels: MAX_IMAGE_PIXELS }).metadata()
   } catch {

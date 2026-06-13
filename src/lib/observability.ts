@@ -12,7 +12,11 @@ type EventInput = {
 }
 
 export function captureError(error: unknown, context?: Record<string, any>) {
-  Sentry.captureException(error, { extra: context })
+  try {
+    Sentry.captureException(error, { extra: context })
+  } catch (captureError) {
+    console.error("Failed to capture error:", captureError)
+  }
 }
 
 export async function recordEvent(input: EventInput) {
@@ -65,12 +69,16 @@ export async function reportSlowOperation(input: {
     thresholdMs: input.thresholdMs,
   }
 
-  Sentry.addBreadcrumb({
-    category: "performance",
-    level: "warning",
-    message: `${input.name} took ${Math.round(input.durationMs)}ms`,
-    data: metadata,
-  })
+  try {
+    Sentry.addBreadcrumb({
+      category: "performance",
+      level: "warning",
+      message: `${input.name} took ${Math.round(input.durationMs)}ms`,
+      data: metadata,
+    })
+  } catch (error) {
+    console.error("Failed to add performance breadcrumb:", error)
+  }
 
   await recordEvent({
     type: "MAINTENANCE",

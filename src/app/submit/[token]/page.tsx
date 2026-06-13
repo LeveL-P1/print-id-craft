@@ -102,6 +102,20 @@ const wordCount = (s: string): number =>
 
 const ADDRESS_MIN_WORDS = 5
 
+async function parseApiError(res: Response, fallback: string) {
+  const contentType = res.headers.get("content-type") || ""
+  if (contentType.includes("application/json")) {
+    const data = await res.json().catch(() => null)
+    return data?.error || data?.detail || fallback
+  }
+
+  const text = await res.text().catch(() => "")
+  if (text && !text.trim().startsWith("<!DOCTYPE")) {
+    return text.slice(0, 180)
+  }
+  return fallback
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SampleReferencePhoto — shows a clear illustration of "what a good ID photo
 // looks like". If an admin places a real image at /public/sample-id-photo.jpg
@@ -111,6 +125,21 @@ const ADDRESS_MIN_WORDS = 5
 // ─────────────────────────────────────────────────────────────────────────────
 const SampleReferencePhoto = () => {
   const [hasRealPhoto, setHasRealPhoto] = useState<boolean | null>(null) // null = loading
+
+  useEffect(() => {
+    let cancelled = false
+    fetch("/sample-id-photo.jpg", { method: "HEAD" })
+      .then((res) => {
+        if (!cancelled) setHasRealPhoto(res.ok)
+      })
+      .catch(() => {
+        if (!cancelled) setHasRealPhoto(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   return (
     <div style={{ flex: '0 0 110px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       <div style={{
@@ -122,16 +151,17 @@ const SampleReferencePhoto = () => {
       }}>
         {/* Probe image — hidden if it fails to load. We rely on onLoad/onError
             to decide whether to render the silhouette fallback. */}
-        <img
-          src="/sample-id-photo.jpg"
-          alt="Sample ID photo"
-          onLoad={() => setHasRealPhoto(true)}
-          onError={() => setHasRealPhoto(false)}
-          style={{
-            width: '100%', height: '100%', objectFit: 'cover',
-            display: hasRealPhoto ? 'block' : 'none',
-          }}
-        />
+        {hasRealPhoto === true && (
+          <img
+            src="/sample-id-photo.jpg"
+            alt="Sample ID photo"
+            onError={() => setHasRealPhoto(false)}
+            style={{
+              width: '100%', height: '100%', objectFit: 'cover',
+              display: 'block',
+            }}
+          />
+        )}
 
         {/* Silhouette fallback — drawn only when there is no real photo. */}
         {hasRealPhoto === false && (
@@ -515,18 +545,20 @@ export default function SubmitPage() {
           if (!uploadRes.ok && uploadRes.status >= 500) {
             uploadRes = await fetch("/api/upload", { method: "POST", body: fd })
           }
-          const uploadData = await uploadRes.json()
+          const uploadData = uploadRes.ok
+            ? await uploadRes.json().catch(() => null)
+            : null
           setUploadProgress(70)
-          if (uploadRes.ok && uploadData.success) {
+          if (uploadRes.ok && uploadData?.success) {
             photoUrl = uploadData.url
             photoPath = uploadData.path || ""
           } else {
-            throw new Error(uploadData.error || "Photo upload failed")
+            throw new Error(await parseApiError(uploadRes, "Photo upload failed. Please try again."))
           }
           setUploadProgress(80)
         } catch (photoErr) {
           console.error("Photo upload failed:", photoErr)
-          setAlertMsg("Photo upload failed. Please check your internet and try again.")
+          setAlertMsg(photoErr instanceof Error ? photoErr.message : "Photo upload failed. Please check your internet and try again.")
           setSubmitting(false)
           setUploadProgress(0)
           return

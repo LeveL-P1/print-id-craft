@@ -293,8 +293,11 @@ export async function removeBackgroundViaServer(
 
   const res = await fetch("/api/photo/remove-background", { method: "POST", body: fd })
   if (!res.ok) {
-    const data = await res.json().catch(() => ({}))
-    throw new Error(data.error || `Server removal failed (${res.status})`)
+    const contentType = res.headers.get("content-type") || ""
+    const message = contentType.includes("application/json")
+      ? (await res.json().catch(() => ({})))?.error
+      : ""
+    throw new Error(message || `Server removal failed (${res.status})`)
   }
 
   options.onProgress?.("Server cleanup complete", 90)

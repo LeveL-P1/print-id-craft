@@ -6,6 +6,7 @@ import { durableRateLimit, getClientIp } from "@/lib/rate-limit"
 import { isRembgConfigured, removeBackgroundRembg } from "@/lib/rembg-service"
 import { compositePhotoBackground } from "@/lib/photo-composite-server"
 
+export const runtime = "nodejs"
 export const maxDuration = 60
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024
