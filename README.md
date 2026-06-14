@@ -1,16 +1,51 @@
 # WiseMelon
 
-Production portal for school ID-card collection and manufacturing.
+## Overview
+
+WiseMelon is a production-grade portal for school ID card registration, verification, and batch manufacturing.
+
+The system supports:
+- Manufacturer setup of schools, classes, ID templates, and print batches.
+- Public student/parent registration with photo upload, background processing, and QR generation.
+- Teacher verification and review workflows.
+- Export of student data as CSV, Excel, and complete archive ZIP packages.
+- Background job processing for heavy tasks, including PDF generation and archive exports.
+
+This repository is built with Next.js 16, Prisma, Supabase, and Vercel-ready deployment configuration.
+
+## Key Features
+
+- School and class management
+- Template-driven ID card layout builder
+- Public registration link for students and parents
+- Photo upload with optional background removal and processing
+- Teacher/MANUFACTURER review and comment workflows
+- Export: CSV, Excel, ZIP archive with photos, QR codes, and metadata
+- Background worker queue powered by `/api/jobs/process`
+- Production-ready Vercel cron jobs and security headers
+- Supabase storage integration with private media support
+
+## Architecture
+
+- Frontend: `Next.js` app using server components and React client components
+- Database: `PostgreSQL` via `Prisma` ORM
+- Auth: `next-auth` powered sessions for manufacturer and teacher roles
+- Storage: `Supabase` object storage for student photos and exported assets
+- Background processing: Vercel cron and job queue pattern with `Job` records
+- Monitoring: optional `Sentry` integration
 
 ## System Model
 
-Manufacturer creates a school, classes, and an ID template. Parents/students submit details and photos through a public registration link. Teachers and manufacturers verify records. Manufacturer exports CSV/Excel/ZIP archives and print batches.
+1. Manufacturer creates a school, staff accounts, classes, and ID templates.
+2. Parents/students submit details and photos through a school registration link.
+3. Teachers and manufacturers verify submissions and resolve photo issues.
+4. Manufacturer exports CSV/Excel/ZIP archives and prints batches from the dashboard.
 
-## Required Environment
+## Required Environment Variables
 
-Set these in local `.env` and production hosting:
+Create a local `.env` or `.env.local` file and include the following:
 
-```bash
+```env
 DATABASE_URL=
 DIRECT_URL=
 NEXTAUTH_URL=
@@ -24,103 +59,101 @@ SENTRY_DSN=
 NEXT_PUBLIC_SENTRY_DSN=
 ```
 
-`CRON_SECRET` secures cron and worker calls (`Authorization: Bearer ...`). Required in production when Vercel crons are enabled.
-`JOB_WORKER_URL` is optional. Set it to a dedicated Node worker host when heavy PDF/ZIP/photo jobs should run outside Vercel; otherwise the app wakes its own `/api/jobs/process` route.
+Notes:
+- `CRON_SECRET` secures scheduled/maintenance routes and worker calls.
+- `JOB_WORKER_URL` is optional; set it when using a dedicated worker host.
+- `NEXTAUTH_SECRET` is required for session security.
 
-## Vercel Pro + Supabase Pro (recommended for season)
-
-This repo ships **Pro-ready** settings in `vercel.json`:
-
-- Job worker cron every 2 minutes: `GET /api/jobs/process`
-- Daily maintenance: `GET /api/maintenance/cleanup`
-- Weekly platform metadata backup: `GET /api/admin/backup/scheduled` (Sunday 03:00 UTC)
-
-Function timeouts: job worker **300s**; most API routes **60s**.
-
-### Supabase dashboard (after upgrading to Pro)
-
-1. Enable **daily backups** (and optional **PITR** for point-in-time recovery).
-2. Confirm bucket `student-photos` exists and is accessible with the service role.
-3. Run `npx prisma db push` once after deploy if `EXPORT_PLATFORM_BACKUP` was added to the `JobType` enum.
-
-### Backup strategy (no data loss)
-
-| Layer | What | How |
-|-------|------|-----|
-| Database | Postgres rows | Supabase Pro daily backups + optional PITR |
-| Metadata JSON | Users, schools, classes, templates, students, batches | Weekly cron → `student-photos/backups/platform/*.json` |
-| Photos / PDFs / ZIPs | Binary files in Storage | Per-school **Complete Archive ZIP** exports; copy to external drive weekly |
-| Manual snapshot | Full JSON download | Manufacturer: `GET /api/admin/export-db` (paginated; use `?students=false` for metadata-only) |
-| On-demand cloud backup | Same as weekly job | Manufacturer: `POST /api/admin/backup/run` |
-
-Check backup health: `GET /api/admin/backup/status` (manufacturer session).
-
-Manual weekly backup trigger:
+## Local Setup
 
 ```bash
-curl -X POST https://your-domain/api/admin/backup/run \
-  -H "Cookie: next-auth.session-token=..." \
-  -H "Content-Type: application/json" \
-  -d '{"includeStudents":true}'
-```
-
-Or rely on the Sunday cron (uses `CRON_SECRET` like other maintenance routes).
-
-### Vercel Hobby note
-
-Scheduled crons and 300s durations require **Vercel Pro**. On Hobby, remove the `crons` block from `vercel.json` and call maintenance/backup endpoints manually; jobs still run when enqueued via immediate worker kick.
-
-## Commands
-
-```bash
+git clone <repo-url>
+cd print-id-craft
 npm install --legacy-peer-deps
 npx prisma generate
 npx prisma db push
-npm run build
-npm test
 npm run dev
 ```
 
-## Production Checks
+Open `http://localhost:3000` to access the application.
 
-Before deploy:
+## Database
+
+The app uses Prisma with a PostgreSQL datasource. The schema includes core models such as:
+- `User` (MANUFACTURER, TEACHER)
+- `School`
+- `Class`
+- `Template`
+- `Student`
+- `Job`
+- `SystemEvent`
+- `RateLimit`
+
+Run database preparation commands:
 
 ```bash
-npx tsc --noEmit
+npm run db:push
+npm run db:prepare-live
+npm run db:reset
+```
+
+## Scripts
+
+Useful npm commands:
+
+```bash
+npm run dev
+npm run build
+npm start
 npm run lint
 npm test
-npm run build
+npm test:watch
+npm test:ci
+npm test:e2e
+npm run load:submit
+npm run load:full
+npm run seed
+npm run db:push
+npm run db:migrate:create
+npm run db:migrate:deploy
+npm run db:prepare-live
+npm run db:reset
+npm run db:use:mysql
+npm run db:use:postgres
+npm run desktop
+npm run desktop:build
 ```
 
-Builds validate TypeScript and lint. Warnings are allowed; errors fail deploy.
+## Deployment
 
-## Supabase
+This repository is configured for Vercel with `vercel.json`.
 
-Storage bucket: `student-photos`
+Important production endpoints and schedules:
 
-The app stores both:
+- `GET /api/jobs/process` — job queue processing (every 2 minutes)
+- `GET /api/maintenance/cleanup` — daily cleanup and retention pruning
+- `GET /api/admin/backup/scheduled` — weekly metadata backup
 
-- `photoUrl`: current display URL.
-- `photoPath`: durable storage path used for archive downloads and future signed URLs.
+If deploying on Vercel Hobby, remove the `crons` section from `vercel.json` and invoke maintenance endpoints manually.
 
-For stronger privacy, move the bucket to private and serve images through:
+## Supabase Storage & Media
 
-```text
-/api/media/student-photo/:studentId
-```
+The app expects a Supabase storage bucket named `student-photos`.
 
-Authenticated student APIs return this media route automatically when `photoPath`
-exists, so manufacturer/teacher screens continue to work with private buckets.
+The system stores:
+- `photoUrl`: current display URL
+- `photoPath`: durable storage path for signed URLs and archive downloads
+
+For private buckets, media is served through the app via secure media routes.
 
 ## Exports
 
-Manufacturer export tab supports:
-
+Manufacturer exports support:
 - CSV
 - Excel
 - Complete Archive ZIP
 
-Archive contents:
+Archive structure includes:
 
 ```text
 students/students.csv
@@ -132,90 +165,50 @@ school.json
 manifest.json
 ```
 
-Archive guardrails:
-
+Export constraints:
 - default max: 1500 students
 - hard max: 3000 students
 - use class/status filters for larger schools
-- use `photos=false` for metadata-only export
+- use `photos=false` for metadata-only exports
 
-## Maintenance
+## Monitoring & Maintenance
 
-Vercel Pro runs these crons automatically (see `vercel.json`):
+Enable Sentry with:
 
-```text
-GET /api/maintenance/cleanup        (daily 02:00 UTC)
-GET /api/jobs/process               (every 2 minutes)
-GET /api/admin/backup/scheduled     (Sunday 03:00 UTC)
+```env
+SENTRY_DSN=
+NEXT_PUBLIC_SENTRY_DSN=
 ```
 
-On **Vercel Hobby**, call the same endpoints manually (no scheduled cron):
+Maintenance endpoints:
 
-This deletes expired rate-limit rows. It requires `CRON_SECRET` in production.
-It also prunes old `SystemEvent` and completed/failed `Job` records. Retention
-defaults are 90 days for events and 30 days for completed jobs; override with
-`EVENT_RETENTION_DAYS` and `JOB_RETENTION_DAYS` when needed.
+```text
+POST /api/maintenance/cleanup
+POST /api/admin/backup/run
+GET /api/admin/backup/status
+GET /api/admin/events
+GET /api/admin/jobs
+GET /api/admin/export-db
+```
 
-Manual call:
+Manual maintenance example:
 
 ```bash
 curl -X POST https://your-domain/api/maintenance/cleanup \
   -H "Authorization: Bearer $CRON_SECRET"
 ```
 
-## Monitoring
+## Backup Strategy
 
-Sentry is optional but recommended. Configure:
-
-```bash
-SENTRY_DSN=
-NEXT_PUBLIC_SENTRY_DSN=
-```
-
-The app also records important backend failures in `SystemEvent`.
-
-Admin APIs:
-
-```text
-GET /api/admin/events
-GET /api/admin/jobs
-GET /api/admin/backup/status
-POST /api/admin/backup/run
-GET /api/admin/export-db
-```
-
-Manufacturer session required.
-The manufacturer dashboard also includes a compact Operations panel showing
-readiness, recent backend events, and recent jobs.
-
-`Job` records track background work: archive exports, QR generation after import, print batch PDF generation, and platform metadata backups. On Pro, crons in `vercel.json` process the queue every 2 minutes. On Hobby, the worker runs when jobs are enqueued (not on a schedule).
-
-Poll job status: `GET /api/jobs/{jobId}`. Download completed archive: `GET /api/jobs/{jobId}/download`.
-
-Worker auth uses `Authorization: Bearer $CRON_SECRET` (or `WORKER_SECRET` if set).
-
-## Security Audit
-
-`npm audit fix` and compatible dependency overrides have been applied. Remaining
-audit items require deliberate product changes, not a blind forced update:
-
-- `next` / bundled `postcss`: fix requires a major Next upgrade.
-- `next-auth` / transitive `uuid`: forced audit path downgrades auth and should not be used.
-- `xlsx`: removed; replaced with `exceljs` for import/export. Legacy `.xls` imports are no longer supported — use `.csv` or `.xlsx`.
-
-## Recovery Notes
-
-If a public submission spike occurs:
-
-1. Check `/api/admin/events`.
-2. Check Supabase DB and storage health.
-3. Confirm `RateLimit` rows are being cleaned by cron.
-4. Export affected school with `photos=false` if archive photo export is too large.
-5. Use class/status filters for ZIP archive chunks.
+Recommended backup layers:
+- Database backups via Supabase daily backups/PITR
+- Weekly JSON metadata exports via scheduled backup job
+- Complete per-school ZIP archives for photos, print assets, and metadata
+- Manual `GET /api/admin/export-db` snapshots as needed
 
 ## Load Testing
 
-Controlled public-submit test against a staging school/class link:
+Use the provided load scripts for staging validation:
 
 ```bash
 LOAD_TARGET=https://your-staging-domain \
@@ -224,8 +217,6 @@ LOAD_TOTAL=1000 \
 LOAD_CONCURRENCY=25 \
 npm run load:submit
 ```
-
-Full test with optional photo uploads and separate upload/submit latency metrics (up to 3000 students):
 
 ```bash
 LOAD_TARGET=https://your-staging-domain \
@@ -236,9 +227,18 @@ LOAD_WITH_PHOTOS=1 \
 npm run load:full
 ```
 
-Set `LOAD_MODE=school` for school-wide submit links. Use staging data only; the
-script creates real student submissions.
+Use staging data only; these scripts generate real student submissions.
 
-## Current Architecture Ceiling
+## Best Practices
 
-This stack is suitable for 1000+ submissions with bounded exports. Very large PDF/ZIP jobs should eventually move to a dedicated queue/worker using the existing `Job` table.
+- Keep `CRON_SECRET` and Supabase service keys out of source control
+- Use Vercel Pro for scheduled cron execution and longer function timeouts
+- Validate builds with `npx tsc --noEmit` and `npm run lint`
+- Regularly export backups and verify storage access
+
+## Notes
+
+- Custom webpack is required for WASM/ONNX support in Next.js production
+- The app uses optimized remote patterns for Supabase-hosted images
+- Background jobs are tracked through the `Job` table and can be polled for completion
+- The repository also includes Electron desktop launch commands for local desktop workflows
