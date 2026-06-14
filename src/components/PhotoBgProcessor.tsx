@@ -1,5 +1,5 @@
 "use client"
-import { useState, useRef, useCallback, useEffect } from "react"
+import { useState, useRef, useCallback, useEffect, useMemo } from "react"
 import { processPhotoBackgroundLocal } from "@/lib/photo-bg-composite-client"
 import { PHOTO_BG_STATUS, type PhotoBgStatus } from "@/lib/photo-bg-status"
 
@@ -17,6 +17,23 @@ type Props = {
 const BG_JPEG_QUALITY = 0.88
 const BG_WORK_MAX_DIM = 768
 
+const LIVE_STEPS = [
+  { id: "prepare", label: "Preparing photo", match: /prepar/i },
+  { id: "model", label: "Loading AI", match: /model|download/i },
+  { id: "clean", label: "Removing background", match: /remov|clean|inference/i },
+  { id: "color", label: "Applying colour", match: /colour|color|apply|background updated|done/i },
+] as const
+
+function getActiveStepIndex(message: string, progress: number): number {
+  const msg = message.toLowerCase()
+  const byMessage = LIVE_STEPS.findIndex((step) => step.match.test(msg))
+  if (byMessage >= 0) return byMessage
+  if (progress >= 85) return 3
+  if (progress >= 25) return 2
+  if (progress >= 10) return 1
+  return 0
+}
+
 export default function PhotoBgProcessor({
   photoUrl,
   defaultBgColor,
@@ -29,6 +46,7 @@ export default function PhotoBgProcessor({
   const [processing, setProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
   const [progressMsg, setProgressMsg] = useState("")
+  const [elapsedSec, setElapsedSec] = useState(0)
   const schoolBgColor = defaultBgColor || "#FFFFFF"
   const [processedUrl, setProcessedUrl] = useState<string | null>(null)
   const [error, setError] = useState("")
@@ -38,6 +56,12 @@ export default function PhotoBgProcessor({
   const autoSkippedRef = useRef(false)
   const removalStartedRef = useRef(false)
   const lastBgStatusRef = useRef<PhotoBgStatus>("")
+  const processingStartedAtRef = useRef<number | null>(null)
+
+  const activeStepIndex = useMemo(
+    () => getActiveStepIndex(progressMsg, progress),
+    [progressMsg, progress]
+  )
 
   const setBgStatus = useCallback((status: PhotoBgStatus) => {
     lastBgStatusRef.current = status
@@ -53,20 +77,16 @@ export default function PhotoBgProcessor({
     const img = new Image()
     img.onload = () => {
       setPhotoLoaded(true)
-      if (photoUrl.startsWith("data:")) {
-        setPhotoDataUrl(photoUrl)
+      const canvas = document.createElement("canvas")
+      const scale = Math.min(1, BG_WORK_MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight))
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale))
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
+      const ctx = canvas.getContext("2d")
+      if (ctx) {
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+        setPhotoDataUrl(canvas.toDataURL("image/jpeg", BG_JPEG_QUALITY))
       } else {
-        const canvas = document.createElement("canvas")
-        const scale = Math.min(1, BG_WORK_MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight))
-        canvas.width = Math.max(1, Math.round(img.naturalWidth * scale))
-        canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
-        const ctx = canvas.getContext("2d")
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-          setPhotoDataUrl(canvas.toDataURL("image/jpeg", BG_JPEG_QUALITY))
-        } else {
-          setPhotoDataUrl(photoUrl)
-        }
+        setPhotoDataUrl(photoUrl)
       }
     }
     img.onerror = () => {
@@ -74,6 +94,21 @@ export default function PhotoBgProcessor({
     }
     img.src = photoUrl
   }, [photoUrl])
+
+  useEffect(() => {
+    if (!processing) {
+      processingStartedAtRef.current = null
+      setElapsedSec(0)
+      return
+    }
+    processingStartedAtRef.current = Date.now()
+    const timer = window.setInterval(() => {
+      if (processingStartedAtRef.current) {
+        setElapsedSec(Math.floor((Date.now() - processingStartedAtRef.current) / 1000))
+      }
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [processing])
 
   const removeBackground = useCallback(async () => {
     const sourceUrl = photoDataUrl || photoUrl
@@ -136,6 +171,7 @@ export default function PhotoBgProcessor({
   }, [autoConfirm, autoSkipAfterMs, processing, onSkip, setBgStatus])
 
   const displayUrl = photoDataUrl || photoUrl
+  const isWorking = processing || (!processedUrl && photoLoaded && !error)
 
   return (
     <div style={{ padding: 0 }}>
@@ -156,22 +192,64 @@ export default function PhotoBgProcessor({
         )}
       </p>
 
-      {!processing && !processedUrl && photoLoaded && !error && (
-        <div style={{ background: '#f8fafc', borderRadius: 12, padding: 16, border: '1px solid #e2e8f0', marginBottom: 16, textAlign: 'center' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', marginBottom: 8 }}>Your Uploaded Photo</div>
-          <div style={{ maxWidth: 160, margin: '0 auto', borderRadius: 10, overflow: 'hidden', border: '2px solid #e2e8f0', aspectRatio: '3/4' }}>
-            <img src={displayUrl} alt="Original" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      {isWorking && (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+          style={{ background: 'linear-gradient(180deg, #eff6ff 0%, #f8fafc 100%)', borderRadius: 16, padding: 20, border: '1px solid #bfdbfe', marginBottom: 16 }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 16 }}>
+            <span className="bg-live-dot" aria-hidden="true" />
+            <span style={{ fontSize: 13, fontWeight: 800, color: '#1e40af', letterSpacing: '0.04em' }}>LIVE</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#3b82f6' }}>— AI is preparing your photo</span>
           </div>
-        </div>
-      )}
 
-      {processing && (
-        <div style={{ background: '#f0f9ff', borderRadius: 14, padding: 24, border: '1px solid #bae6fd', textAlign: 'center' }}>
-          <div className="login-spinner" style={{ width: 36, height: 36, borderColor: 'rgba(59,130,246,0.2)', borderTopColor: '#3b82f6', margin: '0 auto 12px' }} />
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#1e40af', marginBottom: 8 }}>{progressMsg}</div>
-          <div style={{ height: 6, borderRadius: 3, background: '#e0f2fe', overflow: 'hidden', maxWidth: 280, margin: '0 auto' }}>
-            <div style={{ height: '100%', borderRadius: 3, background: 'linear-gradient(90deg, #3b82f6, #6366f1)', width: `${progress}%`, transition: 'width 0.5s ease' }} />
+          {displayUrl && (
+            <div className="bg-live-photo-wrap" aria-hidden="true">
+              <img src={displayUrl} alt="" />
+              <div className="bg-live-scan" />
+              <div className="bg-live-shimmer" />
+            </div>
+          )}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18, maxWidth: 300, margin: '0 auto 18px' }}>
+            {LIVE_STEPS.map((step, index) => {
+              const isDone = index < activeStepIndex
+              const isActive = index === activeStepIndex
+              return (
+                <div
+                  key={step.id}
+                  className={`bg-live-step${isActive ? " is-active" : ""}${isDone ? " is-done" : ""}`}
+                >
+                  <span className="bg-live-step-dot">{isDone ? "✓" : index + 1}</span>
+                  <span>{step.label}{isActive ? "…" : ""}</span>
+                </div>
+              )
+            })}
           </div>
+
+          <div style={{ textAlign: 'center', marginBottom: 10 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#1e3a8a', marginBottom: 4 }}>
+              {progressMsg || "Starting…"}
+            </div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: '#2563eb', lineHeight: 1, marginBottom: 4 }}>
+              {Math.max(0, Math.min(100, progress))}%
+            </div>
+            {elapsedSec > 0 && (
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>
+                Running for {elapsedSec}s — please keep this page open
+              </div>
+            )}
+          </div>
+
+          <div style={{ height: 8, borderRadius: 4, background: '#dbeafe', overflow: 'hidden', maxWidth: 320, margin: '0 auto' }}>
+            <div className="bg-live-progress-fill" style={{ width: `${Math.max(4, progress)}%` }} />
+          </div>
+
+          <p style={{ fontSize: 11, color: '#64748b', textAlign: 'center', marginTop: 14, marginBottom: 0, lineHeight: 1.5 }}>
+            Your phone is working on the photo right now. First time may take up to a minute while the AI loads.
+          </p>
         </div>
       )}
 
@@ -210,9 +288,16 @@ export default function PhotoBgProcessor({
       )}
 
       {!processing && processedUrl && autoConfirm && (
-        <div style={{ textAlign: 'center', padding: '8px 0' }}>
+        <div style={{ textAlign: 'center', padding: '12px 0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12 }}>
+            <span style={{ width: 24, height: 24, borderRadius: '50%', background: '#dcfce7', color: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700 }}>✓</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#16a34a' }}>Photo ready!</span>
+          </div>
+          <div style={{ maxWidth: 120, margin: '0 auto 12px', borderRadius: 10, overflow: 'hidden', border: '2px solid #22c55e', aspectRatio: '3/4' }}>
+            <img src={processedUrl} alt="Prepared photo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          </div>
           <div className="login-spinner" style={{ width: 28, height: 28, borderColor: 'rgba(34,197,94,0.2)', borderTopColor: '#22c55e', margin: '0 auto 10px' }} />
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#16a34a' }}>Photo ready — continuing…</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#16a34a' }}>Continuing to review…</div>
         </div>
       )}
     </div>

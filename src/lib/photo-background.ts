@@ -115,6 +115,180 @@ export function matchesSchoolColor(
   return colorDistance(bg.dominantRgb, target) < threshold
 }
 
+/** Fast recolor only when the wall is already the school colour — never for white→red etc. */
+export function canUseFastRecolorOnly(bg: BgUniformity, targetHex: string): boolean {
+  if (!isPlainBackground(bg)) return false
+  return matchesSchoolColor(bg, targetHex, 45)
+}
+
+export function measureEdgeBackgroundMatch(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  targetHex: string
+): number {
+  const target = parseHexColor(targetHex)
+  if (!target) return 0
+
+  const bg = analyzeEdgeBackground(ctx, w, h)
+  const dist = colorDistance(bg.dominantRgb, target)
+  if (dist > 55) return Math.max(0, 100 - dist)
+
+  type RGB = { r: number; g: number; b: number }
+  const samples: RGB[] = []
+  const collect = (x: number, y: number, width: number, height: number) => {
+    try {
+      const data = ctx.getImageData(x, y, width, height).data
+      for (let i = 0; i < data.length; i += 12) {
+        samples.push({ r: data[i], g: data[i + 1], b: data[i + 2] })
+      }
+    } catch { /* ignore */ }
+  }
+  const topBand = Math.max(20, Math.floor(h * 0.12))
+  const sideBand = Math.max(20, Math.floor(w * 0.10))
+  collect(0, 0, w, topBand)
+  collect(0, topBand, sideBand, Math.floor(h * 0.55))
+  collect(w - sideBand, topBand, sideBand, Math.floor(h * 0.55))
+
+  if (samples.length === 0) return 0
+  const matched = samples.filter((p) => colorDistance(p, target) < 40).length
+  return Math.round((matched / samples.length) * 100)
+}
+
+export async function measureForegroundRatioInTransparentBlob(blob: Blob): Promise<number> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    const url = URL.createObjectURL(blob)
+    const finish = (ratio: number) => {
+      URL.revokeObjectURL(url)
+      resolve(ratio)
+    }
+    img.onload = () => {
+      const canvas = document.createElement("canvas")
+      canvas.width = img.naturalWidth
+      canvas.height = img.naturalHeight
+      const ctx = canvas.getContext("2d")
+      if (!ctx) { finish(0); return }
+      ctx.drawImage(img, 0, 0)
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+      let fg = 0
+      const total = canvas.width * canvas.height
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] >= 64) fg++
+      }
+      finish(total > 0 ? fg / total : 0)
+    }
+    img.onerror = () => finish(0)
+    img.src = url
+  })
+}
+
+/** Flood from edges: remove white halos and uneven shades outside the subject. */
+export function cleanupBackgroundArtifacts(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  targetHex: string
+): void {
+  const target = parseHexColor(targetHex)
+  if (!target) return
+
+  const imageData = ctx.getImageData(0, 0, w, h)
+  const data = imageData.data
+  const total = w * h
+
+  const isReplaceable = (r: number, g: number, b: number) => {
+    if (r > 195 && g > 195 && b > 195) return true
+    if (colorDistance({ r, g, b }, target) < 55) return true
+    const max = Math.max(r, g, b)
+    const min = Math.min(r, g, b)
+    if (max - min < 28 && max > 150) return true
+    return false
+  }
+
+  const isProtectedSubject = (r: number, g: number, b: number) => {
+    if (g > r + 12 && g > b + 12 && g > 60) return true
+    if (r > 95 && g > 50 && b > 35 && r >= g - 15 && r > b + 8) return true
+    if (r < 90 && g < 90 && b < 90) return true
+    return false
+  }
+
+  const visited = new Uint8Array(total)
+  const replace = new Uint8Array(total)
+  const queue = new Int32Array(total)
+  let head = 0
+  let tail = 0
+
+  const trySeed = (idx: number) => {
+    if (idx < 0 || idx >= total || visited[idx]) return
+    const i = idx * 4
+    const r = data[i]
+    const g = data[i + 1]
+    const b = data[i + 2]
+    if (isProtectedSubject(r, g, b)) {
+      visited[idx] = 1
+      return
+    }
+    if (!isReplaceable(r, g, b)) {
+      visited[idx] = 1
+      return
+    }
+    visited[idx] = 1
+    replace[idx] = 1
+    queue[tail++] = idx
+  }
+
+  for (let x = 0; x < w; x++) {
+    trySeed(x)
+    trySeed((h - 1) * w + x)
+  }
+  for (let y = 0; y < h; y++) {
+    trySeed(y * w)
+    trySeed(y * w + (w - 1))
+  }
+
+  while (head < tail) {
+    const idx = queue[head++]
+    const x = idx % w
+    const y = (idx / w) | 0
+    const neighbours = [
+      x > 0 ? idx - 1 : -1,
+      x < w - 1 ? idx + 1 : -1,
+      y > 0 ? idx - w : -1,
+      y < h - 1 ? idx + w : -1,
+    ]
+    for (const n of neighbours) {
+      if (n < 0 || visited[n]) continue
+      const i = n * 4
+      const r = data[i]
+      const g = data[i + 1]
+      const b = data[i + 2]
+      if (isProtectedSubject(r, g, b)) {
+        visited[n] = 1
+        continue
+      }
+      if (!isReplaceable(r, g, b)) {
+        visited[n] = 1
+        continue
+      }
+      visited[n] = 1
+      replace[n] = 1
+      queue[tail++] = n
+    }
+  }
+
+  for (let i = 0; i < total; i++) {
+    if (!replace[i]) continue
+    const p = i * 4
+    data[p] = target.r
+    data[p + 1] = target.g
+    data[p + 2] = target.b
+    data[p + 3] = 255
+  }
+
+  ctx.putImageData(imageData, 0, 0)
+}
+
 export function recolorPlainBackgroundOnCanvas(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -187,6 +361,7 @@ export function recolorPlainBackgroundOnCanvas(
 
   if (replaced < total * 0.15) return false
   ctx.putImageData(imageData, 0, 0)
+  cleanupBackgroundArtifacts(ctx, w, h, targetHex)
   return true
 }
 
@@ -213,11 +388,31 @@ export async function loadImageToCanvas(url: string, maxDim = 1024): Promise<{
 
 type BgRemovalDevice = "gpu" | "cpu"
 
-/** Full-precision ISNet — best hair/edge quality in @imgly/background-removal (~170MB first download). */
-export const BG_REMOVAL_MODEL = "isnet" as const
+/**
+ * ISNet FP16 — IMG.LY default: best practical balance of hair/edge quality,
+ * download size (~80MB), and inference speed on parent phones. Full `isnet`
+ * is slightly sharper but ~2× slower and more likely to feel stuck on CPU.
+ */
+export const BG_REMOVAL_MODEL = "isnet_fp16" as const
+
+/** Abort inference if the device stalls — prevents an endless spinner. */
+export const BG_REMOVAL_INFERENCE_TIMEOUT_MS = 120_000
 
 let preloadPromise: Promise<BgRemovalDevice> | null = null
 let removalChain: Promise<unknown> = Promise.resolve()
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)),
+      ms
+    )
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value) },
+      (err) => { clearTimeout(timer); reject(err) }
+    )
+  })
+}
 
 function runSerialized<T>(task: () => Promise<T>): Promise<T> {
   const run = removalChain.then(task, task)
@@ -266,12 +461,21 @@ export async function removeBackgroundWithBestModel(
     }
 
     try {
-      return await removeBackground(blob, { ...base, device })
+      const result = await withTimeout(
+        removeBackground(blob, { ...base, device }),
+        BG_REMOVAL_INFERENCE_TIMEOUT_MS,
+        "Background removal"
+      )
+      return result
     } catch (gpuErr) {
       if (device === "cpu") throw gpuErr
       const { preload } = await import("@imgly/background-removal")
       await preload({ model: BG_REMOVAL_MODEL, device: "cpu" })
-      return await removeBackground(blob, { ...base, device: "cpu" })
+      return await withTimeout(
+        removeBackground(blob, { ...base, device: "cpu" }),
+        BG_REMOVAL_INFERENCE_TIMEOUT_MS,
+        "Background removal"
+      )
     }
   })
 }

@@ -797,6 +797,15 @@ export default function SubmitPage() {
       setStep(blockReason?.includes("photo") || !croppedPhoto ? "photo" : "form")
       return
     }
+    if (
+      config.photoBgColor &&
+      photoBgStatus !== PHOTO_BG_STATUS.PROCESSED &&
+      photoBgStatus !== PHOTO_BG_STATUS.PLAIN
+    ) {
+      setAlertMsg("Please wait while we prepare your photo background, then try again.")
+      goToBgProcessing()
+      return
+    }
     setSubmitting(true)
     setUploadProgress(0)
     setPhotoUploadWarning("")
