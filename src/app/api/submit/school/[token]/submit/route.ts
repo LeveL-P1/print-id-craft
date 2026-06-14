@@ -106,18 +106,14 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
     // Pre-compute auto-assigned fields OUTSIDE the transaction to avoid
     // hitting Prisma's default 5 000 ms interactive-transaction timeout.
     const autoFields = await computeAutoAssignedFields(school.id)
-
-    let photoFields = { photoUrl: "", photoPath: "", photoBgStatus: "" }
-    try {
-      photoFields = await resolveSubmitPhotoFields({
-        photoUrl: validated.photoUrl,
-        photoPath: validated.photoPath,
-        photoDataUrl: validated.photoDataUrl,
-        schoolId: school.id,
-      })
-    } catch (photoError) {
-      console.error("Photo resolution failed (non-fatal):", photoError)
+    const finalFormData = {
+      ...validated.formData,
+      ...autoFields,
+      class: classFields.class,
+      ...(classFields.classGrade ? { classGrade: classFields.classGrade } : {}),
+      ...(classFields.division ? { division: classFields.division } : {}),
     }
+    const indexData = buildStudentIndexData(finalFormData, cls.id)
 
     let student: any = null
     let retries = 3
@@ -125,14 +121,6 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
       try {
         student = await prisma.$transaction(async (tx) => {
           const serialNumber = await getNextStudentSerial(tx, school.id, school.name)
-          const finalFormData = {
-            ...validated.formData,
-            ...autoFields,
-            class: classFields.class,
-            ...(classFields.classGrade ? { classGrade: classFields.classGrade } : {}),
-            ...(classFields.division ? { division: classFields.division } : {}),
-          }
-          const indexData = buildStudentIndexData(finalFormData, cls.id)
           return tx.student.create({
             data: {
               schoolId: school.id,
@@ -140,9 +128,9 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
               serialNumber,
               ...indexData,
               formData: finalFormData,
-              photoUrl: photoFields.photoUrl,
-              photoPath: photoFields.photoPath,
-              photoBgStatus: photoFields.photoBgStatus || validated.photoBgStatus || "",
+              photoUrl: "",
+              photoPath: "",
+              photoBgStatus: validated.photoBgStatus || "SKIPPED",
               status: "SUBMITTED",
             },
           })
@@ -155,6 +143,27 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
         }
         throw err
       }
+    }
+
+    try {
+      const photoFields = await resolveSubmitPhotoFields({
+        photoUrl: validated.photoUrl,
+        photoPath: validated.photoPath,
+        photoDataUrl: validated.photoDataUrl,
+        schoolId: school.id,
+      })
+      if (photoFields.photoUrl || photoFields.photoPath || photoFields.photoBgStatus) {
+        await prisma.student.update({
+          where: { id: student.id },
+          data: {
+            photoUrl: photoFields.photoUrl,
+            photoPath: photoFields.photoPath,
+            photoBgStatus: photoFields.photoBgStatus || validated.photoBgStatus || "",
+          },
+        })
+      }
+    } catch (photoError) {
+      console.error("Photo resolution failed after student create (non-fatal):", photoError)
     }
 
     try {

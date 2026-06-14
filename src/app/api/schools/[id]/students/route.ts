@@ -7,9 +7,22 @@ import { withStudentPhotoUrl } from "@/lib/student-photo-url"
 import { buildStudentIndexData } from "@/lib/student-index"
 import { normalizeFormValue } from "@/lib/field-resolver"
 import { reportSlowOperation } from "@/lib/observability"
+import { formatClassSection } from "@/lib/section-class"
 
 // Optimize: prefer longer-running function for connection reuse
 export const maxDuration = 10
+
+function uniqueValues(...values: Array<string | undefined | null>) {
+  return Array.from(new Set(
+    values
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  ))
+}
+
+function jsonEqualsAny(path: string, values: string[]) {
+  return values.map((value) => ({ formData: { path: [path], equals: value } }))
+}
 
 export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params
@@ -35,21 +48,43 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
 
     const andFilters: any[] = []
 
-    if (classGrade) {
+    if (classGrade && division) {
+      const gradeValues = uniqueValues(classGrade, classGrade.toUpperCase(), classGrade.toLowerCase())
+      const divisionValues = uniqueValues(division, division.toUpperCase(), division.toLowerCase())
+      const classValues = uniqueValues(
+        formatClassSection(classGrade, division),
+        `${classGrade}-${division}`,
+        `${classGrade} ${division}`,
+        `${classGrade.toUpperCase()} - ${division.toUpperCase()}`
+      )
       andFilters.push({
         OR: [
-          { formData: { path: ["classGrade"], equals: classGrade } },
-          { formData: { path: ["CLASSGRADE"], equals: classGrade } },
+          {
+            AND: [
+              { OR: [...jsonEqualsAny("classGrade", gradeValues), ...jsonEqualsAny("CLASSGRADE", gradeValues)] },
+              { OR: [...jsonEqualsAny("division", divisionValues), ...jsonEqualsAny("DIVISION", divisionValues), ...jsonEqualsAny("section", divisionValues)] },
+            ],
+          },
+          { OR: [...jsonEqualsAny("class", classValues), ...jsonEqualsAny("classSection", classValues), ...jsonEqualsAny("CLASS", classValues)] },
         ],
       })
-    }
-
-    if (division) {
+    } else if (classGrade) {
+      const gradeValues = uniqueValues(classGrade, classGrade.toUpperCase(), classGrade.toLowerCase())
       andFilters.push({
         OR: [
-          { formData: { path: ["division"], equals: division } },
-          { formData: { path: ["division"], equals: division.toLowerCase() } },
-          { formData: { path: ["DIVISION"], equals: division } },
+          ...jsonEqualsAny("classGrade", gradeValues),
+          ...jsonEqualsAny("CLASSGRADE", gradeValues),
+          ...jsonEqualsAny("class", gradeValues),
+          ...jsonEqualsAny("classSection", gradeValues),
+        ],
+      })
+    } else if (division) {
+      const divisionValues = uniqueValues(division, division.toUpperCase(), division.toLowerCase())
+      andFilters.push({
+        OR: [
+          ...jsonEqualsAny("division", divisionValues),
+          ...jsonEqualsAny("DIVISION", divisionValues),
+          ...jsonEqualsAny("section", divisionValues),
         ],
       })
     }
@@ -106,8 +141,7 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
       },
     })
 
-    // Cache for 10 seconds, serve stale for 30s while revalidating
-    response.headers.set("Cache-Control", "private, max-age=10, stale-while-revalidate=30")
+    response.headers.set("Cache-Control", "no-store")
     await reportSlowOperation({
       name: "api.students.list",
       durationMs: Date.now() - startedAt,

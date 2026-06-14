@@ -21,6 +21,7 @@ const nextConfig = {
   // Next 16 uses Turbopack by default; this app relies on custom webpack
   // (WASM/ONNX). Keep webpack for production builds on Vercel.
   turbopack: {},
+  allowedDevOrigins: ['127.0.0.1', 'localhost'],
   // Externalize heavy WASM packages from the server bundle.
   serverExternalPackages: ['@imgly/background-removal'],
   // Performance: optimize images

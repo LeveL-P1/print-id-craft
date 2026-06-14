@@ -95,18 +95,14 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
     // This is a read-only lookup (findMany take:200) that doesn't need the
     // serialisation guarantee of the advisory-lock transaction.
     const autoFields = await computeAutoAssignedFields(cls.school.id)
-
-    let photoFields = { photoUrl: "", photoPath: "", photoBgStatus: "" }
-    try {
-      photoFields = await resolveSubmitPhotoFields({
-        photoUrl: validated.photoUrl,
-        photoPath: validated.photoPath,
-        photoDataUrl: validated.photoDataUrl,
-        schoolId: cls.school.id,
-      })
-    } catch (photoError) {
-      console.error("Photo resolution failed (non-fatal):", photoError)
+    const finalFormData = {
+      ...validated.formData,
+      ...autoFields,
+      class: classFields.class,
+      ...(classFields.classGrade ? { classGrade: classFields.classGrade } : {}),
+      ...(classFields.division ? { division: classFields.division } : {}),
     }
+    const indexData = buildStudentIndexData(finalFormData, cls.id)
 
     // Create student with retry for serial number collisions under high concurrency
     let student: any = null
@@ -115,14 +111,6 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
       try {
         student = await prisma.$transaction(async (tx) => {
           const serialNumber = await getNextStudentSerial(tx, cls.school.id, cls.school.name)
-          const finalFormData = {
-            ...validated.formData,
-            ...autoFields,
-            class: classFields.class,
-            ...(classFields.classGrade ? { classGrade: classFields.classGrade } : {}),
-            ...(classFields.division ? { division: classFields.division } : {}),
-          }
-          const indexData = buildStudentIndexData(finalFormData, cls.id)
           return tx.student.create({
             data: {
               schoolId: cls.school.id,
@@ -130,9 +118,9 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
               serialNumber,
               ...indexData,
               formData: finalFormData,
-              photoUrl: photoFields.photoUrl,
-              photoPath: photoFields.photoPath,
-              photoBgStatus: photoFields.photoBgStatus || validated.photoBgStatus || "",
+              photoUrl: "",
+              photoPath: "",
+              photoBgStatus: validated.photoBgStatus || "SKIPPED",
               status: "SUBMITTED",
             },
           })
@@ -147,6 +135,27 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
         }
         throw err
       }
+    }
+
+    try {
+      const photoFields = await resolveSubmitPhotoFields({
+        photoUrl: validated.photoUrl,
+        photoPath: validated.photoPath,
+        photoDataUrl: validated.photoDataUrl,
+        schoolId: cls.school.id,
+      })
+      if (photoFields.photoUrl || photoFields.photoPath || photoFields.photoBgStatus) {
+        await prisma.student.update({
+          where: { id: student.id },
+          data: {
+            photoUrl: photoFields.photoUrl,
+            photoPath: photoFields.photoPath,
+            photoBgStatus: photoFields.photoBgStatus || validated.photoBgStatus || "",
+          },
+        })
+      }
+    } catch (photoError) {
+      console.error("Photo resolution failed after student create (non-fatal):", photoError)
     }
 
     try {
