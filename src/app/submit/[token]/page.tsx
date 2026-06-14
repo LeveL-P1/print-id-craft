@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { useParams } from "next/navigation"
 import PhotoVerifier from "@/components/PhotoVerifier"
-import JpgCardPreview from "@/components/JpgCardPreview"
+import JpgCardPreview, { generateJpgCard } from "@/components/JpgCardPreview"
 import PhotoCropper from "@/components/PhotoCropper"
 import {
   getFieldRole,
@@ -18,6 +18,22 @@ const SUPPORT_PHONE_WA = "919881877607"
 
 function buildWhatsAppUrl(message: string) {
   return `https://wa.me/${SUPPORT_PHONE_WA}?text=${encodeURIComponent(message)}`
+}
+
+const safeFilePart = (value: string) =>
+  (value || "student")
+    .trim()
+    .replace(/[^a-z0-9]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 50) || "student"
+
+function downloadDataUrl(dataUrl: string, fileName: string) {
+  const a = document.createElement("a")
+  a.href = dataUrl
+  a.download = fileName
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
 }
 
 function buildSupportWhatsAppMessage(parts: {
@@ -419,6 +435,7 @@ export default function SubmitPage() {
   const [result, setResult] = useState<{ serialNumber: string; studentId: string } | null>(null)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [alertMsg, setAlertMsg] = useState("")
+  const [previewDownloadStatus, setPreviewDownloadStatus] = useState<"" | "downloaded" | "unavailable">("")
   const [duplicateBlocked, setDuplicateBlocked] = useState(false)
   const [duplicateInfo, setDuplicateInfo] = useState<{
     studentName: string
@@ -746,6 +763,7 @@ export default function SubmitPage() {
         setUploadProgress(100)
         setResult(data.data)
         clearDraft()
+        setPreviewDownloadStatus("")
         try {
           const studentName = resolveFieldValue(formData, "name")
           window.localStorage.setItem(SUBMITTED_KEY, JSON.stringify({
@@ -754,6 +772,28 @@ export default function SubmitPage() {
             submittedAt: new Date().toISOString(),
           }))
         } catch { /* ignore */ }
+        try {
+          if (config.templateImageUrl && config.fieldMappings?.length > 0) {
+            const studentName = resolveFieldValue(formData, "name")
+            const fileBase = safeFilePart(`${studentName || "student"}-${data.data.serialNumber || "preview"}`)
+            const previewDataUrl = await generateJpgCard(
+              config.templateImageUrl,
+              config.fieldMappings,
+              formData,
+              croppedPhoto,
+              1,
+              undefined,
+              (config as any).cardWidthMm || 85.6,
+            )
+            downloadDataUrl(previewDataUrl, `${fileBase}-id-preview.jpg`)
+            setPreviewDownloadStatus("downloaded")
+          } else {
+            setPreviewDownloadStatus("unavailable")
+          }
+        } catch (downloadErr) {
+          console.warn("Could not auto-download ID preview:", downloadErr)
+          setPreviewDownloadStatus("unavailable")
+        }
         setStep("success")
         setSubmitting(false)
       } else if (data.error === "DUPLICATE_NAME" || data.error === "DUPLICATE_ROLL") {
@@ -840,6 +880,16 @@ export default function SubmitPage() {
           )}
 
           <p style={{ fontSize: 13, color: '#94a3b8', marginBottom: 8 }}>Please save this serial number for your records.</p>
+          {previewDownloadStatus === "downloaded" && (
+            <p style={{ fontSize: 12, color: '#16a34a', fontWeight: 700, marginBottom: 8 }}>
+              ID preview image downloaded to your device.
+            </p>
+          )}
+          {previewDownloadStatus === "unavailable" && (
+            <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 8 }}>
+              Preview download was not available on this device. Your registration is still saved.
+            </p>
+          )}
           <p style={{ fontSize: 12, color: '#64748b', lineHeight: 1.55, maxWidth: 420, margin: '0 auto' }}>
             Your uploaded photo will be processed by the manufacturer. The background will be made plain and the photo will be improved for the final ID card.
           </p>
