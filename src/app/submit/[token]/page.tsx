@@ -363,8 +363,7 @@ export default function SubmitPage() {
 
   const checkSubmissionStatus = useCallback(async (fd: Record<string, string>) => {
     const name = resolveFieldValue(fd, "name")
-    const father = resolveFieldValue(fd, "father")
-    if (!name || !father) return
+    if (!name || name.trim().length < 3) return
     try {
       const res = await fetch(
         `/api/submit/${token}?statusCheck=1&formData=${encodeURIComponent(JSON.stringify(fd))}`
@@ -479,9 +478,9 @@ export default function SubmitPage() {
   useEffect(() => {
     if (!config || step === "loading" || step === "error" || step === "success") return
     const name = resolveFieldValue(formData, "name")
-    const father = resolveFieldValue(formData, "father")
-    if (!name || !father) return
-    checkSubmissionStatus(formData)
+    if (!name || name.trim().length < 3) return
+    const timer = window.setTimeout(() => checkSubmissionStatus(formData), 450)
+    return () => window.clearTimeout(timer)
   }, [config, formData, step, checkSubmissionStatus])
 
   const handleFieldChange = (key: string, value: string) => {
@@ -751,7 +750,7 @@ export default function SubmitPage() {
   if (alreadySubmitted) {
     const waUrl = buildWhatsAppUrl(buildSupportWhatsAppMessage({
       schoolName: config?.schoolName,
-      className: config?.className,
+      className: getDisplayClass(config, formData),
       studentName: alreadySubmitted.studentName,
       serialNumber: alreadySubmitted.serialNumber,
       reason: "already_submitted",
@@ -778,7 +777,7 @@ export default function SubmitPage() {
               {alreadySubmitted.submittedAt ? (
                 <> on <strong>{formatSubmittedDate(alreadySubmitted.submittedAt)}</strong></>
               ) : null}
-              {config?.className ? <> in <strong>{config.className}</strong></> : null}.
+              {getDisplayClass(config, formData) ? <> in <strong>{getDisplayClass(config, formData)}</strong></> : null}.
             </p>
             <div style={{ background: '#f8fafc', borderRadius: 12, padding: 16, marginBottom: 20 }}>
               <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>Registration ID</p>
@@ -803,6 +802,9 @@ export default function SubmitPage() {
                 marginBottom: 12,
               }}
             >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/>
+              </svg>
               Contact Support on WhatsApp
             </a>
             <a
@@ -828,7 +830,7 @@ export default function SubmitPage() {
     const studentName = duplicateInfo?.studentName || resolveFieldValue(formData, "name")
     const waUrl = buildWhatsAppUrl(buildSupportWhatsAppMessage({
       schoolName: config?.schoolName,
-      className: config?.className,
+      className: getDisplayClass(config, formData),
       studentName,
       reason: "duplicate_blocked",
     }))
@@ -850,7 +852,7 @@ export default function SubmitPage() {
                 ? "This roll number is already registered"
                 : "This student is already registered"}
               {studentName ? <> for <strong style={{ color: '#0f172a' }}>{studentName}</strong></> : null}
-              {config?.className ? <> in <strong>{config.className}</strong></> : null}.
+              {getDisplayClass(config, formData) ? <> in <strong>{getDisplayClass(config, formData)}</strong></> : null}.
               {duplicateInfo?.submittedAt ? (
                 <> Submitted on <strong>{formatSubmittedDate(duplicateInfo.submittedAt)}</strong>.</>
               ) : null}

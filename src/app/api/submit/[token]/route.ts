@@ -44,8 +44,7 @@ export async function GET(req: Request, props: { params: Promise<{ token: string
         }
       }
       const name = resolveFieldValue(formData, "name")
-      const father = resolveFieldValue(formData, "father")
-      if (!name || !father) {
+      if (!name) {
         return NextResponse.json({ success: true, data: { submitted: false } })
       }
       const status = await checkSubmissionStatus(cls.id, formData)

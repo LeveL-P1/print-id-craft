@@ -383,6 +383,26 @@ export async function checkDuplicateSubmission(
     }
   }
 
+  if (indexData.normalizedName) {
+    const byName = await prisma.student.findFirst({
+      where: {
+        classId,
+        normalizedName: indexData.normalizedName,
+        status: { not: "FLAGGED" },
+      },
+      select: { serialNumber: true, submittedAt: true, formData: true },
+    })
+    if (byName) {
+      return toDuplicateResult(
+        "identity",
+        "DUPLICATE_NAME",
+        "This student name is already registered in this class. Contact support for changes.",
+        byName,
+        name
+      )
+    }
+  }
+
   if (indexData.normalizedRollNo) {
     const byRoll = await prisma.student.findFirst({
       where: {
