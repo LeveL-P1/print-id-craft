@@ -7,6 +7,7 @@ import {
   type PhotoBorderConfig, type WrapTextConfig,
 } from "./IDMakerDialogs"
 import { resolveDisplayFieldValue, formatDateValue, isPrefixedAddressField } from "@/lib/field-resolver"
+import { isClassDivisionFieldKey } from "@/lib/section-class"
 
 const BG_COLOR_PRESETS = [
   // Neutrals
@@ -136,8 +137,9 @@ const SAMPLE_DATA: Record<string, string> = {
   name: "Avneesh Abhishek Awachat",
   fullName: "Avneesh Abhishek Awachat",
   Student_Name: "Avneesh Abhishek Awachat",
-  class: "V -A",
-  division: "A",
+  class: "VI - A",
+  classSection: "VI - A",
+  classDivision: "VI - A",
   branch: "Bibwewadi",
   father: "9650319700",
   mother: "8850257336",
@@ -1575,6 +1577,7 @@ export default function JpgTemplateMapper({
             {/* Field overlays */}
             {mappings.map((m) => {
               const isSelected = m.id === selectedId
+              const isClassDivField = isClassDivisionFieldKey(m.fieldKey)
               // Resolve preview value with this priority:
               //   1. Real student data from the current school (passed via
               //      previewStudent — uses the shared field-resolver so
@@ -1610,7 +1613,7 @@ export default function JpgTemplateMapper({
                       : showPreview
                       ? "none"
                       : `2px ${isSelected ? "solid" : "dashed"} ${
-                          isSelected ? "#3b82f6" : m.type === "flag" ? "#f59e0b" : "rgba(255,255,255,0.6)"
+                          isSelected ? "#3b82f6" : isClassDivField ? "#eab308" : m.type === "flag" ? "#f59e0b" : "rgba(255,255,255,0.6)"
                         }`,
                     borderRadius: (m.type === "photo" || m.type === "flag")
                       ? `${m.photoBorderRadius || 0}px`
@@ -1619,6 +1622,8 @@ export default function JpgTemplateMapper({
                       ? showPreview ? "transparent" : "rgba(59, 130, 246, 0.15)"
                       : m.type === "flag"
                       ? showPreview ? "transparent" : "rgba(245, 158, 11, 0.15)"
+                      : isClassDivField
+                      ? showPreview ? "transparent" : "rgba(234, 179, 8, 0.15)"
                       : showPreview
                       ? "transparent"
                       : isSelected
@@ -3372,6 +3377,30 @@ export default function JpgTemplateMapper({
               </button>
             )}
 
+            {/* Class - Division button (single combined placeholder) */}
+            {!mappings.find((m) => isClassDivisionFieldKey(m.fieldKey)) && (
+              <button
+                onClick={() => addFieldMapping("class", "Class - Division")}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  border: "1.5px dashed #eab308",
+                  borderRadius: 8,
+                  background: "#fefce8",
+                  color: "#a16207",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  marginBottom: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                📚 Add Class - Division Placeholder
+              </button>
+            )}
+
             {/* Flag button */}
             {!mappings.find((m) => m.type === "flag") && (
               <button
@@ -3400,8 +3429,6 @@ export default function JpgTemplateMapper({
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {[
                 { key: "name", label: "Student Name" },
-                { key: "class", label: "Class-Section" },
-                { key: "division", label: "Division" },
                 { key: "branch", label: "Branch" },
                 { key: "rollNo", label: "Roll No. / NO" },
                 { key: "father", label: "Father's Mobile No." },

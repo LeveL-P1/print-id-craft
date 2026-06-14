@@ -303,7 +303,7 @@ export function isPrefixedAddressField(fieldKey: string): boolean {
  */
 export function resolveDisplayFieldValue(fd: Record<string, string>, fieldKey: string): string {
   const nk = normalizeKey(fieldKey)
-  if (nk === "class" || nk === "classsection") {
+  if (nk === "class" || nk === "classsection" || nk === "classdivision") {
     return resolveClassDisplayValue(fd)
   }
   if (nk === "division" || nk === "div") {
@@ -323,7 +323,7 @@ export function getCardTextWrapMode(
   configured?: string
 ): "nowrap" | "wrap" | "multiline" {
   const nk = normalizeKey(fieldKey)
-  if (nk === "class" || nk === "classsection" || nk === "division") return "wrap"
+  if (nk === "class" || nk === "classsection" || nk === "classdivision" || nk === "division") return "wrap"
   if (configured === "nowrap" || configured === "wrap" || configured === "multiline") {
     return configured
   }

@@ -329,16 +329,19 @@ describe("resolveFieldValue", () => {
   })
 
   describe("section class + division", () => {
-    it("formats V -A for card placeholder", () => {
-      expect(formatClassSection("V", "A")).toBe("V -A")
+    it("formats VI - B for card placeholder", () => {
+      expect(formatClassSection("VI", "B")).toBe("VI - B")
+      expect(formatClassSection("V", "A")).toBe("V - A")
     })
 
     it("resolves combined class on card from stored fields", () => {
-      expect(resolveDisplayFieldValue({ classGrade: "V", division: "A" }, "class")).toBe("V -A")
+      expect(resolveDisplayFieldValue({ classGrade: "V", division: "A" }, "class")).toBe("V - A")
+      expect(resolveDisplayFieldValue({ classGrade: "VI", division: "B" }, "class")).toBe("VI - B")
     })
 
     it("hides duplicate division when class is combined", () => {
-      expect(resolveDisplayFieldValue({ class: "V -A", division: "A" }, "division")).toBe("")
+      expect(resolveDisplayFieldValue({ class: "V - A", division: "A" }, "division")).toBe("")
+      expect(resolveDisplayFieldValue({ classGrade: "VI", division: "B" }, "division")).toBe("")
     })
 
     it("builds combined class on submit", () => {
@@ -348,7 +351,7 @@ describe("resolveFieldValue", () => {
         DEFAULT_CLASS_OPTIONS.SECONDARY
       )
       expect(result.ok).toBe(true)
-      if (result.ok) expect(result.class).toBe("VII -A")
+      if (result.ok) expect(result.class).toBe("VII - A")
     })
 
     it("includes divisions A through M", () => {

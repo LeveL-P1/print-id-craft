@@ -1,4 +1,4 @@
-/** Section-based registration: Class (Roman) + Division dropdowns; card shows e.g. V -A. */
+/** Section-based registration: Class (Roman) + Division dropdowns; card shows e.g. VI - A. */
 
 export const DIVISIONS = [
   "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
@@ -20,13 +20,13 @@ export const DEFAULT_CLASS_OPTIONS: Record<SectionType, string[]> = {
   SECONDARY: ["VI", "VII", "VIII", "IX", "X"],
 }
 
-/** Combine grade + division for the Class placeholder (e.g. V + A -> V -A). */
+/** Combine grade + division for the card placeholder (e.g. VI + B -> VI - B). */
 export function formatClassSection(classGrade: string, division: string): string {
   const grade = String(classGrade || "").trim()
   const div = String(division || "").trim().toUpperCase()
   if (!grade) return div
   if (!div) return grade
-  return `${grade} -${div}`
+  return `${grade} - ${div}`
 }
 
 
@@ -51,28 +51,40 @@ export function resolveEffectiveClassOptions(
 }
 
 export function resolveClassDisplayValue(fd: Record<string, string>): string {
-  const stored = String(fd.class || fd.classSection || "").trim()
-  const grade = String(fd.classGrade || "").trim()
-  const division = String(fd.division || "").trim().toUpperCase()
+  const grade = String(fd.classGrade || fd.CLASSGRADE || "").trim()
+  const division = String(fd.division || fd.DIVISION || "").trim().toUpperCase()
   if (grade && division) return formatClassSection(grade, division)
+  if (grade) return grade
+
+  const stored = String(fd.class || fd.classSection || "").trim()
   if (stored) {
     const legacy = stored.match(/^(.+?)\s*-\s*([A-M])$/i)
-    if (legacy) return formatClassSection(legacy[1], legacy[2])
+    if (legacy) return formatClassSection(legacy[1].trim(), legacy[2])
     return stored
   }
-  return grade || division
+  return division
+}
+
+/** True for the single combined Class - Division card placeholder. */
+export function isClassDivisionFieldKey(fieldKey: string): boolean {
+  const nk = String(fieldKey || "").toLowerCase().replace(/[^a-z0-9]/g, "")
+  return nk === "class" || nk === "classsection" || nk === "classdivision"
 }
 
 export function resolveDivisionDisplayValue(fd: Record<string, string>): string {
+  const grade = String(fd.classGrade || fd.CLASSGRADE || "").trim()
+  if (grade) return ""
+
   const classVal = resolveClassDisplayValue(fd)
-  if (classVal && /\s-\s*[A-M]$| -[A-M]$|-[A-M]$/i.test(classVal)) return ""
-  return String(fd.division || "").trim().toUpperCase()
+  if (classVal && /\s-\s*[A-M]$/i.test(classVal)) return ""
+
+  return String(fd.division || fd.DIVISION || "").trim().toUpperCase()
 }
 
 export type ClassStudentCount = { label: string; count: number }
 export type GradeStudentCount = { grade: string; count: number }
 
-/** Per-section student counts grouped by full class label (e.g. VI-A) and by grade (e.g. VI). */
+/** Per-section student counts grouped by full class label (e.g. VI - A) and by grade (e.g. VI). */
 export function aggregateSectionStudentCounts(
   students: Array<{ classId: string; formData: unknown }>,
   classId: string
@@ -84,8 +96,8 @@ export function aggregateSectionStudentCounts(
     if (student.classId !== classId) continue
     const fd = (student.formData || {}) as Record<string, string>
     const label = resolveClassDisplayValue(fd) || "Unassigned"
-    const grade = String(fd.classGrade || "").trim()
-      || label.replace(/\s*-[A-M]$/i, "").trim()
+    const grade = String(fd.classGrade || fd.CLASSGRADE || "").trim()
+      || label.replace(/\s*-\s*[A-M]$/i, "").trim()
       || "Unassigned"
 
     byClass.set(label, (byClass.get(label) || 0) + 1)
