@@ -9,7 +9,40 @@ import {
   type FieldRole,
 } from "@/lib/field-resolver"
 import { formatClassSection } from "@/lib/section-class"
-import { prepareStudentPhotoForUpload } from "@/lib/client-photo-upload"
+import { uploadStudentPhotoResilient } from "@/lib/client-photo-upload"
+
+const SUPPORT_PHONE_DISPLAY = "+91 98818 77607"
+const SUPPORT_PHONE_E164 = "+919881877607"
+const SUPPORT_PHONE_WA = "919881877607"
+
+function buildWhatsAppUrl(message: string) {
+  return `https://wa.me/${SUPPORT_PHONE_WA}?text=${encodeURIComponent(message)}`
+}
+
+function buildSupportWhatsAppMessage(parts: {
+  schoolName?: string
+  className?: string
+  studentName?: string
+  serialNumber?: string
+  reason?: "already_submitted" | "duplicate_blocked"
+}) {
+  const school = parts.schoolName || "the school"
+  const classPart = parts.className ? ` (${parts.className})` : ""
+  const namePart = parts.studentName ? ` for ${parts.studentName}` : ""
+  if (parts.reason === "already_submitted") {
+    return (
+      `Hello, I need help with the ID card form for ${school}${classPart}${namePart}.` +
+      (parts.serialNumber ? ` Registration ID: ${parts.serialNumber}.` : " ") +
+      " Please help."
+    )
+  }
+  return (
+    `Hello, I am trying to submit the ID card form for ${school}${classPart},` +
+    ` but I'm getting a "details already registered" message.` +
+    (parts.studentName ? ` My name is ${parts.studentName}.` : "") +
+    " Please help."
+  )
+}
 
 const JpgCardPreview = dynamic(() => import("@/components/JpgCardPreview"), { ssr: false })
 const PhotoCropper = dynamic(() => import("@/components/PhotoCropper"), { ssr: false })
@@ -107,46 +140,6 @@ const wordCount = (s: string): number =>
   (s || "").trim().split(/\s+/).filter(Boolean).length
 
 const ADDRESS_MIN_WORDS = 5
-const PHOTO_UPLOAD_TIMEOUT_MS = 45_000
-const PHOTO_UPLOAD_RETRY_TIMEOUT_MS = 60_000
-
-async function parseApiError(res: Response, fallback: string) {
-  const contentType = res.headers.get("content-type") || ""
-  if (contentType.includes("application/json")) {
-    const data = await res.json().catch(() => null)
-    return data?.error || data?.detail || fallback
-  }
-
-  const text = await res.text().catch(() => "")
-  if (text && !text.trim().startsWith("<!DOCTYPE")) {
-    return text.slice(0, 180)
-  }
-  return fallback
-}
-
-async function uploadFormWithTimeout(formData: FormData, timeoutMs = PHOTO_UPLOAD_TIMEOUT_MS) {
-  const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    return await fetch("/api/upload", {
-      method: "POST",
-      body: formData,
-      signal: controller.signal,
-    })
-  } finally {
-    window.clearTimeout(timeout)
-  }
-}
-
-const isAbortError = (error: unknown) =>
-  error instanceof DOMException && error.name === "AbortError"
-
-function getUploadNetworkErrorMessage(error: unknown) {
-  if (isAbortError(error)) {
-    return "Photo upload is taking too long. Please try again on a stronger network."
-  }
-  return error instanceof Error ? error.message : "Photo upload failed. Please check your internet and try again."
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SampleReferencePhoto — shows a clear illustration of "what a good ID photo
@@ -345,6 +338,7 @@ export default function SubmitPage() {
     submittedAt: string
   } | null>(null)
   const [photoVerified, setPhotoVerified] = useState(false)
+  const [photoUploadWarning, setPhotoUploadWarning] = useState("")
 
   // Visible 10-digit text for each mobile-intent field, kept separate from
   // formData so we never round-trip the "+91 " prefix through the input value
@@ -565,65 +559,55 @@ export default function SubmitPage() {
     }
     setSubmitting(true)
     setUploadProgress(0)
+    setPhotoUploadWarning("")
+    setAlertMsg("")
+
     try {
-      let photoUrl = ""
-      let photoPath = ""
-      if (croppedPhoto) {
-        try {
-          setUploadProgress(10)
-          const uploadFile = await prepareStudentPhotoForUpload(croppedPhoto)
-          setUploadProgress(25)
-          const fd = new FormData()
-          fd.append("file", uploadFile)
-          fd.append("folder", `students/${config.schoolId}`)
-          fd.append("submitToken", token)
-          setUploadProgress(30)
-          if (typeof navigator !== "undefined" && navigator.onLine === false) {
-            throw new Error("You appear to be offline. Please reconnect and submit again.")
-          }
-          let uploadRes: Response
-          try {
-            uploadRes = await uploadFormWithTimeout(fd, PHOTO_UPLOAD_TIMEOUT_MS)
-          } catch (error) {
-            throw new Error(getUploadNetworkErrorMessage(error))
-          }
-          if (!uploadRes.ok && uploadRes.status >= 500) {
-            setUploadProgress(45)
-            try {
-              uploadRes = await uploadFormWithTimeout(fd, PHOTO_UPLOAD_RETRY_TIMEOUT_MS)
-            } catch (error) {
-              throw new Error(getUploadNetworkErrorMessage(error))
-            }
-          }
-          const uploadData = uploadRes.ok
-            ? await uploadRes.json().catch(() => null)
-            : null
-          setUploadProgress(70)
-          if (uploadRes.ok && uploadData?.success) {
-            photoUrl = uploadData.url
-            photoPath = uploadData.path || ""
-          } else {
-            throw new Error(await parseApiError(uploadRes, "Photo upload failed. Please try again."))
-          }
-          setUploadProgress(80)
-        } catch (photoErr) {
-          console.error("Photo upload failed:", photoErr)
-          photoUrl = ""
-          photoPath = ""
-          setUploadProgress(80)
-        }
-      } else {
-        setUploadProgress(80)
+      const photoResult = await uploadStudentPhotoResilient({
+        croppedPhoto,
+        schoolId: config.schoolId,
+        submitToken: token,
+        onProgress: setUploadProgress,
+      })
+
+      if (photoResult.uploadFailed) {
+        setPhotoUploadWarning(
+          photoResult.lastError ||
+            "Photo upload had a problem — your registration will still be saved."
+        )
       }
 
       setUploadProgress(85)
-      const res = await fetch(`/api/submit/${token}/submit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ formData, photoUrl, photoPath, photoBgStatus: "" }),
-      })
+      let res: Response
+      try {
+        res = await fetch(`/api/submit/${token}/submit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            formData,
+            photoUrl: photoResult.photoUrl,
+            photoPath: photoResult.photoPath,
+            photoDataUrl: photoResult.photoDataUrl,
+            photoBgStatus: "",
+          }),
+        })
+      } catch (networkErr) {
+        console.error("Submit network error:", networkErr)
+        setAlertMsg("Could not reach the server. Please check your internet and try again.")
+        setSubmitting(false)
+        return
+      }
+
       setUploadProgress(95)
-      const data = await res.json()
+      let data: any
+      try {
+        data = await res.json()
+      } catch {
+        setAlertMsg("Unexpected server response. Please try again.")
+        setSubmitting(false)
+        return
+      }
+
       if (data.success) {
         setUploadProgress(100)
         setResult(data.data)
@@ -637,6 +621,7 @@ export default function SubmitPage() {
           }))
         } catch { /* ignore */ }
         setStep("success")
+        setSubmitting(false)
       } else if (data.error === "DUPLICATE_NAME" || data.error === "DUPLICATE_ROLL") {
         setDuplicateInfo({
           studentName: data.existing?.studentName || resolveFieldValue(formData, "name"),
@@ -647,14 +632,12 @@ export default function SubmitPage() {
         setDuplicateBlocked(true)
         setSubmitting(false)
       } else {
-        setAlertMsg(data.message || data.error || "Submission failed")
-        setTimeout(() => setAlertMsg(""), 5000)
+        setAlertMsg(data.message || data.error || "Submission failed. Please try again.")
         setSubmitting(false)
       }
     } catch (err) {
-      console.error(err)
-      setAlertMsg("Submission failed. Please try again.")
-      setTimeout(() => setAlertMsg(""), 5000)
+      console.error("Submit error:", err)
+      setAlertMsg("Something went wrong. Please try again — your details are still on this page.")
       setSubmitting(false)
     }
   }
@@ -732,14 +715,13 @@ export default function SubmitPage() {
   )
 
   if (alreadySubmitted) {
-    const supportPhone = "919881877607"
-    const waMessage = encodeURIComponent(
-      `Hello, I need help with the ID card form for ${config?.schoolName || "the school"}` +
-      (config?.className ? ` (${config.className})` : "") +
-      (alreadySubmitted.studentName ? ` for ${alreadySubmitted.studentName}.` : ".") +
-      ` Registration ID: ${alreadySubmitted.serialNumber}. Please help.`
-    )
-    const waUrl = `https://wa.me/${supportPhone}?text=${waMessage}`
+    const waUrl = buildWhatsAppUrl(buildSupportWhatsAppMessage({
+      schoolName: config?.schoolName,
+      className: config?.className,
+      studentName: alreadySubmitted.studentName,
+      serialNumber: alreadySubmitted.serialNumber,
+      reason: "already_submitted",
+    }))
     return (
       <div className="submit-page">
         <div className="submit-container" style={{ maxWidth: 520 }}>
@@ -751,13 +733,13 @@ export default function SubmitPage() {
               margin: '0 auto 20px', fontSize: 36,
             }}>✓</div>
             <h2 style={{ fontSize: 22, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
-              Form Already Submitted
+              Already Registered
             </h2>
             <p style={{ fontSize: 14, color: '#64748b', marginBottom: 8, lineHeight: 1.6 }}>
               {alreadySubmitted.studentName ? (
-                <>You already submitted this form for <strong style={{ color: '#0f172a' }}>{alreadySubmitted.studentName}</strong></>
+                <>This student is already registered: <strong style={{ color: '#0f172a' }}>{alreadySubmitted.studentName}</strong></>
               ) : (
-                <>You already submitted this form</>
+                <>This form has already been submitted</>
               )}
               {alreadySubmitted.submittedAt ? (
                 <> on <strong>{formatSubmittedDate(alreadySubmitted.submittedAt)}</strong></>
@@ -771,7 +753,7 @@ export default function SubmitPage() {
               </p>
             </div>
             <p style={{ fontSize: 13, color: '#94a3b8', marginBottom: 24, lineHeight: 1.6 }}>
-              Do not fill the form again. Contact the school if you need changes.
+              Do not submit again. Contact support if you need changes.
             </p>
             <a
               href={waUrl}
@@ -784,9 +766,23 @@ export default function SubmitPage() {
                 background: '#25D366', color: 'white',
                 fontSize: 15, fontWeight: 700,
                 textDecoration: 'none',
+                marginBottom: 12,
               }}
             >
-              Contact School on WhatsApp
+              Contact Support on WhatsApp
+            </a>
+            <a
+              href={`tel:${SUPPORT_PHONE_E164}`}
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                gap: 8, width: '100%', maxWidth: 320,
+                padding: '12px 20px', borderRadius: 12,
+                background: '#f8fafc', color: '#334155',
+                fontSize: 14, fontWeight: 600,
+                textDecoration: 'none', border: '1px solid #e2e8f0',
+              }}
+            >
+              Call {SUPPORT_PHONE_DISPLAY}
             </a>
           </div>
         </div>
@@ -796,15 +792,12 @@ export default function SubmitPage() {
 
   if (duplicateBlocked) {
     const studentName = duplicateInfo?.studentName || resolveFieldValue(formData, "name")
-    const supportPhone = "919881877607" // +91 98818 77607
-    const waMessage = encodeURIComponent(
-      `Hello, I am trying to submit the ID card form for ${config?.schoolName || "the school"}` +
-      (config?.className ? ` (${config.className})` : "") +
-      `, but I'm getting a "details already registered" message.` +
-      (studentName ? ` My name is ${studentName}.` : "") +
-      ` Please help.`
-    )
-    const waUrl = `https://wa.me/${supportPhone}?text=${waMessage}`
+    const waUrl = buildWhatsAppUrl(buildSupportWhatsAppMessage({
+      schoolName: config?.schoolName,
+      className: config?.className,
+      studentName,
+      reason: "duplicate_blocked",
+    }))
     return (
       <div className="submit-page">
         <div className="submit-container" style={{ maxWidth: 520 }}>
@@ -837,10 +830,9 @@ export default function SubmitPage() {
               </div>
             )}
             <p style={{ fontSize: 13, color: '#94a3b8', marginBottom: 24, lineHeight: 1.6 }}>
-              You cannot submit again. If you need changes or believe this is a mistake, contact the school on WhatsApp.
+              You cannot submit again. Contact support on WhatsApp if you need changes.
             </p>
 
-            {/* WhatsApp support button */}
             <a
               href={waUrl}
               target="_blank"
@@ -853,35 +845,32 @@ export default function SubmitPage() {
                 fontSize: 15, fontWeight: 700,
                 textDecoration: 'none',
                 boxShadow: '0 4px 12px rgba(37, 211, 102, 0.3)',
-                transition: 'transform 0.15s, box-shadow 0.15s',
+                marginBottom: 12,
               }}
             >
-              {/* WhatsApp glyph */}
               <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                 <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/>
               </svg>
               Chat with Support on WhatsApp
             </a>
 
-            <div style={{ marginTop: 16, fontSize: 12, color: '#94a3b8' }}>
-              Support: <strong style={{ color: '#475569' }}>+91 98818 77607</strong>
-            </div>
-
-            <button
-              onClick={() => {
-                setDuplicateBlocked(false)
-                setDuplicateInfo(null)
-                setStep("form")
-              }}
+            <a
+              href={`tel:${SUPPORT_PHONE_E164}`}
               style={{
-                marginTop: 24, padding: '10px 20px',
-                background: 'transparent', color: '#64748b',
-                border: '1px solid #e2e8f0', borderRadius: 8,
-                fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                gap: 8, width: '100%', maxWidth: 320,
+                padding: '12px 20px', borderRadius: 12,
+                background: '#f8fafc', color: '#334155',
+                fontSize: 14, fontWeight: 600,
+                textDecoration: 'none', border: '1px solid #e2e8f0',
               }}
             >
-              ← Back to form
-            </button>
+              Call {SUPPORT_PHONE_DISPLAY}
+            </a>
+
+            <div style={{ marginTop: 16, fontSize: 12, color: '#94a3b8' }}>
+              Support: <strong style={{ color: '#475569' }}>{SUPPORT_PHONE_DISPLAY}</strong>
+            </div>
           </div>
         </div>
       </div>
@@ -1018,6 +1007,12 @@ export default function SubmitPage() {
               <div style={{ height: 6, borderRadius: 3, background: '#f1f5f9', overflow: 'hidden' }}>
                 <div style={{ height: '100%', borderRadius: 3, background: 'linear-gradient(90deg, #3b82f6, #2563eb)', width: `${uploadProgress}%`, transition: 'width 0.3s' }} />
               </div>
+            </div>
+          )}
+
+          {photoUploadWarning && (
+            <div style={{ padding: '12px 16px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, color: '#92400e', fontSize: 13, marginBottom: 16 }}>
+              ℹ️ {photoUploadWarning}
             </div>
           )}
 
@@ -1538,8 +1533,7 @@ export default function SubmitPage() {
                 Take one photo — we handle the rest
               </p>
               <p style={{ fontSize: 13, color: '#64748b', marginBottom: 16, textAlign: 'center', lineHeight: 1.6 }}>
-                Tap the camera button below. Stand against any plain wall.
-                We automatically crop, fix lighting, and set the same background colour for every student.
+                Tap the camera button below. Stand straight against a plain wall in school uniform.
               </p>
 
               {/* Reference Sample + Instructions card */}
@@ -1577,7 +1571,7 @@ export default function SubmitPage() {
                           background: config.photoBgColor,
                           border: '1px solid rgba(0,0,0,0.12)',
                         }} />
-                        <span>Your ID card will use a plain background colour. You do not need to worry about the exact shade — the manufacturer will set it when printing.</span>
+                        <span>Your ID card will use a plain background. The school will prepare your photo for printing.</span>
                       </div>
                     )}
                   </div>

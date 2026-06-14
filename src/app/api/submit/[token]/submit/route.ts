@@ -7,7 +7,7 @@ import QRCode from "qrcode"
 import { computeAutoAssignedFields } from "@/lib/submit-fields"
 import { getNextStudentSerial } from "@/lib/student-serial"
 import { reportError, reportSlowOperation } from "@/lib/observability"
-import { checkDuplicateSubmission } from "@/lib/submit-fields"
+import { checkDuplicateSubmission, resolveSubmitPhotoFields } from "@/lib/submit-fields"
 import { buildStudentIndexData } from "@/lib/student-index"
 import { validateAndBuildClassFields } from "@/lib/section-class"
 
@@ -26,6 +26,7 @@ const publicSubmitSchema = z.object({
     .default("")
     .refine((url) => !url || photoUrlRefine(url), { message: "Invalid photo URL origin" }),
   photoPath: z.string().optional().default(""),
+  photoDataUrl: z.string().optional().default(""),
   photoBgStatus: z
     .enum(["", "PLAIN", "PROCESSED", "SKIPPED", "REPROCESSED"])
     .optional()
@@ -95,6 +96,18 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
     // serialisation guarantee of the advisory-lock transaction.
     const autoFields = await computeAutoAssignedFields(cls.school.id)
 
+    let photoFields = { photoUrl: "", photoPath: "", photoBgStatus: "" }
+    try {
+      photoFields = await resolveSubmitPhotoFields({
+        photoUrl: validated.photoUrl,
+        photoPath: validated.photoPath,
+        photoDataUrl: validated.photoDataUrl,
+        schoolId: cls.school.id,
+      })
+    } catch (photoError) {
+      console.error("Photo resolution failed (non-fatal):", photoError)
+    }
+
     // Create student with retry for serial number collisions under high concurrency
     let student: any = null
     let retries = 3
@@ -102,9 +115,6 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
       try {
         student = await prisma.$transaction(async (tx) => {
           const serialNumber = await getNextStudentSerial(tx, cls.school.id, cls.school.name)
-          const photoPath = validated.photoPath?.startsWith(`students/${cls.school.id}/`)
-            ? validated.photoPath
-            : ""
           const finalFormData = {
             ...validated.formData,
             ...autoFields,
@@ -120,9 +130,9 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
               serialNumber,
               ...indexData,
               formData: finalFormData,
-              photoUrl: validated.photoUrl,
-              photoPath,
-              photoBgStatus: validated.photoBgStatus || "",
+              photoUrl: photoFields.photoUrl,
+              photoPath: photoFields.photoPath,
+              photoBgStatus: photoFields.photoBgStatus || validated.photoBgStatus || "",
               status: "SUBMITTED",
             },
           })

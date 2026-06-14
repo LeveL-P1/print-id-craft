@@ -12,6 +12,8 @@
  */
 
 import { prisma } from "@/lib/prisma"
+import { randomUUID } from "crypto"
+import { storagePublicUrl, storageUpload } from "@/lib/storage"
 import {
   normalizeFormValue,
   resolveFieldValue,
@@ -381,5 +383,81 @@ export async function checkSubmissionStatus(
     serialNumber: dup.existing.serialNumber,
     submittedAt: dup.existing.submittedAt.toISOString(),
     studentName: dup.existing.studentName,
+  }
+}
+
+const PHOTO_BUCKET = "student-photos"
+const MAX_PHOTO_DATA_URL_BYTES = 2.5 * 1024 * 1024
+
+function parsePhotoDataUrl(dataUrl: string): Buffer | null {
+  const match = dataUrl.match(/^data:image\/[^;]+;base64,(.+)$/)
+  if (!match) return null
+  try {
+    const buffer = Buffer.from(match[1], "base64")
+    if (buffer.length === 0 || buffer.length > MAX_PHOTO_DATA_URL_BYTES) return null
+    return buffer
+  } catch {
+    return null
+  }
+}
+
+async function normalizeSubmitPhoto(buffer: Buffer): Promise<Buffer> {
+  try {
+    const sharp = (await import("sharp")).default
+    return await sharp(buffer, { limitInputPixels: 24_000_000 })
+      .rotate()
+      .resize({ width: 768, height: 768, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 86, mozjpeg: true })
+      .toBuffer()
+  } catch {
+    return buffer
+  }
+}
+
+async function persistStudentPhotoFromDataUrl(
+  dataUrl: string,
+  schoolId: string
+): Promise<{ photoUrl: string; photoPath: string }> {
+  const empty = { photoUrl: "", photoPath: "" }
+  if (!dataUrl?.startsWith("data:image/")) return empty
+  try {
+    const raw = parsePhotoDataUrl(dataUrl)
+    if (!raw) return empty
+    const prepared = await normalizeSubmitPhoto(raw)
+    const filePath = `students/${schoolId}/${Date.now()}-${randomUUID()}.jpg`
+    const { error } = await storageUpload(PHOTO_BUCKET, filePath, prepared, {
+      contentType: "image/jpeg",
+      upsert: true,
+    })
+    if (error) {
+      console.error("persistStudentPhotoFromDataUrl failed:", error)
+      return empty
+    }
+    return { photoUrl: storagePublicUrl(PHOTO_BUCKET, filePath), photoPath: filePath }
+  } catch (error) {
+    console.error("persistStudentPhotoFromDataUrl error:", error)
+    return empty
+  }
+}
+
+/** Never throws — student record is created even if photo storage fails. */
+export async function resolveSubmitPhotoFields(options: {
+  photoUrl: string
+  photoPath: string
+  photoDataUrl: string
+  schoolId: string
+}): Promise<{ photoUrl: string; photoPath: string; photoBgStatus: string }> {
+  const pathOk = options.photoPath?.startsWith(`students/${options.schoolId}/`)
+  if (options.photoUrl && pathOk) {
+    return { photoUrl: options.photoUrl, photoPath: options.photoPath, photoBgStatus: "" }
+  }
+  if (options.photoDataUrl) {
+    const persisted = await persistStudentPhotoFromDataUrl(options.photoDataUrl, options.schoolId)
+    if (persisted.photoUrl) return { ...persisted, photoBgStatus: "" }
+  }
+  return {
+    photoUrl: options.photoUrl || "",
+    photoPath: pathOk ? options.photoPath : "",
+    photoBgStatus: "SKIPPED",
   }
 }

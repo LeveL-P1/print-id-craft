@@ -361,40 +361,15 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
           tip: isBlurry ? "Hold the camera steady and ensure the subject is in focus" : undefined,
         })
 
-        // ── 9. Background Uniformity ──
-        // We now require BOTH high uniformity AND a colour match against the
-        // school's selected template colour before we can safely skip the AI
-        // background-replacement step. A "plain but wrong colour" background
-        // (e.g. blue wall when the school wants red) still needs AI re-colour.
-        // The decision is exposed via a custom property `_bgQualityGood` on
-        // the check object so handleFile() can read it without re-running the
-        // analysis.
+        // ── 9. Plain background (advisory — never blocks upload) ──
         const bg = analyzeBackgroundUniformity(ctx, analysisW, analysisH)
-        const target = parseColor(schoolBgColor)
-        const detectedColorDistance = target ? Math.round(colorDistance(bg.dominantRgb, target)) : null
-        // Uniform enough to call "plain": score >= 75 AND dominant bin > 60%.
-        const isUniform = bg.score >= 75 && bg.dominantRatio >= 0.6
-        // "Matches school colour" within ΔE ≈ 50 (lenient — JPEG colour shift,
-        // ambient light, slight camera WB differences are normal).
-        const matchesSchool = target !== null && detectedColorDistance !== null && detectedColorDistance < 50
-        const bgQualityGood = isUniform && (target === null || matchesSchool)
-        const bgDetail =
-          !isUniform
-            ? `${bg.score}% uniform — mixed background`
-            : matchesSchool
-              ? `Plain & matches school colour ✓`
-              : target
-                ? `Plain but wrong colour — AI will recolour to school's choice`
-                : `${bg.score}% uniform`
+        const isUniform = bg.score >= 60 && bg.dominantRatio >= 0.5
         checks.push({
           passed: isUniform,
           severity: "warning",
-          label: "Background",
-          detail: bgDetail,
-          tip: target
-            ? `For fastest results, take the photo against a plain wall in the school's colour. Otherwise our AI will replace it.`
-            : `Use a plain, solid-coloured wall as background.`,
-          ...(({ _bgQualityGood: bgQualityGood } as any)),
+          label: "Plain Background",
+          detail: isUniform ? `${bg.score}% uniform` : "Mixed background — use a plain wall",
+          tip: "Stand against a single-colour plain wall for best results",
         })
 
         // ── 10–13. Face / person detection ──
@@ -428,14 +403,15 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
           })
         }
 
-        // ── 11. Face Count (warning only — group photos get a nudge, not a block) ──
+        // ── 11. Single student only — multiple faces block upload ──
         if (hasPerson) {
+          const singleFace = faceResult.count === 1
           checks.push({
-            passed: faceResult.count === 1,
-            severity: faceResult.count === 1 ? "info" : "warning",
-            label: "Single Face",
-            detail: faceResult.count === 1 ? "1 face found" : `${faceResult.count} faces found`,
-            tip: faceResult.count === 1 ? undefined : "Only the student's face should be in the photo — no group photos",
+            passed: singleFace,
+            severity: singleFace ? "info" : "critical",
+            label: "One Student Only",
+            detail: singleFace ? "1 person found" : `${faceResult.count} people found`,
+            tip: singleFace ? undefined : "Only the student should be in the photo — no group photos",
           })
         }
 
@@ -474,77 +450,27 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
           })
         }
 
-        // ── 14. Front-Facing Heuristic ──
-        // Demoted from "critical" to "warning": this is just a luminance-
-        // symmetry check between the left/right halves of the face region,
-        // which fails on uneven lighting (window on one side), tilted
-        // heads, or strong backgrounds — none of which justify rejecting
-        // an otherwise good ID photo. The browser FaceDetector + Face
-        // Centering already cover the real "is the face in frame" case.
+        // ── 14. Front-facing (advisory) ──
         const frontFacing = analyzeFrontFacing(ctx, img.width, img.height)
         checks.push({
           passed: frontFacing.passed,
           severity: "warning",
-          label: "Front-Facing",
+          label: "Looking Straight",
           detail: frontFacing.confidence,
-          tip: "Look directly at the camera — avoid side angles. ID cards require a front-facing photo."
+          tip: "Look directly at the camera with a straight posture",
         })
 
-        // ── 15. Color Cast / White Balance Check ──
-        const colorCast = analyzeColorCast(ctx, img.width, img.height)
-        checks.push({
-          passed: colorCast.passed,
-          severity: "info",
-          label: "Color Balance",
-          detail: colorCast.detail,
-          tip: colorCast.tip
-        })
-
-        // ── 16. Occlusion / eyes / attire — advisory only (never block upload) ──
+        // ── 15. School uniform / proper attire (advisory) ──
         if (hasPerson && faceResult.bounds && !faceResult.rough) {
-          const occlusion = analyzeOcclusion(ctx, img.width, img.height, faceResult.bounds)
-          checks.push({
-            passed: occlusion.passed,
-            severity: occlusion.passed ? "info" : "warning",
-            label: "Face Visible",
-            detail: occlusion.detail,
-            tip: occlusion.passed ? undefined : (occlusion.tip || "Eyes, nose, and mouth should be clearly visible"),
-          })
-
-          const eyes = analyzeEyesVisible(ctx, img.width, img.height, faceResult.bounds)
-          checks.push({
-            passed: eyes.passed,
-            severity: eyes.passed ? "info" : "warning",
-            label: "Eyes Visible",
-            detail: eyes.detail,
-            tip: eyes.passed ? undefined : (eyes.tip || "Remove sunglasses if possible — eyes should be visible"),
-          })
-
           const attire = analyzeAttire(ctx, img.width, img.height, faceResult.bounds)
           checks.push({
             passed: attire.passed,
-            severity: attire.passed ? "info" : "warning",
-            label: "Proper Attire",
+            severity: "warning",
+            label: "School Uniform",
             detail: attire.detail,
-            tip: attire.passed ? undefined : (attire.tip || "School uniform or a proper shirt is recommended"),
+            tip: attire.passed ? undefined : (attire.tip || "Wear school uniform or a proper shirt"),
           })
         }
-
-        // ── 17. Content Appropriateness Check ──
-        // Demoted from "critical" to "warning". This is a pure skin-pixel
-        // heuristic that gives lots of false positives — orange/red/yellow
-        // shirts read as skin, dark-skinned subjects fall outside the tuned
-        // range, etc. We still surface the suggestion but never hard-block
-        // a portrait that has already passed Face Detected + Face Centering
-        // + Front-Facing.
-        const contentCheck = analyzeContentAppropriateness(ctx, img.width, img.height, faceResult)
-        checks.push({
-          passed: contentCheck.passed,
-          severity: "warning",
-          label: "ID Photo Content",
-          detail: contentCheck.detail,
-          tip: contentCheck.tip
-        })
 
         URL.revokeObjectURL(url)
         const criticalFails = checks.filter(c => !c.passed && c.severity === "critical")
@@ -1246,44 +1172,34 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
   }
 
   const handleFile = useCallback(async (file: File) => {
-    if (!file.type.startsWith("image/")) {
-      alert("Please upload an image file (JPEG, PNG)")
-      return
-    }
+    try {
+      if (!file.type.startsWith("image/")) {
+        alert("Please upload an image file (JPEG, PNG)")
+        return
+      }
 
-    setVerifying(true)
-    setCameraError("")
-    setResult(null)
+      setVerifying(true)
+      setCameraError("")
+      setResult(null)
 
-    // Auto-adjust before analysis
-    const adjustedFile = await performAutoAdjust(file)
-    lastAdjustedFileRef.current = adjustedFile
+      const adjustedFile = await performAutoAdjust(file)
+      lastAdjustedFileRef.current = adjustedFile
 
-    // Convert to stable data URL (not blob URL) so it survives across steps
-    const previewUrl = await fileToDataUrl(adjustedFile)
-    setPreview(previewUrl)
+      const previewUrl = await fileToDataUrl(adjustedFile)
+      setPreview(previewUrl)
 
-    const verificationResult = await analyzePhoto(adjustedFile)
-    setResult(verificationResult)
-    setVerifying(false)
+      const verificationResult = await analyzePhoto(adjustedFile)
+      setResult(verificationResult)
+      setVerifying(false)
 
-    // Auto-accept whenever NO critical check fails. The heuristic checks
-    // (ID Photo Content, Front-Facing luminance symmetry, blur score) are
-    // flagged as "warning" — they're informational and were producing
-    // false positives on perfectly valid passport photos (orange shirts,
-    // dark backgrounds, denoised phone JPEGs, etc.). Parents still see the
-    // warning banner so they know what could be better, but the photo
-    // proceeds to the next step. Only true critical failures (no face,
-    // multiple faces, face off-centre, file too big, etc.) block.
-    const criticalFails = verificationResult.checks.filter(c => !c.passed && c.severity === "critical")
-    if (criticalFails.length === 0) {
-      const bgCheck = verificationResult.checks.find(c => c.label === "Background")
-      // bgGood = "skip AI safely". Requires the photo's edge background to
-      // be BOTH plain (high uniformity) AND a colour match for the school's
-      // template choice. analyzeBackgroundUniformity attaches the combined
-      // flag via _bgQualityGood; fall back to bgCheck.passed for older paths.
-      const bgGood = (bgCheck as any)?._bgQualityGood ?? !!bgCheck?.passed
-      onPhotoAccepted(adjustedFile, previewUrl, bgGood)
+      const criticalFails = verificationResult.checks.filter(c => !c.passed && c.severity === "critical")
+      if (criticalFails.length === 0) {
+        onPhotoAccepted(adjustedFile, previewUrl, true)
+      }
+    } catch (error) {
+      console.error("Photo verification error:", error)
+      setVerifying(false)
+      setCameraError("Could not process this photo. Please try again or choose a different image.")
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analyzePhoto, onPhotoAccepted])
@@ -1354,8 +1270,8 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
           One student, one photo
         </div>
         <div style={{ fontSize: 12, color: '#15803d', lineHeight: 1.7 }}>
-          Look at the camera. Only the student should be in the photo.
-          <br />A plain wall behind you gives the best result.
+          Look straight at the camera. Wear school uniform.
+          <br />Stand against a plain wall — only one student in the photo.
         </div>
       </div>
 
@@ -1735,7 +1651,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
               Drag & drop, browse files, or take a live photo
             </div>
             <div style={{ fontSize: 11, color: '#64748b', marginBottom: 14, fontStyle: 'italic' }}>
-              Photos are auto-cropped to passport size & enhanced automatically
+              JPEG, PNG, or WebP — max 5 MB
             </div>
             <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
               <button
