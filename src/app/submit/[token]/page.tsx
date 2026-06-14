@@ -164,14 +164,14 @@ const DOB_YEARS = Array.from({ length: 90 }, (_, i) => String(new Date().getFull
 function parseDobParts(value: string) {
   const trimmed = (value || "").trim()
   const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  if (iso) return { month: iso[2], day: iso[3], year: iso[1].slice(-2) }
+  if (iso) return { month: iso[2], day: iso[3], year: iso[1] }
 
-  const slash = trimmed.match(/^(\d{1,2}|MM)\/(\d{1,2}|DD)\/(\d{2,4}|YY)$/)
+  const slash = trimmed.match(/^(\d{1,2}|MM)\/(\d{1,2}|DD)\/(\d{2,4}|YY|YYYY)$/)
   if (slash) {
     return {
       month: slash[1] === "MM" ? "" : slash[1].padStart(2, "0"),
       day: slash[2] === "DD" ? "" : slash[2].padStart(2, "0"),
-      year: slash[3] === "YY" ? "" : slash[3].length === 2 ? `20${slash[3]}` : slash[3],
+      year: slash[3] === "YY" || slash[3] === "YYYY" ? "" : slash[3].length === 2 ? `20${slash[3]}` : slash[3],
     }
   }
 
@@ -437,6 +437,7 @@ export default function SubmitPage() {
   const [result, setResult] = useState<{ serialNumber: string; studentId: string } | null>(null)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [alertMsg, setAlertMsg] = useState("")
+  const [missingFieldKey, setMissingFieldKey] = useState("")
   const [previewDownloadStatus, setPreviewDownloadStatus] = useState<"" | "downloaded" | "unavailable">("")
   const successPreviewRef = useRef<HTMLDivElement>(null)
   const previewDownloadAttemptedRef = useRef(false)
@@ -598,8 +599,34 @@ export default function SubmitPage() {
     return () => window.clearTimeout(timer)
   }, [config, formData, step, checkSubmissionStatus])
 
+  const getMissingFieldStyle = (key: string): React.CSSProperties =>
+    missingFieldKey === key
+      ? {
+          outline: "2px solid #ef4444",
+          outlineOffset: 4,
+          borderRadius: 12,
+          background: "#fff7f7",
+        }
+      : {}
+
+  const scrollToField = (key: string) => {
+    if (typeof window === "undefined") return
+    window.setTimeout(() => {
+      document
+        .querySelector(`[data-field-key="${key.replace(/"/g, '\\"')}"]`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" })
+    }, 50)
+  }
+
+  const showMissingField = (key: string, message: string) => {
+    setMissingFieldKey(key)
+    setAlertMsg(message)
+    scrollToField(key)
+  }
+
   const handleFieldChange = (key: string, value: string) => {
     setFormData(prev => ({ ...prev, [key]: value }))
+    if (missingFieldKey === key) setMissingFieldKey("")
   }
 
   const getPreviewFileName = useCallback(() => {
@@ -675,18 +702,16 @@ export default function SubmitPage() {
   const handleFormSubmit = (e?: React.FormEvent | React.MouseEvent) => {
     e?.preventDefault()
 
-    // Per-field validation for the parent-friendly intents. We surface the
-    // first error inline via setAlertMsg + early return so the form never
-    // submits with garbage data (a sub-5-word address, an incomplete mobile
-    // number, etc.).
+    // Per-field validation for the parent-friendly intents. We show the first
+    // missing detail, highlight that input, and scroll it into view.
     if (config) {
       if (config.usesClassPicker) {
         if (!formData.classGrade?.trim()) {
-          setAlertMsg("Please select a class.")
+          showMissingField("classGrade", "Please select a class.")
           return
         }
         if (!formData.division?.trim()) {
-          setAlertMsg("Please select a division.")
+          showMissingField("division", "Please select a division.")
           return
         }
       }
@@ -695,33 +720,34 @@ export default function SubmitPage() {
         const value = (formData[f.key] || "").trim()
         const role = fieldRole(f)
         if (f.required && !value) {
-          setAlertMsg(`Please fill in ${getCleanLabel(f.label)}.`)
+          showMissingField(f.key, `Please fill in ${getCleanLabel(f.label)}.`)
           return
         }
         if (role === "address" && f.required) {
           if (wordCount(value) < ADDRESS_MIN_WORDS) {
-            setAlertMsg(`Please write the full address — at least ${ADDRESS_MIN_WORDS} words (house no, street, area, city, pincode).`)
+            showMissingField(f.key, `Please write the full address - at least ${ADDRESS_MIN_WORDS} words (house no, street, area, city, pincode).`)
             return
           }
         }
         if (role === "mobile" && f.required) {
           const local = stripIndianPrefix(value)
           if (local.length !== 10) {
-            setAlertMsg("Mobile number must be exactly 10 digits (after +91).")
+            showMissingField(f.key, "Mobile number must be exactly 10 digits (after +91).")
             return
           }
         }
         if (role === "dob" && f.required && !/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
-          setAlertMsg("Please select date of birth in MM/DD/YYYY format.")
+          showMissingField(f.key, "Please select the full date of birth: Month, Date, and Year.")
           return
         }
         if (role === "branch" && f.required && value.length < 2) {
-          setAlertMsg("Please enter the branch name.")
+          showMissingField(f.key, "Please enter the branch name.")
           return
         }
       }
     }
     setAlertMsg("")
+    setMissingFieldKey("")
 
     if (!photoFile || !photoPreview || !photoVerified) {
       setStep("photo")
@@ -734,6 +760,7 @@ export default function SubmitPage() {
     const blockReason = getPreviewBlockReason()
     if (blockReason) {
       setAlertMsg(blockReason)
+      setMissingFieldKey("")
       setStep(blockReason.includes("photo") ? "photo" : "form")
       return
     }
@@ -741,6 +768,7 @@ export default function SubmitPage() {
       setCroppedPhoto(photoPreview)
     }
     setAlertMsg("")
+    setMissingFieldKey("")
     setStep("review")
   }
 
@@ -1256,7 +1284,8 @@ export default function SubmitPage() {
           {/* Alert message */}
           {alertMsg && (
             <div style={{ padding: '12px 16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, color: '#ef4444', fontSize: 13, marginBottom: 16 }}>
-              ⚠️ {alertMsg}
+              <strong>{missingFieldKey ? "Add missing details" : "Please check this"}</strong>
+              <div style={{ marginTop: 3 }}>{alertMsg}</div>
             </div>
           )}
 
@@ -1369,6 +1398,12 @@ export default function SubmitPage() {
                   </button>
                 </div>
               )}
+              {alertMsg && (
+                <div style={{ padding: '12px 16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, color: '#ef4444', fontSize: 13, marginBottom: 16 }}>
+                  <strong>{missingFieldKey ? "Add missing details" : "Please check this"}</strong>
+                  <div style={{ marginTop: 3 }}>{alertMsg}</div>
+                </div>
+              )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 {config?.usesClassPicker ? (
                   <>
@@ -1385,7 +1420,7 @@ export default function SubmitPage() {
                         Assigned from your registration link
                       </span>
                     </div>
-                    <div className="form-group">
+                    <div className="form-group" data-field-key="classGrade" style={getMissingFieldStyle("classGrade")}>
                       <label>
                         Class <span style={{ color: '#ef4444' }}>*</span>
                       </label>
@@ -1394,6 +1429,7 @@ export default function SubmitPage() {
                         value={formData.classGrade || ""}
                         onChange={(e) => {
                           const classGrade = e.target.value
+                          if (missingFieldKey === "classGrade") setMissingFieldKey("")
                           setFormData((prev) => ({
                             ...prev,
                             classGrade,
@@ -1415,7 +1451,7 @@ export default function SubmitPage() {
                         ))}
                       </select>
                     </div>
-                    <div className="form-group">
+                    <div className="form-group" data-field-key="division" style={getMissingFieldStyle("division")}>
                       <label>
                         Division <span style={{ color: '#ef4444' }}>*</span>
                       </label>
@@ -1424,6 +1460,7 @@ export default function SubmitPage() {
                         value={formData.division || ""}
                         onChange={(e) => {
                           const division = e.target.value
+                          if (missingFieldKey === "division") setMissingFieldKey("")
                           setFormData((prev) => ({
                             ...prev,
                             division,
@@ -1478,7 +1515,7 @@ export default function SubmitPage() {
                       ? mobileLocals[field.key]
                       : stripIndianPrefix(value)
                     return (
-                      <div key={field.key} className="form-group">
+                      <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                         <label>
                           {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
@@ -1522,7 +1559,7 @@ export default function SubmitPage() {
                     const wc = wordCount(value)
                     const ok = wc >= ADDRESS_MIN_WORDS
                     return (
-                      <div key={field.key} className="form-group">
+                      <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                         <label>
                           {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
@@ -1552,7 +1589,7 @@ export default function SubmitPage() {
                     const opts = config?.flagColors || []
                     if (opts.length > 0) {
                       return (
-                        <div key={field.key} className="form-group">
+                        <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                           <label>
                             {getCleanLabel(field.label)}
                             {field.required && <span style={{ color: '#ef4444' }}> *</span>}
@@ -1573,7 +1610,7 @@ export default function SubmitPage() {
                     }
                     // Fallback: free text (e.g. first student in the school)
                     return (
-                      <div key={field.key} className="form-group">
+                      <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                         <label>
                           {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
@@ -1592,7 +1629,7 @@ export default function SubmitPage() {
                   // ── Date of birth ──
                   if (role === "dob") {
                     return (
-                      <div key={field.key} className="form-group">
+                      <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                         <label>
                           {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
@@ -1610,7 +1647,7 @@ export default function SubmitPage() {
                   if (role === "branch") {
                     if (config?.fixedBranch) return null
                     return (
-                      <div key={field.key} className="form-group">
+                      <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                         <label>
                           {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
@@ -1629,7 +1666,7 @@ export default function SubmitPage() {
                   // ── Blood group ──
                   if (role === "bloodgroup") {
                     return (
-                      <div key={field.key} className="form-group">
+                      <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                         <label>
                           {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
@@ -1655,7 +1692,7 @@ export default function SubmitPage() {
                     // "GR No." doesn't see a single-digit roll-number style hint.
                     const example = /gr/.test(lbl) || /admission/.test(lbl) ? "2851" : "7"
                     return (
-                      <div key={field.key} className="form-group">
+                      <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                         <label>
                           {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
@@ -1687,7 +1724,7 @@ export default function SubmitPage() {
                             : "Darshan Sunil Choudhari"
                     const showOrderHint = role === "name" && !lbl.includes("surname")
                     return (
-                      <div key={field.key} className="form-group">
+                      <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                         <label>
                           {getCleanLabel(field.label)}
                           {showOrderHint && (
@@ -1721,7 +1758,7 @@ export default function SubmitPage() {
 
                   // ── Generic fallback: previous behaviour ──
                   return (
-                    <div key={field.key} className="form-group">
+                    <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                       <label>
                         {getCleanLabel(field.label)}
                         {field.required && <span style={{ color: '#ef4444' }}> *</span>}
