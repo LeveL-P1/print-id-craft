@@ -4,13 +4,23 @@ import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { z } from "zod"
 import crypto from "crypto"
+import {
+  DEFAULT_CLASS_OPTIONS,
+  aggregateSectionStudentCounts,
+  parseClassOptions,
+  type SectionType,
+} from "@/lib/section-class"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 30
 
+const sectionTypeSchema = z.enum(["PRE_PRIMARY", "PRIMARY", "SECONDARY"])
+
 const classSchema = z.object({
-  name: z.string().min(1, "Class name is required"),
+  name: z.string().min(1, "Section name is required"),
   expiresAt: z.string().optional().nullable(),
+  sectionType: sectionTypeSchema.optional().nullable(),
+  classOptions: z.array(z.string()).optional(),
 })
 
 function parsePagination(req: Request) {
@@ -43,6 +53,8 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
         isActive: true,
         expiresAt: true,
         templateId: true,
+        sectionType: true,
+        classOptions: true,
         createdAt: true,
         _count: { select: { students: true } },
       },
@@ -54,7 +66,7 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
     const classIds = baseClasses.map((entry) => entry.id)
     const templateIds = Array.from(new Set(baseClasses.map((entry) => entry.templateId).filter(Boolean))) as string[]
 
-    const [templatesResult, teachersResult, totalResult] = await Promise.allSettled([
+    const [templatesResult, teachersResult, totalResult, studentsResult] = await Promise.allSettled([
       templateIds.length
         ? prisma.template.findMany({
             where: { id: { in: templateIds }, schoolId: params.id },
@@ -68,6 +80,12 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
           })
         : Promise.resolve([]),
       prisma.class.count({ where: { schoolId: params.id } }),
+      classIds.length
+        ? prisma.student.findMany({
+            where: { schoolId: params.id, classId: { in: classIds } },
+            select: { classId: true, formData: true },
+          })
+        : Promise.resolve([]),
     ])
 
     const templatesById = new Map(
@@ -90,10 +108,15 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
       }
     }
 
+    const sectionStudents =
+      studentsResult.status === "fulfilled" ? studentsResult.value : []
+
     const classes = baseClasses.map((entry) => ({
       ...entry,
+      classOptions: parseClassOptions(entry.classOptions),
       template: entry.templateId ? templatesById.get(entry.templateId) || null : null,
       teachers: teachersByClassId.get(entry.id) || [],
+      studentBreakdown: aggregateSectionStudentCounts(sectionStudents, entry.id),
     }))
 
     const response = NextResponse.json({
@@ -142,16 +165,27 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       }
     }
 
+    const sectionType = validated.sectionType as SectionType | null | undefined
+    let classOptions = validated.classOptions
+    if (classOptions === undefined && sectionType) {
+      classOptions = DEFAULT_CLASS_OPTIONS[sectionType]
+    }
+
     const newClass = await prisma.class.create({
       data: {
         name: validated.name,
         schoolId: params.id,
         linkToken: crypto.randomUUID(),
         expiresAt,
+        sectionType: sectionType || null,
+        classOptions: classOptions ?? [],
       },
     })
 
-    return NextResponse.json({ success: true, data: newClass }, { status: 201 })
+    return NextResponse.json({
+      success: true,
+      data: { ...newClass, classOptions: parseClassOptions(newClass.classOptions) },
+    }, { status: 201 })
   } catch (error) {
     console.error(`POST /api/schools/${params.id}/classes error:`, error)
     if (error instanceof z.ZodError) {

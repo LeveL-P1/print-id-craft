@@ -4,11 +4,19 @@ import { z } from "zod"
 import { durableRateLimit, getClientIp } from "@/lib/rate-limit"
 import { storageUpload, storagePublicUrl } from "@/lib/storage"
 import QRCode from "qrcode"
-import { computeAutoAssignedFields } from "@/lib/submit-fields"
+import {
+  computeAutoAssignedFields,
+  getPublicSubmissionFields,
+  requireValidSubmitPhotoFields,
+  validatePublicSubmissionDetails,
+} from "@/lib/submit-fields"
 import { getNextStudentSerial } from "@/lib/student-serial"
 import { reportError, reportSlowOperation } from "@/lib/observability"
 import { checkDuplicateSubmission } from "@/lib/submit-fields"
 import { buildStudentIndexData } from "@/lib/student-index"
+import { validateAndBuildClassFields } from "@/lib/section-class"
+import { recordPublicSubmissionAudit } from "@/lib/submission-audit"
+import { getDefaultTemplate } from "@/lib/template-resolver"
 
 const photoUrlRefine = (url: string) => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
@@ -26,6 +34,7 @@ const publicSchoolSubmitSchema = z.object({
     .default("")
     .refine((url) => !url || photoUrlRefine(url), { message: "Invalid photo URL origin" }),
   photoPath: z.string().optional().default(""),
+  photoDataUrl: z.string().optional().default(""),
   photoBgStatus: z
     .enum(["", "PLAIN", "PROCESSED", "SKIPPED", "REPROCESSED"])
     .optional()
@@ -33,8 +42,7 @@ const publicSchoolSubmitSchema = z.object({
 })
 
 export async function POST(req: Request, props: { params: Promise<{ token: string }> }) {
-  const params = await props.params;
-export async function POST(req: Request, { params }: { params: { token: string } }) {
+  const params = await props.params
   const startedAt = Date.now()
   let schoolId: string | null = null
   let classId: string | null = null
@@ -63,11 +71,13 @@ export async function POST(req: Request, { params }: { params: { token: string }
 
     const body = await req.json()
     const validated = publicSchoolSubmitSchema.parse(body)
+    const template = await getDefaultTemplate(school.id)
+    const requiredFields = await getPublicSubmissionFields(school.id, template)
 
     // Verify the class belongs to this school and is still open.
     const cls = await prisma.class.findFirst({
       where: { id: validated.classId, schoolId: school.id, isActive: true },
-      select: { id: true, name: true, expiresAt: true },
+      select: { id: true, name: true, expiresAt: true, classOptions: true, sectionType: true },
     })
     if (!cls) {
       return NextResponse.json({ error: "Selected class is not available." }, { status: 400 })
@@ -78,8 +88,60 @@ export async function POST(req: Request, { params }: { params: { token: string }
     }
 
     const formData = validated.formData as Record<string, string>
+
+    const classFields = validateAndBuildClassFields(
+      formData,
+      cls.name,
+      cls.classOptions,
+      cls.sectionType
+    )
+    if (!classFields.ok) {
+      return NextResponse.json({ error: classFields.error }, { status: 400 })
+    }
+
+    const detailValidation = validatePublicSubmissionDetails(formData, requiredFields)
+    if (!detailValidation.ok) {
+      return NextResponse.json({ error: detailValidation.error }, { status: 400 })
+    }
+
+    await recordPublicSubmissionAudit({
+      stage: "ATTEMPT",
+      source: "school-link",
+      token: params.token,
+      schoolId: school.id,
+      schoolName: school.name,
+      classId: cls.id,
+      sectionType: cls.sectionType,
+      sectionName: cls.name,
+      classValue: classFields.class,
+      classGrade: classFields.classGrade,
+      division: classFields.division,
+      studentName: formData.name || formData.studentName || formData.fullName,
+      hasPhoto: Boolean(validated.photoUrl || validated.photoPath || validated.photoDataUrl),
+      photoBgStatus: validated.photoBgStatus,
+      durationMs: Date.now() - startedAt,
+    })
+
     const duplicate = await checkDuplicateSubmission(cls.id, formData)
     if (duplicate.isDuplicate) {
+      await recordPublicSubmissionAudit({
+        stage: "DUPLICATE",
+        source: "school-link",
+        token: params.token,
+        schoolId: school.id,
+        schoolName: school.name,
+        classId: cls.id,
+        sectionType: cls.sectionType,
+        sectionName: cls.name,
+        classValue: classFields.class,
+        classGrade: classFields.classGrade,
+        division: classFields.division,
+        studentName: duplicate.existing.studentName || formData.name || formData.studentName || formData.fullName,
+        serialNumber: duplicate.existing.serialNumber,
+        hasPhoto: Boolean(validated.photoUrl || validated.photoPath || validated.photoDataUrl),
+        photoBgStatus: validated.photoBgStatus,
+        durationMs: Date.now() - startedAt,
+      })
       return NextResponse.json({
         error: duplicate.error,
         message: duplicate.message,
@@ -94,6 +156,20 @@ export async function POST(req: Request, { params }: { params: { token: string }
     // Pre-compute auto-assigned fields OUTSIDE the transaction to avoid
     // hitting Prisma's default 5 000 ms interactive-transaction timeout.
     const autoFields = await computeAutoAssignedFields(school.id)
+    const finalFormData = {
+      ...validated.formData,
+      ...autoFields,
+      class: classFields.class,
+      ...(classFields.classGrade ? { classGrade: classFields.classGrade } : {}),
+      ...(classFields.division ? { division: classFields.division } : {}),
+    }
+    const indexData = buildStudentIndexData(finalFormData, cls.id)
+    const photoFields = await requireValidSubmitPhotoFields({
+      photoUrl: validated.photoUrl,
+      photoPath: validated.photoPath,
+      photoDataUrl: validated.photoDataUrl,
+      schoolId: school.id,
+    })
 
     let student: any = null
     let retries = 3
@@ -101,11 +177,6 @@ export async function POST(req: Request, { params }: { params: { token: string }
       try {
         student = await prisma.$transaction(async (tx) => {
           const serialNumber = await getNextStudentSerial(tx, school.id, school.name)
-          const photoPath = validated.photoPath?.startsWith(`students/${school.id}/`)
-            ? validated.photoPath
-            : ""
-          const finalFormData = { ...validated.formData, ...autoFields, class: cls.name }
-          const indexData = buildStudentIndexData(finalFormData, cls.id)
           return tx.student.create({
             data: {
               schoolId: school.id,
@@ -113,9 +184,9 @@ export async function POST(req: Request, { params }: { params: { token: string }
               serialNumber,
               ...indexData,
               formData: finalFormData,
-              photoUrl: validated.photoUrl,
-              photoPath,
-              photoBgStatus: validated.photoBgStatus || "",
+              photoUrl: photoFields.photoUrl,
+              photoPath: photoFields.photoPath,
+              photoBgStatus: photoFields.photoBgStatus || validated.photoBgStatus || "",
               status: "SUBMITTED",
             },
           })
@@ -129,6 +200,26 @@ export async function POST(req: Request, { params }: { params: { token: string }
         throw err
       }
     }
+
+    await recordPublicSubmissionAudit({
+      stage: "SAVED",
+      source: "school-link",
+      token: params.token,
+      schoolId: school.id,
+      schoolName: school.name,
+      classId: cls.id,
+      sectionType: cls.sectionType,
+      sectionName: cls.name,
+      classValue: classFields.class,
+      classGrade: classFields.classGrade,
+      division: classFields.division,
+      studentName: indexData.fullName || formData.name || formData.studentName || formData.fullName,
+      studentId: student.id,
+      serialNumber: student.serialNumber,
+      hasPhoto: true,
+      photoBgStatus: photoFields.photoBgStatus || validated.photoBgStatus || "",
+      durationMs: Date.now() - startedAt,
+    })
 
     try {
       const qrContent = JSON.stringify({
@@ -168,6 +259,9 @@ export async function POST(req: Request, { params }: { params: { token: string }
     })
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.issues }, { status: 400 })
+    }
+    if (error?.message === "A valid student photo is required. Please upload the photo again.") {
+      return NextResponse.json({ error: error.message }, { status: 400 })
     }
     const message = error?.message || (typeof error === "string" ? error : "Internal Server Error")
     return NextResponse.json({ error: message }, { status: 500 })

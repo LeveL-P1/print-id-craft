@@ -1,15 +1,28 @@
 "use client"
-import { useState, useEffect, useCallback, useMemo, useRef } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react"
 import { useParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
 import dynamic from "next/dynamic"
+import { prepareStudentPhotoForUpload } from "@/lib/client-photo-upload"
+import {
+  DEFAULT_CLASS_OPTIONS,
+  DIVISIONS,
+  SECTION_TYPE_LABELS,
+  formatClassSection,
+  resolveEffectiveClassOptions,
+  type SectionType,
+} from "@/lib/section-class"
+import { photoCacheVersion, studentPhotoUrl as buildStudentPhotoUrl } from "@/lib/student-photo-url"
 
 // Lazy-load heavy components — only loaded when their tab is active
 const IDCardPreview = dynamic(() => import("@/components/IDCardPreview"), { ssr: false })
 const JpgTemplateMapper = dynamic(() => import("@/components/JpgTemplateMapper"), { ssr: false })
 const JpgCardPreview = dynamic(() => import("@/components/JpgCardPreview"), { ssr: false })
 const BatchGenerator = dynamic(() => import("@/components/BatchGenerator"), { ssr: false })
+const ManufacturerPhotoBgEditor = dynamic(() => import("@/components/ManufacturerPhotoBgEditor"), { ssr: false })
+const ManufacturerBgBatchProcessor = dynamic(() => import("@/components/ManufacturerBgBatchProcessor"), { ssr: false })
+const PhotoCropper = dynamic(() => import("@/components/PhotoCropper"), { ssr: false })
 
 /**
  * Resolve a student's flag-image URL by trying every column the import
@@ -63,10 +76,29 @@ type ClassData = {
   isActive: boolean
   expiresAt: string | null
   templateId: string | null
+  sectionType: SectionType | null
+  classOptions: string[]
   template: { id: string; name: string; templateImageUrl: string | null } | null
   _count: { students: number }
+  studentBreakdown?: {
+    byClass: Array<{ label: string; count: number }>
+    byGrade: Array<{ grade: string; count: number }>
+  }
   teachers: { id: string; name: string; email: string; isMainTeacher: boolean }[]
   createdAt: string
+}
+
+const SCHOOL_TAB_LABELS: Record<
+  "overview" | "classes" | "students" | "template" | "generate" | "batches" | "export",
+  string
+> = {
+  overview: "Overview",
+  classes: "Section",
+  students: "Students",
+  template: "Template",
+  generate: "Generate",
+  batches: "Batches",
+  export: "Export",
 }
 
 type SchoolTemplateSummary = {
@@ -95,6 +127,8 @@ type StudentData = {
   serialNumber: string
   photoUrl: string
   photoPath?: string
+  photoUpdatedAt?: number
+  updatedAt?: string
   photoBgStatus?: string
   formData: any
   status: string
@@ -103,6 +137,23 @@ type StudentData = {
   submittedAt: string
   classId: string
   class: { id: string; name: string }
+}
+
+function getStudentPhotoUrl(s: Pick<StudentData, "id" | "photoUrl" | "photoPath" | "formData" | "updatedAt" | "photoUpdatedAt">): string {
+  const fromMedia = buildStudentPhotoUrl(s)
+  if (fromMedia) return fromMedia
+  const fd = s.formData as Record<string, string> | undefined
+  const fromForm = fd?.photoUrl || fd?.["Photo URL"] || fd?.["photo url"]
+  return typeof fromForm === "string" ? fromForm : ""
+}
+
+function studentPhotoCacheKey(s: Pick<StudentData, "id" | "updatedAt" | "photoUpdatedAt">): string {
+  const version = photoCacheVersion(s)
+  return version ? `${s.id}-${version}` : s.id
+}
+
+function studentHasPhoto(s: Pick<StudentData, "id" | "photoUrl" | "photoPath" | "formData">): boolean {
+  return getStudentPhotoUrl(s).length > 0
 }
 
 type SchoolDetail = {
@@ -149,16 +200,27 @@ export default function SchoolDetailPage() {
   const [studentTotal, setStudentTotal] = useState(0)
   const [statusFilter, setStatusFilter] = useState("")
   const [classFilter, setClassFilter] = useState("")
+  const [gradeClassFilter, setGradeClassFilter] = useState("")
+  const [showStudentAddSection, setShowStudentAddSection] = useState(false)
+  const [studentTabNewSectionName, setStudentTabNewSectionName] = useState("")
   const [exportingFormat, setExportingFormat] = useState<"csv" | "excel" | "archive" | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [searchInput, setSearchInput] = useState("")
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [tabLoading, setTabLoading] = useState(false)
+  const [expandedSectionIds, setExpandedSectionIds] = useState<Set<string>>(new Set())
 
-  // Add class
+  // Add section (stored as Class row — one link per section)
   const [newClassName, setNewClassName] = useState("")
+  const [newSectionType, setNewSectionType] = useState<SectionType | "">("")
   const [newExpiry, setNewExpiry] = useState("")
   const [addingClass, setAddingClass] = useState(false)
+
+  // Inline class-options editor (Roman numerals per section)
+  const [editingClassOptionsFor, setEditingClassOptionsFor] = useState<string | null>(null)
+  const [editingClassOptionsDraft, setEditingClassOptionsDraft] = useState("")
+  const [editingSectionTypeDraft, setEditingSectionTypeDraft] = useState<SectionType | "">("")
+  const [savingClassOptions, setSavingClassOptions] = useState(false)
 
   // Inline expiry editor (per-row): which class is being edited + its draft value
   const [editingExpiryFor, setEditingExpiryFor] = useState<string | null>(null)
@@ -226,17 +288,26 @@ export default function SchoolDetailPage() {
   const [manualSearchQuery, setManualSearchQuery] = useState('')
   const [allStudentsList, setAllStudentsList] = useState<any[]>([])
 
-  // Batch reprocess skipped photo backgrounds
+  // Batch AI background (local, runs in browser on manufacturer PC)
   const [reprocessOpen, setReprocessOpen] = useState(false)
-  const [reprocessMode, setReprocessMode] = useState<"skipped" | "unprocessed" | "all">("skipped")
   const [reprocessBgColor, setReprocessBgColor] = useState("#FFFFFF")
   const [reprocessLoading, setReprocessLoading] = useState(false)
-  const [reprocessStarting, setReprocessStarting] = useState(false)
   const [reprocessInfo, setReprocessInfo] = useState<{
     skippedCount: number
     bgColor?: string
-    rembgAvailable: boolean
-    activeJob: any | null
+    clientAiAvailable: boolean
+    students: Array<{ id: string; serialNumber: string; photoUrl: string; name?: string }>
+  } | null>(null)
+  const [bgEditorStudent, setBgEditorStudent] = useState<{
+    id: string
+    name: string
+    photoUrl: string
+    defaultBgColor: string
+  } | null>(null)
+  const [photoCrop, setPhotoCrop] = useState<{
+    url: string
+    target: "edit" | "detail"
+    studentId?: string
   } | null>(null)
 
   // Memoized blob-URL map for unmatched photo thumbnails. Previously, the
@@ -337,15 +408,19 @@ export default function SchoolDetailPage() {
 
   const fetchStudents = async (
     page = 1,
-    overrides?: { status?: string; classId?: string; search?: string }
+    overrides?: { status?: string; classId?: string; classGrade?: string; division?: string; search?: string }
   ) => {
     try {
       const params = new URLSearchParams({ page: String(page), limit: "50" })
       const status = overrides?.status ?? statusFilter
       const classId = overrides?.classId ?? classFilter
+      const classGrade = overrides?.classGrade ?? (gradeClassFilter ? gradeClassFilter.split("|")[0] : "")
+      const division = overrides?.division ?? (gradeClassFilter ? gradeClassFilter.split("|")[1] || "" : "")
       const search = overrides?.search ?? searchQuery
       if (status) params.set("status", status)
       if (classId) params.set("classId", classId)
+      if (classGrade) params.set("classGrade", classGrade)
+      if (division) params.set("division", division)
       if (search) params.set("search", search)
       const res = await fetch(`/api/schools/${schoolId}/students?${params}`, { cache: 'no-store' })
       const data = await res.json()
@@ -353,6 +428,11 @@ export default function SchoolDetailPage() {
         setStudents(data.data)
         setStudentTotal(data.pagination.total)
         setStudentPage(data.pagination.page)
+        setSelectedStudent((prev) => {
+          if (!prev) return prev
+          const fresh = data.data.find((s: StudentData) => s.id === prev.id)
+          return fresh || prev
+        })
       } else {
         toast.error(data.error || "Failed to load students")
       }
@@ -387,6 +467,7 @@ export default function SchoolDetailPage() {
   useEffect(() => {
     setStatusFilter("")
     setClassFilter("")
+    setGradeClassFilter("")
     setSearchQuery("")
     setSearchInput("")
     setStudentPage(1)
@@ -411,7 +492,12 @@ export default function SchoolDetailPage() {
       setTabLoading(true)
       fetchStudents().finally(() => setTabLoading(false))
     }
-  }, [statusFilter, classFilter, searchQuery])
+  }, [statusFilter, classFilter, gradeClassFilter, searchQuery])
+
+  useEffect(() => {
+    setGradeClassFilter("")
+    setStudentPage(1)
+  }, [classFilter])
 
   // Lazy-load tab data when switching tabs
   useEffect(() => {
@@ -419,13 +505,20 @@ export default function SchoolDetailPage() {
       setTabLoading(true)
       Promise.all([
         fetchStudents(),
+        fetchClasses(false),
         templateLoadedRef.current ? Promise.resolve() : fetchTemplate(),
         schoolTemplatesLoadedRef.current ? Promise.resolve() : fetchSchoolTemplates(),
         flagsLoadedRef.current ? Promise.resolve() : fetchFlags(),
       ]).finally(() => setTabLoading(false))
     }
-    if (tab === "classes" && !loading && !schoolTemplatesLoadedRef.current) {
-      fetchSchoolTemplates()
+    if (tab === "students" && students.length > 0 && !loading) {
+      fetchClasses(false)
+    }
+    if (tab === "classes" && !loading) {
+      fetchClasses(false)
+      if (!schoolTemplatesLoadedRef.current) {
+        fetchSchoolTemplates()
+      }
     }
     if (tab === "template" && !loading) {
       if (!templateLoadedRef.current) fetchTemplate()
@@ -466,20 +559,137 @@ export default function SchoolDetailPage() {
       const res = await fetch(`/api/schools/${schoolId}/classes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newClassName, expiresAt: newExpiry || null }),
+        body: JSON.stringify({
+          name: newClassName,
+          expiresAt: newExpiry || null,
+          sectionType: newSectionType || null,
+        }),
       })
       const data = await res.json()
       if (data.success) {
-        toast.success("Class created!")
+        toast.success("Section created!")
         setNewClassName("")
+        setNewSectionType("")
         setNewExpiry("")
         fetchClasses()
         fetchSchool()
+      } else {
+        toast.error(data.error || "Failed to create section")
       }
     } catch (err) {
-      toast.error("Failed to create class")
+      toast.error("Failed to create section")
     } finally {
       setAddingClass(false)
+    }
+  }
+
+  const handleAddSectionFromStudentsTab = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!studentTabNewSectionName.trim()) return
+    setAddingClass(true)
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/classes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: studentTabNewSectionName.trim() }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        toast.success("Section created!")
+        setStudentTabNewSectionName("")
+        setShowStudentAddSection(false)
+        await fetchClasses(false)
+        if (data.data?.id) setClassFilter(data.data.id)
+      } else {
+        toast.error(data.error || "Failed to create section")
+      }
+    } catch {
+      toast.error("Failed to create section")
+    } finally {
+      setAddingClass(false)
+    }
+  }
+
+  const selectedStudentSection = useMemo(
+    () => classes.find((c) => c.id === classFilter) || null,
+    [classes, classFilter]
+  )
+
+  const sectionClassPickerOptions = useMemo(() => {
+    if (!selectedStudentSection) return []
+    const grades = resolveEffectiveClassOptions(
+      selectedStudentSection.classOptions,
+      selectedStudentSection.sectionType,
+      selectedStudentSection.name
+    )
+    const seen = new Set<string>()
+    const options: Array<{ value: string; label: string }> = []
+
+    const addOption = (grade: string, division: string, label?: string) => {
+      const value = `${grade}|${division}`
+      if (seen.has(value)) return
+      seen.add(value)
+      options.push({
+        value,
+        label: label || formatClassSection(grade, division),
+      })
+    }
+
+    for (const grade of grades) {
+      for (const div of DIVISIONS) addOption(grade, div)
+    }
+
+    for (const { label } of selectedStudentSection.studentBreakdown?.byClass || []) {
+      const parsed = label.match(/^(.+?)\s*-+\s*([A-M])$/i)
+      if (parsed) addOption(parsed[1].trim(), parsed[2].toUpperCase(), label)
+      else if (label && label !== "Unassigned") addOption(label, "", label)
+    }
+
+    return options.sort((a, b) =>
+      a.label.localeCompare(b.label, undefined, { numeric: true })
+    )
+  }, [selectedStudentSection])
+
+  const startEditClassOptions = (cls: ClassData) => {
+    setEditingClassOptionsFor(cls.id)
+    setEditingClassOptionsDraft((cls.classOptions || []).join(", "))
+    setEditingSectionTypeDraft(cls.sectionType || "")
+  }
+
+  const cancelEditClassOptions = () => {
+    setEditingClassOptionsFor(null)
+    setEditingClassOptionsDraft("")
+    setEditingSectionTypeDraft("")
+  }
+
+  const saveEditClassOptions = async (cid: string) => {
+    const classOptions = editingClassOptionsDraft
+      .split(/[,;\n]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+    if (classOptions.length === 0) {
+      toast.error("Add at least one class (Roman numerals, comma-separated).")
+      return
+    }
+    setSavingClassOptions(true)
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/classes/${cid}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          classOptions,
+          sectionType: editingSectionTypeDraft || null,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) throw new Error(data.error || "Failed")
+      toast.success("Section classes updated.")
+      cancelEditClassOptions()
+      fetchClasses()
+    } catch (e: any) {
+      toast.error(e?.message || "Could not save class options.")
+    } finally {
+      setSavingClassOptions(false)
     }
   }
 
@@ -767,14 +977,14 @@ export default function SchoolDetailPage() {
 
   const shareWhatsApp = (token: string, className: string) => {
     const url = `${window.location.origin}/submit/${token}`
-    const msg = encodeURIComponent(`📋 ID Card Registration Form\n\nSchool: ${school?.name}\nClass: ${className}\n\nPlease fill your details:\n${url}`)
+    const msg = encodeURIComponent(`📋 ID Card Registration Form\n\nSchool: ${school?.name}\nSection: ${className}\n\nOpen the link, select your child's class and division, then fill the form:\n${url}`)
     window.open(`https://wa.me/?text=${msg}`, "_blank")
   }
 
   const shareEmail = (token: string, className: string) => {
     const url = `${window.location.origin}/submit/${token}`
     const subject = encodeURIComponent(`ID Card Registration - ${school?.name} - ${className}`)
-    const body = encodeURIComponent(`Dear Parent/Student,\n\nPlease fill the ID card registration form for ${className}:\n\n${url}\n\nRegards,\n${school?.name}`)
+    const body = encodeURIComponent(`Dear Parent/Student,\n\nPlease open the link below, select your child's class and division, and fill the ID card registration form for ${className}:\n\n${url}\n\nRegards,\n${school?.name}`)
     window.open(`mailto:?subject=${subject}&body=${body}`)
   }
 
@@ -963,8 +1173,59 @@ export default function SchoolDetailPage() {
     setEditFormFields({ ...(s.formData as Record<string, string>) })
     setEditClassId(s.classId || s.class?.id || "")
     setEditPhotoFile(null)
-    setEditPhotoPreview(s.photoUrl || "")
+    setEditPhotoPreview(getStudentPhotoUrl(s) || "")
     setEditStudentOpen(true)
+  }
+
+  const closePhotoCrop = () => {
+    if (photoCrop?.url.startsWith("blob:")) URL.revokeObjectURL(photoCrop.url)
+    setPhotoCrop(null)
+  }
+
+  const pickPhotoForCrop = (file: File, target: "edit" | "detail", studentId?: string) => {
+    setPhotoCrop((prev) => {
+      if (prev?.url.startsWith("blob:")) URL.revokeObjectURL(prev.url)
+      return { url: URL.createObjectURL(file), target, studentId }
+    })
+  }
+
+  const handlePhotoCropped = async (croppedDataUrl: string) => {
+    if (!photoCrop) return
+    const { target, studentId } = photoCrop
+    try {
+      if (target === "edit") {
+        setEditPhotoPreview(croppedDataUrl)
+        const file = await prepareStudentPhotoForUpload(croppedDataUrl, {
+          fileName: `photo-${Date.now()}.jpg`,
+        })
+        setEditPhotoFile(file)
+        closePhotoCrop()
+        toast.success("Photo cropped — save the student to upload.")
+        return
+      }
+      if (target === "detail" && studentId) {
+        const file = await prepareStudentPhotoForUpload(croppedDataUrl, {
+          fileName: `${studentId}.jpg`,
+        })
+        const fd = new FormData()
+        fd.append("photo", file)
+        fd.append("studentId", studentId)
+        const res = await fetch(`/api/schools/${schoolId}/students/assign-photo`, { method: "POST", body: fd })
+        const data = await res.json()
+        closePhotoCrop()
+        if (data.success) {
+          toast.success("Photo updated!")
+          if (selectedStudent?.id === studentId) {
+            updateStudentPhotoInState(studentId, data.data.photoUrl, data.data.photoPath, data.data.updatedAt)
+          }
+          fetchStudents(studentPage)
+        } else {
+          toast.error(data.error || "Upload failed")
+        }
+      }
+    } catch {
+      toast.error("Could not save cropped photo")
+    }
   }
 
   const handleSaveStudent = async () => {
@@ -1330,12 +1591,17 @@ export default function SchoolDetailPage() {
     setAllStudentsList([])
   }
 
-  const fetchReprocessInfo = async (mode: "skipped" | "unprocessed" | "all" = reprocessMode) => {
+  const fetchReprocessInfo = async () => {
     setReprocessLoading(true)
     try {
       const params = new URLSearchParams()
       if (classFilter) params.set("classId", classFilter)
-      params.set("mode", mode)
+      if (gradeClassFilter) {
+        const [classGrade, division = ""] = gradeClassFilter.split("|")
+        if (classGrade) params.set("classGrade", classGrade)
+        if (division) params.set("division", division)
+      }
+      params.set("mode", "all")
       const res = await fetch(`/api/schools/${schoolId}/students/reprocess-photos?${params.toString()}`)
       const data = await res.json()
       if (data.success) {
@@ -1351,51 +1617,109 @@ export default function SchoolDetailPage() {
     }
   }
 
-  const openReprocessModal = async (mode: "skipped" | "unprocessed" | "all") => {
-    setReprocessMode(mode)
-    setReprocessOpen(true)
-    await fetchReprocessInfo(mode)
-  }
-
-  const startReprocessJob = async (studentIds?: string[]) => {
-    if (!/^#[0-9a-fA-F]{6}$/.test(reprocessBgColor)) {
-      toast.error("Enter a valid background color like #FFFFFF")
+  const openBgEditorForStudent = (s: StudentData) => {
+    const fd = s.formData as Record<string, string>
+    const photoUrl = getStudentPhotoUrl(s)
+    if (!photoUrl) {
+      toast.error("No photo on file for this student. Ask them to re-submit via the form link, or upload a photo manually.")
       return
     }
-    setReprocessStarting(true)
-    try {
-      const res = await fetch(`/api/schools/${schoolId}/students/reprocess-photos`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          classId: classFilter || null,
-          studentIds,
-          maxStudents: studentIds?.length || 5000,
-          mode: reprocessMode,
-          bgColor: reprocessBgColor,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        toast.error(data.error || "Failed to start reprocess job")
-        return
-      }
-      toast.success(
-        studentIds?.length
-          ? "Single photo background processing started."
-          : reprocessMode === "all"
-            ? "Background processing started for the entire selected scope."
-            : reprocessMode === "unprocessed"
-              ? "Background processing started for unprocessed photos."
-              : "Background reprocess started for skipped photos."
-      )
-      await fetchReprocessInfo(reprocessMode)
-    } catch {
-      toast.error("Failed to start reprocess job")
-    } finally {
-      setReprocessStarting(false)
-    }
+    const studentClass = classes.find((c) => c.id === s.classId)
+    const tpl = resolveStudentTemplate(studentClass, s, templateData)
+    setBgEditorStudent({
+      id: s.id,
+      name: fd?.fullName || fd?.["Full Name"] || fd?.["Student Name"] || s.serialNumber,
+      photoUrl,
+      defaultBgColor: (tpl as { photoBgColor?: string })?.photoBgColor || reprocessBgColor || "#FFFFFF",
+    })
   }
+
+  const persistPhotoBgColor = useCallback(async (color: string) => {
+    const normalized = color.toUpperCase()
+    if (!/^#[0-9A-F]{6}$/.test(normalized)) {
+      throw new Error("Enter a valid background colour like #FFFFFF")
+    }
+
+    const selectedClass = classFilter ? classes.find((c) => c.id === classFilter) : null
+    const templateId = selectedClass?.templateId || schoolTemplates[0]?.id || templateData?.id
+    const url = templateId
+      ? `/api/schools/${schoolId}/templates/${templateId}`
+      : `/api/schools/${schoolId}/template`
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ photoBgColor: normalized }),
+    })
+    const data = await res.json().catch(() => null)
+    if (!res.ok || !data?.success) {
+      throw new Error(data?.error || "Failed to save background colour")
+    }
+
+    setReprocessBgColor(normalized)
+    setTemplateData((prev: any) => prev ? { ...prev, photoBgColor: normalized } : prev)
+    setSchoolTemplates((prev) => prev.map((tpl) => (
+      tpl.id === data.data.id ? { ...tpl, photoBgColor: normalized } : tpl
+    )))
+    setClasses((prev) => prev.map((cls) => (
+      cls.templateId === data.data.id && cls.template
+        ? { ...cls, template: { ...cls.template, photoBgColor: normalized } as any }
+        : cls
+    )))
+  }, [classFilter, classes, schoolId, schoolTemplates, templateData?.id])
+
+  const updateStudentPhotoInState = useCallback((
+    studentId: string,
+    photoUrl: string,
+    photoPath?: string,
+    updatedAt?: string
+  ) => {
+    const photoUpdatedAt = updatedAt ? new Date(updatedAt).getTime() : Date.now()
+    const update = (student: StudentData): StudentData =>
+      student.id === studentId
+        ? {
+            ...student,
+            photoUrl,
+            photoPath: photoPath || student.photoPath,
+            photoBgStatus: "REPROCESSED",
+            photoUpdatedAt,
+            updatedAt: updatedAt || new Date(photoUpdatedAt).toISOString(),
+          }
+        : student
+
+    setStudents((prev) => prev.map(update))
+    setSelectedStudent((prev) => prev ? update(prev) : prev)
+    setReprocessInfo((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        students: prev.students.map((s) =>
+          s.id === studentId
+            ? { ...s, photoUrl: buildStudentPhotoUrl({ id: s.id, photoPath: photoPath || undefined, photoUrl, updatedAt, photoUpdatedAt }) }
+            : s
+        ),
+      }
+    })
+  }, [])
+
+  const openReprocessModal = async () => {
+    if (!classFilter) {
+      toast.error("Select a section/class first, then process photos for that class.")
+      return
+    }
+    setReprocessOpen(true)
+    await fetchReprocessInfo()
+  }
+
+  const handleBatchBgComplete = (stats: { processed: number; failed: number }) => {
+    toast.success(`Background processing complete: ${stats.processed} saved, ${stats.failed} failed.`)
+    fetchStudents(studentPage)
+    fetchReprocessInfo()
+  }
+
+  const selectedBatchClassLabel = [
+    selectedStudentSection?.name,
+    gradeClassFilter && sectionClassPickerOptions.find((o) => o.value === gradeClassFilter)?.label,
+  ].filter(Boolean).join(" / ") || "Selected class"
 
   // Flag management handlers
   const fetchFlags = async () => {
@@ -1656,6 +1980,56 @@ export default function SchoolDetailPage() {
   )
   if (!school) return <div style={{ padding: 32 }}>School not found.</div>
 
+  const toggleSectionExpanded = (sectionId: string) => {
+    setExpandedSectionIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(sectionId)) next.delete(sectionId)
+      else next.add(sectionId)
+      return next
+    })
+  }
+
+  const getSectionGradeRows = (cls: ClassData) => {
+    const effectiveOptions = resolveEffectiveClassOptions(cls.classOptions, cls.sectionType, cls.name)
+    const gradeCounts = new Map(
+      (cls.studentBreakdown?.byGrade || []).map((entry) => [entry.grade, entry.count])
+    )
+    if (effectiveOptions.length > 0) {
+      return effectiveOptions.map((grade) => ({ grade, count: gradeCounts.get(grade) || 0 }))
+    }
+    if (gradeCounts.size > 0) {
+      return Array.from(gradeCounts.entries())
+        .map(([grade, count]) => ({ grade, count }))
+        .sort((a, b) => a.grade.localeCompare(b.grade, undefined, { numeric: true }))
+    }
+    return []
+  }
+
+  const renderSectionStudentCounts = (cls: ClassData) => {
+    const breakdown = cls.studentBreakdown?.byClass || []
+    if (breakdown.length === 0) {
+      return <span className="status-badge status-submitted">{cls._count.students}</span>
+    }
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>
+          {cls._count.students} total
+        </span>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {breakdown.map(({ label, count }) => (
+            <span
+              key={label}
+              className="status-badge status-submitted"
+              style={{ fontSize: 11, whiteSpace: "nowrap" }}
+            >
+              {label}: {count}
+            </span>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   const tabs = ["overview", "classes", "students", "template", "generate", "batches", "export"] as const
 
   return (
@@ -1690,7 +2064,7 @@ export default function SchoolDetailPage() {
         </div>
 
         <div className="school-tabs-scroll" style={{ display: 'flex', borderBottom: '1px solid var(--gray-200)', marginBottom: 24, paddingBottom: 0 }}>
-          {["overview", "classes", "students", "template", "generate", "batches", "export"].map(t => (
+          {(["overview", "classes", "students", "template", "generate", "batches", "export"] as const).map(t => (
             <button
               key={t}
               onClick={() => setTab(t as any)}
@@ -1707,7 +2081,7 @@ export default function SchoolDetailPage() {
                 cursor: 'pointer'
               }}
             >
-              {t}
+              {SCHOOL_TAB_LABELS[t]}
             </button>
           ))}
         </div>
@@ -1912,10 +2286,10 @@ export default function SchoolDetailPage() {
                   }}>🔗</div>
                   <div style={{ flex: 1, minWidth: 200 }}>
                     <div style={{ fontSize: 14, fontWeight: 700, color: '#1e293b' }}>
-                      School-Wide Registration Link
+                      Section Registration Links
                     </div>
                     <div style={{ fontSize: 11, color: '#475569', lineHeight: 1.45 }}>
-                      One URL for the whole school. Parents pick their child&apos;s class from a dropdown.
+                      Optional fallback: one URL for the whole school. Prefer sharing each section link below.
                     </div>
                   </div>
                   <span style={{
@@ -1984,23 +2358,47 @@ export default function SchoolDetailPage() {
               </div>
             )}
 
-            <form onSubmit={handleAddClass} style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
-              <div className="form-group" style={{ flex: 1, minWidth: 200 }}>
-                <input placeholder="New class name (e.g. Grade 10-A)" value={newClassName} onChange={e => setNewClassName(e.target.value)} required />
+            <form onSubmit={handleAddClass} style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div className="form-group" style={{ flex: 1, minWidth: 180 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4, display: 'block' }}>Section name</label>
+                <input placeholder="e.g. Secondary, Pre Primary" value={newClassName} onChange={e => setNewClassName(e.target.value)} required />
+              </div>
+              <div className="form-group" style={{ width: 180 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4, display: 'block' }}>Section type</label>
+                <select
+                  value={newSectionType}
+                  onChange={(e) => {
+                    const v = e.target.value as SectionType | ""
+                    setNewSectionType(v)
+                  }}
+                  style={{ width: '100%', height: 44, padding: '0 10px', borderRadius: 8, border: '1px solid #cbd5e1' }}
+                >
+                  <option value="">Custom classes</option>
+                  {(Object.keys(SECTION_TYPE_LABELS) as SectionType[]).map((key) => (
+                    <option key={key} value={key}>{SECTION_TYPE_LABELS[key]}</option>
+                  ))}
+                </select>
               </div>
               <div className="form-group" style={{ width: 200 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4, display: 'block' }}>Link expiry</label>
                 <input type="datetime-local" value={newExpiry} onChange={e => setNewExpiry(e.target.value)} placeholder="Expiry (optional)" />
               </div>
               <button type="submit" className="btn btn-primary" style={{ height: 44 }} disabled={addingClass}>
-                {addingClass ? "Adding..." : "Add Class"}
+                {addingClass ? "Adding..." : "Add Section"}
               </button>
             </form>
+            {newSectionType && (
+              <div style={{ fontSize: 11, color: '#64748b', marginTop: -16, marginBottom: 20 }}>
+                Default classes: {DEFAULT_CLASS_OPTIONS[newSectionType].join(", ")} · Divisions A–M on the form
+              </div>
+            )}
 
             <div className="data-table-wrapper">
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Class Name</th>
+                    <th>Section</th>
+                    <th>Classes (Roman)</th>
                     <th>Template</th>
                     <th>Approval Teacher</th>
                     <th>Students</th>
@@ -2012,9 +2410,47 @@ export default function SchoolDetailPage() {
                 <tbody>
                   {classes.map(cls => {
                     const classTeacher = cls.teachers?.find(t => !t.isMainTeacher)
+                    const isExpanded = expandedSectionIds.has(cls.id)
+                    const gradeRows = getSectionGradeRows(cls)
+                    const canExpand = gradeRows.length > 0
                     return (
-                    <tr key={cls.id}>
-                      <td style={{ fontWeight: 600 }}>{cls.name}</td>
+                    <Fragment key={cls.id}>
+                    <tr>
+                      <td style={{ fontWeight: 600 }}>
+                        <button
+                          type="button"
+                          onClick={() => toggleSectionExpanded(cls.id)}
+                          disabled={!canExpand}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 8,
+                            background: "none",
+                            border: "none",
+                            padding: 0,
+                            font: "inherit",
+                            fontWeight: 600,
+                            color: canExpand ? "#0f172a" : "#64748b",
+                            cursor: canExpand ? "pointer" : "default",
+                          }}
+                          title={canExpand ? "Click to show classes under this section" : "Configure classes or add students to expand"}
+                        >
+                          <span style={{ fontSize: 10, color: "#94a3b8", width: 12, display: "inline-block" }}>
+                            {canExpand ? (isExpanded ? "▼" : "▶") : "•"}
+                          </span>
+                          {cls.name}
+                        </button>
+                      </td>
+                      <td style={{ minWidth: 160, fontSize: 12, color: '#475569' }}>
+                        {(cls.classOptions?.length ?? 0) > 0 ? (
+                          <div>
+                            <div style={{ lineHeight: 1.5 }}>{cls.classOptions.join(", ")}</div>
+                            <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>+ Division A–M on form</div>
+                          </div>
+                        ) : (
+                          <span style={{ color: '#94a3b8' }}>Not configured</span>
+                        )}
+                      </td>
                       <td style={{ minWidth: 220 }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                           <select
@@ -2076,7 +2512,7 @@ export default function SchoolDetailPage() {
                           <span style={{ fontSize: 12, color: '#94a3b8' }}>—</span>
                         )}
                       </td>
-                      <td><span className="status-badge status-submitted">{cls._count.students}</span></td>
+                      <td>{renderSectionStudentCounts(cls)}</td>
                       <td>
                         <span className={`status-badge ${cls.isActive ? 'status-approved' : 'status-pending'}`}>
                           {cls.isActive ? "Active" : "Inactive"}
@@ -2090,6 +2526,14 @@ export default function SchoolDetailPage() {
                       <td style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 12 }}>...{cls.linkToken.slice(-8)}</td>
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                          <button
+                            className="btn btn-outline"
+                            onClick={() => startEditClassOptions(cls)}
+                            style={{ fontSize: 11, padding: '5px 10px' }}
+                            title="Configure Roman class list for this section"
+                          >
+                            📚 Edit Classes
+                          </button>
                           <button className="btn btn-outline" onClick={() => copyLink(cls.linkToken)} style={{ fontSize: 11, padding: '5px 10px' }}>📋 Copy</button>
                           <button className="btn btn-outline" onClick={() => shareWhatsApp(cls.linkToken, cls.name)} style={{ fontSize: 11, padding: '5px 10px', color: '#22c55e', borderColor: '#22c55e' }}>💬 WhatsApp</button>
                           <button className="btn btn-outline" onClick={() => shareEmail(cls.linkToken, cls.name)} style={{ fontSize: 11, padding: '5px 10px' }}>📧 Email</button>
@@ -2108,6 +2552,51 @@ export default function SchoolDetailPage() {
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/></svg>
                           </button>
                         </div>
+                        {editingClassOptionsFor === cls.id && (
+                          <div
+                            style={{
+                              marginTop: 8,
+                              padding: 10,
+                              background: '#f0f9ff',
+                              border: '1px solid #bae6fd',
+                              borderRadius: 8,
+                              textAlign: 'left',
+                            }}
+                          >
+                            <div style={{ fontSize: 11, fontWeight: 700, color: '#0369a1', marginBottom: 8 }}>
+                              Roman classes for {cls.name}
+                            </div>
+                            <select
+                              value={editingSectionTypeDraft}
+                              onChange={(e) => {
+                                const v = e.target.value as SectionType | ""
+                                setEditingSectionTypeDraft(v)
+                                if (v) setEditingClassOptionsDraft(DEFAULT_CLASS_OPTIONS[v].join(", "))
+                              }}
+                              style={{ width: '100%', marginBottom: 8, padding: '6px 8px', fontSize: 12, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                            >
+                              <option value="">Custom list</option>
+                              {(Object.keys(SECTION_TYPE_LABELS) as SectionType[]).map((key) => (
+                                <option key={key} value={key}>{SECTION_TYPE_LABELS[key]} defaults</option>
+                              ))}
+                            </select>
+                            <input
+                              value={editingClassOptionsDraft}
+                              onChange={(e) => setEditingClassOptionsDraft(e.target.value)}
+                              placeholder="e.g. VI, VII, VIII, IX, X"
+                              style={{ width: '100%', padding: '8px 10px', fontSize: 12, borderRadius: 6, border: '1px solid #cbd5e1', marginBottom: 8 }}
+                            />
+                            <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8 }}>
+                              Comma-separated. Parents also pick Division A–M; card shows e.g. VII-A.
+                            </div>
+                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                              <button type="button" className="btn btn-outline" onClick={cancelEditClassOptions} style={{ fontSize: 11, padding: '4px 10px' }}>Cancel</button>
+                              <button type="button" className="btn btn-primary" disabled={savingClassOptions} onClick={() => saveEditClassOptions(cls.id)} style={{ fontSize: 11, padding: '4px 10px' }}>
+                                {savingClassOptions ? "Saving…" : "Save"}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                         {/* Inline expiry editor — appears under the action buttons for the row being edited */}
                         {editingExpiryFor === cls.id && (
                           <div
@@ -2157,10 +2646,28 @@ export default function SchoolDetailPage() {
                         )}
                       </td>
                     </tr>
-                  )})
-                  }
+                    {isExpanded && gradeRows.map(({ grade, count }) => (
+                      <tr key={`${cls.id}-grade-${grade}`} style={{ background: "#f8fafc" }}>
+                        <td style={{ paddingLeft: 28, fontSize: 13, color: "#475569", fontWeight: 500 }}>
+                          ↳ Class {grade}
+                        </td>
+                        <td style={{ fontSize: 12, color: "#94a3b8" }}>—</td>
+                        <td colSpan={2} style={{ fontSize: 12, color: "#94a3b8" }}>—</td>
+                        <td>
+                          <span
+                            className={`status-badge ${count > 0 ? "status-submitted" : ""}`}
+                            style={count === 0 ? { background: "#f1f5f9", color: "#94a3b8" } : undefined}
+                          >
+                            {count} {count === 1 ? "student" : "students"}
+                          </span>
+                        </td>
+                        <td colSpan={3} style={{ fontSize: 12, color: "#94a3b8" }}>—</td>
+                      </tr>
+                    ))}
+                    </Fragment>
+                  )})}
                   {classes.length === 0 && (
-                    <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>
+                    <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>
                       {classesLoadError ? (
                         <>
                           Could not load classes (they may still exist in the database).{' '}
@@ -2315,17 +2822,9 @@ export default function SchoolDetailPage() {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
                 Bulk Upload Photos
               </button>
-              <button className="btn btn-outline" onClick={() => openReprocessModal("skipped")} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#6366f1', color: '#4f46e5' }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
-                Reprocess Skipped Photos
-              </button>
-              <button className="btn btn-outline" onClick={() => openReprocessModal("unprocessed")} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#0ea5e9', color: '#0284c7' }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 3v3"/><path d="M18.36 5.64l-2.12 2.12"/><path d="M21 12h-3"/><path d="M18.36 18.36l-2.12-2.12"/><path d="M12 21v-3"/><path d="M5.64 18.36l2.12-2.12"/><path d="M3 12h3"/><path d="M5.64 5.64l2.12 2.12"/></svg>
-                Process Unprocessed
-              </button>
-              <button className="btn btn-outline" onClick={() => openReprocessModal("all")} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#d946ef', color: '#c026d3' }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="m5 3 1 2.5L8.5 6 6 7 5 9.5 4 7 1.5 6 4 5.5Z"/><path d="m19 17 1 2.5 2.5.5-2.5 1-1 2.5-1-2.5-2.5-1 2.5-1Z"/></svg>
-                Process Entire Scope
+              <button className="btn btn-outline" onClick={() => openReprocessModal()} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#8b5cf6', color: '#7c3aed' }} title="Select a section/class, then run local AI background removal and auto-save every processed photo">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+                Process Class Photos (AI Background)
               </button>
               <button className="btn btn-outline" onClick={openAddStudent} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#22c55e', color: '#16a34a' }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
@@ -2372,9 +2871,9 @@ export default function SchoolDetailPage() {
               )}
             </div>
 
-            <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
               <input placeholder="Search by name or serial..." value={searchInput} onChange={e => { const v = e.target.value; setSearchInput(v); if (searchTimerRef.current) clearTimeout(searchTimerRef.current); searchTimerRef.current = setTimeout(() => { setSearchQuery(v); setStudentPage(1); }, 400); }} style={{ height: 40, padding: '0 14px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 14, flex: 1, minWidth: 200 }} />
-              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ height: 40, padding: '0 12px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 13 }}>
+              <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setStudentPage(1) }} style={{ height: 40, padding: '0 12px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 13, minWidth: 130 }}>
                 <option value="">All Status</option>
                 <option value="SUBMITTED">Submitted</option>
                 <option value="APPROVED">Approved</option>
@@ -2382,16 +2881,102 @@ export default function SchoolDetailPage() {
                 <option value="PRINTED">Printed</option>
                 <option value="PENDING">Pending</option>
               </select>
-              <select value={classFilter} onChange={e => setClassFilter(e.target.value)} style={{ height: 40, padding: '0 12px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 13 }}>
-                <option value="">All Classes</option>
-                {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
             </div>
+
+            <div style={{ display: 'flex', gap: 12, marginBottom: showStudentAddSection ? 8 : 20, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 180 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 }}>1. Section</label>
+                <select
+                  value={classFilter}
+                  onChange={(e) => { setClassFilter(e.target.value); setStudentPage(1) }}
+                  style={{ height: 40, padding: '0 12px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 13, minWidth: 180 }}
+                >
+                  <option value="">All Sections</option>
+                  {classes.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 180 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 }}>2. Class</label>
+                <select
+                  value={gradeClassFilter}
+                  onChange={(e) => { setGradeClassFilter(e.target.value); setStudentPage(1) }}
+                  disabled={!classFilter}
+                  style={{
+                    height: 40,
+                    padding: '0 12px',
+                    border: '1.5px solid #e2e8f0',
+                    borderRadius: 10,
+                    fontSize: 13,
+                    minWidth: 180,
+                    opacity: classFilter ? 1 : 0.55,
+                    cursor: classFilter ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  <option value="">{classFilter ? "All Classes in Section" : "Select section first"}</option>
+                  {sectionClassPickerOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, justifyContent: 'flex-end' }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'transparent' }}>.</label>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => setShowStudentAddSection((v) => !v)}
+                  style={{ height: 40, padding: '0 14px', fontSize: 13, whiteSpace: 'nowrap' }}
+                >
+                  + Add Section
+                </button>
+              </div>
+            </div>
+
+            {showStudentAddSection && (
+              <form
+                onSubmit={handleAddSectionFromStudentsTab}
+                style={{
+                  display: 'flex',
+                  gap: 8,
+                  marginBottom: 20,
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  padding: 12,
+                  background: '#f8fafc',
+                  borderRadius: 10,
+                  border: '1px solid #e2e8f0',
+                }}
+              >
+                <input
+                  placeholder="New section name (e.g. Pre Primary, Other)"
+                  value={studentTabNewSectionName}
+                  onChange={(e) => setStudentTabNewSectionName(e.target.value)}
+                  style={{ height: 38, padding: '0 12px', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: 13, flex: 1, minWidth: 200 }}
+                />
+                <button type="submit" className="btn btn-primary" disabled={addingClass || !studentTabNewSectionName.trim()} style={{ height: 38, padding: '0 16px', fontSize: 13 }}>
+                  {addingClass ? "Adding…" : "Create Section"}
+                </button>
+                <button type="button" className="btn btn-outline" onClick={() => setShowStudentAddSection(false)} style={{ height: 38, padding: '0 12px', fontSize: 13 }}>
+                  Cancel
+                </button>
+              </form>
+            )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div style={{ fontSize: 13, color: '#64748b' }}>
                 {studentTotal} students found
-                {(() => { const missing = students.filter(s => !s.photoUrl).length; return missing > 0 ? (
+                {classFilter && selectedStudentSection && (
+                  <span style={{ marginLeft: 8, color: '#3b82f6' }}>
+                    · {selectedStudentSection.name}
+                    {gradeClassFilter && sectionClassPickerOptions.find((o) => o.value === gradeClassFilter)
+                      ? ` · ${sectionClassPickerOptions.find((o) => o.value === gradeClassFilter)?.label}`
+                      : ""}
+                  </span>
+                )}
+                {(() => { const missing = students.filter(s => !studentHasPhoto(s)).length; return missing > 0 ? (
                   <span style={{ marginLeft: 12, fontSize: 12, fontWeight: 600, color: '#ef4444', background: '#fef2f2', padding: '3px 10px', borderRadius: 6 }}>
                     📷 {missing} missing photos
                   </span>
@@ -2468,7 +3053,7 @@ export default function SchoolDetailPage() {
                 <table className="data-table" style={{ minWidth: hasDynamicColumns ? Math.max(800, dataColumns.length * 120) : 800 }}>
                   <thead>
                     <tr>
-                      <th style={{ position: 'sticky', left: 0, background: '#f8fafc', zIndex: 2 }}>Photo</th>
+                      <th style={{ position: 'sticky', left: 0, background: '#f8fafc', zIndex: 2, minWidth: 72 }}>Photo</th>
                       {hasDynamicColumns ? (
                         dataColumns.map(k => <th key={k}>{keyToLabel[k] || k}</th>)
                       ) : (
@@ -2520,19 +3105,40 @@ export default function SchoolDetailPage() {
                         return ""
                       }
                       const studentName = (fd?.fullName || fd?.name || fd?.["Full Name"] || fd?.["Student Name"] || "—") as string
-                      const hasPhoto = !!s.photoUrl
+                      const displayPhotoUrl = getStudentPhotoUrl(s)
+                      const photoCacheKey = studentPhotoCacheKey(s)
+                      const hasPhoto = studentHasPhoto(s)
+                      const isNameColumn = (k: string) => ["fullName", "name", "studentName"].includes(k)
 
                       return (
                         <tr key={s.id}>
-                          <td style={{ position: 'sticky', left: 0, background: '#fff', zIndex: 1 }}>
-                            {s.photoUrl ? (
-                              <div style={{ width: 36, height: 36, borderRadius: '50%', overflow: 'hidden', border: '2px solid #e2e8f0' }}>
-                                <img src={s.photoUrl} alt="" loading="lazy" decoding="async" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                              </div>
+                          <td style={{ position: 'sticky', left: 0, background: '#fff', zIndex: 1, padding: '8px 10px' }}>
+                            {displayPhotoUrl ? (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedStudent(s)}
+                                title="View student photo"
+                                style={{
+                                  width: 52, height: 68, borderRadius: 8, overflow: 'hidden',
+                                  border: '2px solid #e2e8f0', padding: 0, cursor: 'pointer', background: '#f8fafc', display: 'block',
+                                }}
+                              >
+                                <img
+                                  key={photoCacheKey}
+                                  src={displayPhotoUrl}
+                                  alt={studentName}
+                                  loading="lazy"
+                                  decoding="async"
+                                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                  onError={(e) => {
+                                    (e.currentTarget as HTMLImageElement).style.display = 'none'
+                                  }}
+                                />
+                              </button>
                             ) : (
-                              <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#fef2f2', border: '2px dashed #fca5a5', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                                <div style={{ position: 'absolute', top: -2, right: -2, width: 10, height: 10, borderRadius: '50%', background: '#ef4444', border: '1.5px solid white' }} title="Photo missing" />
+                              <div style={{ width: 52, height: 68, borderRadius: 8, background: '#fef2f2', border: '2px dashed #fca5a5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 2, color: '#ef4444', fontSize: 9, fontWeight: 600, textAlign: 'center', padding: 4 }}>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                                No photo
                               </div>
                             )}
                           </td>
@@ -2547,16 +3153,36 @@ export default function SchoolDetailPage() {
                                   fontFamily: isPhotoIdCol || isNumCol ? 'monospace' : 'inherit',
                                   fontWeight: (k === "fullName" || k === "name" || k === "studentName") ? 500 : 'normal',
                                   color: !val ? '#cbd5e1' : isPhotoIdCol ? '#6366f1' : '#334155',
-                                  maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                  maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: isNameColumn(k) ? 'normal' : 'nowrap',
                                 }}>
-                                  {val || "—"}
+                                  {isNameColumn(k) ? (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                                      {displayPhotoUrl && (
+                                        <img
+                                          key={photoCacheKey}
+                                          src={displayPhotoUrl}
+                                          alt=""
+                                          loading="lazy"
+                                          style={{ width: 32, height: 42, borderRadius: 6, objectFit: 'cover', border: '1px solid #e2e8f0', flexShrink: 0 }}
+                                        />
+                                      )}
+                                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{val || "—"}</span>
+                                    </div>
+                                  ) : (val || "—")}
                                 </td>
                               )
                             })
                           ) : (
                             <>
                               <td style={{ fontWeight: 600, fontFamily: 'monospace', fontSize: 13 }}>{s.serialNumber}</td>
-                              <td style={{ fontWeight: 500 }}>{studentName}</td>
+                              <td style={{ fontWeight: 500 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  {displayPhotoUrl && (
+                                    <img key={photoCacheKey} src={displayPhotoUrl} alt="" loading="lazy" style={{ width: 32, height: 42, borderRadius: 6, objectFit: 'cover', border: '1px solid #e2e8f0' }} />
+                                  )}
+                                  {studentName}
+                                </div>
+                              </td>
                             </>
                           )}
                           <td>{s.class?.name || "—"}</td>
@@ -2568,12 +3194,24 @@ export default function SchoolDetailPage() {
                               s.status === 'SUBMITTED' ? 'status-submitted' :
                               'status-pending'
                             }`}>{s.status}</span>
-                            {!hasPhoto && <div style={{ fontSize: 10, color: '#ef4444', marginTop: 3, fontWeight: 600 }}>⚠ Photo</div>}
+                            {!hasPhoto && <div style={{ fontSize: 10, color: '#ef4444', marginTop: 3, fontWeight: 600 }}>⚠ Photo missing</div>}
+                            {hasPhoto && s.photoBgStatus !== "PROCESSED" && s.photoBgStatus !== "REPROCESSED" && s.photoBgStatus !== "PLAIN" && (
+                              <div style={{ fontSize: 10, color: '#7c3aed', marginTop: 3, fontWeight: 600 }}>AI not run</div>
+                            )}
                             {s.flagNote && <div style={{ fontSize: 11, color: '#ef4444', marginTop: 4 }}>📌 {s.flagNote}</div>}
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
-                              <button className="btn btn-outline" style={{ fontSize: 11, padding: '4px 8px', borderColor: '#6366f1', color: '#4f46e5' }} onClick={() => setSelectedStudent(s)}>👁</button>
+                              <button className="btn btn-outline" style={{ fontSize: 11, padding: '4px 8px', borderColor: '#6366f1', color: '#4f46e5' }} onClick={() => setSelectedStudent(s)} title="View & edit">👁</button>
+                              <button
+                                className="btn btn-outline"
+                                style={{ fontSize: 10, padding: '4px 7px', borderColor: '#8b5cf6', color: '#7c3aed', fontWeight: 700, minWidth: 32 }}
+                                onClick={() => openBgEditorForStudent(s)}
+                                disabled={!hasPhoto}
+                                title={hasPhoto ? "AI plain background" : "No photo uploaded yet"}
+                              >
+                                AI
+                              </button>
                               <button className="btn btn-outline" style={{ fontSize: 11, padding: '4px 8px', borderColor: '#3b82f6', color: '#2563eb' }} onClick={() => openEditStudent(s)} title="Edit student">✏️</button>
                               <button className="btn btn-outline" style={{ fontSize: 11, padding: '4px 8px', borderColor: '#22c55e', color: '#16a34a' }} onClick={() => handleStatusUpdate(s.id, "APPROVED")}>✓</button>
                               {s.status === "FLAGGED" ? (
@@ -2651,8 +3289,8 @@ export default function SchoolDetailPage() {
                           <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} onChange={e => {
                             const f = e.target.files?.[0]
                             if (!f) return
-                            setEditPhotoFile(f)
-                            setEditPhotoPreview(URL.createObjectURL(f))
+                            pickPhotoForCrop(f, "edit")
+                            e.target.value = ""
                           }} />
                         </label>
                         {editPhotoFile && <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>{editPhotoFile.name}</div>}
@@ -3302,19 +3940,15 @@ export default function SchoolDetailPage() {
 
           {/* REPROCESS SKIPPED PHOTOS MODAL */}
           {reprocessOpen && (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 24 }} onClick={() => { if (!reprocessStarting) setReprocessOpen(false) }}>
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 24 }} onClick={() => setReprocessOpen(false)}>
               <div style={{ background: 'white', borderRadius: 20, maxWidth: 560, width: '100%', boxShadow: '0 25px 50px rgba(0,0,0,0.25)' }} onClick={e => e.stopPropagation()}>
                 <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>
-                      {reprocessMode === "all" ? "AI Background: Entire Scope" : reprocessMode === "unprocessed" ? "AI Background: Unprocessed Photos" : "Reprocess Skipped Photos"}
+                      Process Class Photos - AI Background
                     </h2>
                     <p style={{ fontSize: 13, color: '#64748b' }}>
-                      {reprocessMode === "all"
-                        ? "Run background removal on every photo in the current scope, including photos processed before."
-                        : reprocessMode === "unprocessed"
-                          ? "Run background removal on photos that have not been AI-processed yet."
-                        : "Re-run background removal on photos where parents skipped AI cleanup."}
+                      {selectedBatchClassLabel}: remove backgrounds, apply the selected plain colour, and automatically save each processed photo.
                     </p>
                   </div>
                   <button onClick={() => setReprocessOpen(false)} style={{ width: 32, height: 32, borderRadius: 8, border: 'none', background: '#f1f5f9', cursor: 'pointer', fontSize: 16 }}>✕</button>
@@ -3328,64 +3962,26 @@ export default function SchoolDetailPage() {
                         <div style={{ padding: 16, background: '#eef2ff', borderRadius: 12, textAlign: 'center' }}>
                           <div style={{ fontSize: 28, fontWeight: 700, color: '#4f46e5' }}>{reprocessInfo.skippedCount}</div>
                           <div style={{ fontSize: 12, color: '#6366f1' }}>
-                            {reprocessMode === "all" ? "Total photos" : reprocessMode === "unprocessed" ? "Unprocessed photos" : "Skipped photos"}
-                            {classFilter ? ' (filtered class)' : ''}
+                            Photos in {selectedBatchClassLabel}
                           </div>
                         </div>
-                        <div style={{ padding: 16, background: reprocessInfo.rembgAvailable ? '#f0fdf4' : '#fef2f2', borderRadius: 12, textAlign: 'center' }}>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: reprocessInfo.rembgAvailable ? '#16a34a' : '#dc2626' }}>
-                            {reprocessInfo.rembgAvailable ? 'Server ready' : 'Server not configured'}
+                        <div style={{ padding: 16, background: '#f0fdf4', borderRadius: 12, textAlign: 'center' }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: '#16a34a' }}>
+                            Local AI ready
                           </div>
-                          <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>REMBG_SERVICE_URL</div>
+                          <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>Runs on this PC · ISNet model</div>
                         </div>
                       </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 12, alignItems: 'center', padding: 12, background: '#f8fafc', borderRadius: 10, border: '1px solid #e2e8f0', marginBottom: 16 }}>
-                        <input
-                          type="color"
-                          value={reprocessBgColor}
-                          onChange={(e) => setReprocessBgColor(e.target.value.toUpperCase())}
-                          style={{ width: 44, height: 36, border: '1px solid #cbd5e1', borderRadius: 8, background: 'white', padding: 2 }}
-                        />
-                        <div>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>Background color after removal</div>
-                          <input
-                            value={reprocessBgColor}
-                            onChange={(e) => setReprocessBgColor(e.target.value.toUpperCase())}
-                            placeholder="#FFFFFF"
-                            maxLength={7}
-                            style={{ marginTop: 6, width: 110, padding: '7px 9px', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: 12, fontWeight: 600, color: '#0f172a' }}
-                          />
-                        </div>
-                      </div>
-                      {!reprocessInfo.rembgAvailable && (
-                        <div style={{ padding: 12, background: '#fff7ed', borderRadius: 10, border: '1px solid #fed7aa', fontSize: 12, color: '#9a3412', marginBottom: 16, lineHeight: 1.6 }}>
-                          Start the self-hosted rembg container (`docker/rembg`) and set <code>REMBG_SERVICE_URL</code> in your environment.
-                        </div>
-                      )}
-                      {reprocessInfo.activeJob && (
-                        <div style={{ padding: 12, background: '#f0f9ff', borderRadius: 10, border: '1px solid #bae6fd', fontSize: 12, color: '#0369a1', marginBottom: 16 }}>
-                          Job <strong>{reprocessInfo.activeJob.status}</strong>
-                          {reprocessInfo.activeJob.result?.processed != null && (
-                            <> — {reprocessInfo.activeJob.result.processed} processed, {reprocessInfo.activeJob.result.failed || 0} failed</>
-                          )}
-                        </div>
-                      )}
-                      <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-                        <button className="btn btn-outline" onClick={() => fetchReprocessInfo(reprocessMode)} disabled={reprocessLoading}>Refresh</button>
-                        <button
-                          className="btn btn-primary"
-                          onClick={() => startReprocessJob()}
-                          disabled={
-                            reprocessStarting ||
-                            !reprocessInfo.rembgAvailable ||
-                            reprocessInfo.skippedCount === 0 ||
-                            !!reprocessInfo.activeJob
-                          }
-                          style={{ background: 'linear-gradient(135deg, #6366f1, #4f46e5)' }}
-                        >
-                          {reprocessStarting ? 'Starting…' : reprocessMode === "skipped" ? `Reprocess ${reprocessInfo.skippedCount} Photos` : `Process ${reprocessInfo.skippedCount} Photos`}
-                        </button>
-                      </div>
+                      <ManufacturerBgBatchProcessor
+                        schoolId={schoolId}
+                        students={reprocessInfo.students}
+                        bgColor={reprocessBgColor}
+                        onBgColorChange={setReprocessBgColor}
+                        onBgColorCommit={persistPhotoBgColor}
+                        onPhotoSaved={updateStudentPhotoInState}
+                        onComplete={handleBatchBgComplete}
+                        onClose={() => setReprocessOpen(false)}
+                      />
                     </>
                   ) : (
                     <div style={{ textAlign: 'center', padding: 24, color: '#94a3b8' }}>Could not load reprocess info.</div>
@@ -3808,9 +4404,12 @@ export default function SchoolDetailPage() {
         const studentClass = classes.find(c => c.id === selectedStudent.classId)
         const studentTemplate = resolveStudentTemplate(studentClass, selectedStudent, templateData)
 
+        const detailPhotoUrl = getStudentPhotoUrl(selectedStudent)
+        const detailPhotoCacheKey = studentPhotoCacheKey(selectedStudent)
+
         // Determine critical missing fields
         const missingItems: string[] = []
-        if (!selectedStudent.photoUrl) missingItems.push("Photo")
+        if (!studentHasPhoto(selectedStudent)) missingItems.push("Photo")
         if (!studentName) missingItems.push("Student Name")
 
         return (
@@ -3838,34 +4437,21 @@ export default function SchoolDetailPage() {
                 {/* Photo — clickable to upload */}
                 <div style={{ position: 'relative' }}>
                   <div
-                    style={{ width: 100, height: 130, borderRadius: 12, overflow: 'hidden', border: selectedStudent.photoUrl ? '2px solid #e2e8f0' : '2px dashed #fca5a5', background: selectedStudent.photoUrl ? '#f8fafc' : '#fef2f2', cursor: 'pointer' }}
+                    style={{ width: 120, height: 156, borderRadius: 12, overflow: 'hidden', border: detailPhotoUrl ? '2px solid #e2e8f0' : '2px dashed #fca5a5', background: detailPhotoUrl ? '#f8fafc' : '#fef2f2', cursor: 'pointer' }}
                     onClick={() => {
                       const input = document.createElement('input')
                       input.type = 'file'
                       input.accept = 'image/*'
-                      input.onchange = async (e: any) => {
+                      input.onchange = (e: any) => {
                         const file = e.target.files?.[0]
                         if (!file) return
-                        const fd = new FormData()
-                        fd.append("photo", file)
-                        fd.append("studentId", selectedStudent.id)
-                        try {
-                          const res = await fetch(`/api/schools/${schoolId}/students/assign-photo`, { method: "POST", body: fd })
-                          const data = await res.json()
-                          if (data.success) {
-                            toast.success("Photo updated!")
-                            setSelectedStudent({ ...selectedStudent, photoUrl: data.data.photoUrl })
-                            fetchStudents(studentPage)
-                          } else {
-                            toast.error(data.error || "Upload failed")
-                          }
-                        } catch { toast.error("Upload failed") }
+                        pickPhotoForCrop(file, "detail", selectedStudent.id)
                       }
                       input.click()
                     }}
                   >
-                    {selectedStudent.photoUrl ? (
-                      <img src={selectedStudent.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    {detailPhotoUrl ? (
+                      <img key={detailPhotoCacheKey} src={detailPhotoUrl} alt={studentName || "Student photo"} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     ) : (
                       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 4, color: '#ef4444' }}>
                         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -3933,10 +4519,11 @@ export default function SchoolDetailPage() {
                     <div>
                       <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>FRONT SIDE</div>
                       <JpgCardPreview
+                        key={detailPhotoCacheKey}
                         templateImageUrl={studentTemplate.templateImageUrl}
                         fieldMappings={studentTemplate.fieldMappings as any[]}
                         formData={selectedStudent.formData as Record<string, string>}
-                        studentPhoto={selectedStudent.photoUrl}
+                        studentPhoto={detailPhotoUrl}
                         flagImageUrl={resolveFlagImageUrl(selectedStudent.formData as Record<string, string>, flagImages)}
                         scale={1}
                         watermark="PREVIEW"
@@ -3948,10 +4535,11 @@ export default function SchoolDetailPage() {
                       <div>
                         <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>BACK SIDE</div>
                         <JpgCardPreview
+                          key={`back-${detailPhotoCacheKey}`}
                           templateImageUrl={studentTemplate.backTemplateImageUrl}
                           fieldMappings={studentTemplate.backFieldMappings as any[] || []}
                           formData={selectedStudent.formData as Record<string, string>}
-                          studentPhoto={selectedStudent.photoUrl}
+                          studentPhoto={detailPhotoUrl}
                           flagImageUrl={resolveFlagImageUrl(selectedStudent.formData as Record<string, string>, flagImages)}
                           scale={1}
                           watermark="PREVIEW"
@@ -3972,11 +4560,12 @@ export default function SchoolDetailPage() {
                     <div>
                       <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 8, textAlign: 'center' }}>FRONT</div>
                       <IDCardPreview
+                        key={detailPhotoCacheKey}
                         layout={studentTemplate.frontLayout || []}
                         widthMm={studentTemplate.cardWidthMm || 85.6}
                         heightMm={studentTemplate.cardHeightMm || 54.0}
                         formData={selectedStudent.formData as Record<string, string>}
-                        studentPhoto={selectedStudent.photoUrl}
+                        studentPhoto={detailPhotoUrl}
                         schoolLogo={school?.logoUrl || undefined}
                         serialNumber={selectedStudent.serialNumber}
                         scale={3.5}
@@ -4005,11 +4594,8 @@ export default function SchoolDetailPage() {
                   <button
                     className="btn btn-outline"
                     style={{ fontSize: 13, borderColor: '#8b5cf6', color: '#7c3aed' }}
-                    disabled={reprocessStarting || !selectedStudent.photoPath}
-                    onClick={async () => {
-                      setReprocessMode("all")
-                      await startReprocessJob([selectedStudent.id])
-                    }}
+                    disabled={!studentHasPhoto(selectedStudent)}
+                    onClick={() => openBgEditorForStudent(selectedStudent)}
                   >
                     AI Background
                   </button>
@@ -4051,6 +4637,40 @@ export default function SchoolDetailPage() {
         </div>
         )
       })()}
+
+      {photoCrop && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200, padding: 16 }} onClick={closePhotoCrop}>
+          <div style={{ background: 'white', borderRadius: 16, maxWidth: 560, width: '100%', maxHeight: '92vh', overflow: 'auto', padding: 20, boxShadow: '0 25px 50px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>Crop Photo</h3>
+            <p style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>Full photo is shown below — zoom/pan, then crop for the ID card.</p>
+            <PhotoCropper
+              photoUrl={photoCrop.url}
+              aspectRatio={3 / 4}
+              onCropped={handlePhotoCropped}
+              onCancel={closePhotoCrop}
+            />
+          </div>
+        </div>
+      )}
+
+      {bgEditorStudent && (
+        <ManufacturerPhotoBgEditor
+          schoolId={schoolId}
+          studentId={bgEditorStudent.id}
+          studentName={bgEditorStudent.name}
+          photoUrl={bgEditorStudent.photoUrl}
+          defaultBgColor={bgEditorStudent.defaultBgColor}
+          onBgColorCommit={persistPhotoBgColor}
+          onSaved={(newPhotoUrl, newPhotoPath, savedBgColor, updatedAt) => {
+            toast.success("Photo background updated!")
+            if (savedBgColor) setReprocessBgColor(savedBgColor)
+            updateStudentPhotoInState(bgEditorStudent.id, newPhotoUrl, newPhotoPath, updatedAt)
+            setBgEditorStudent(null)
+            fetchStudents(studentPage)
+          }}
+          onClose={() => setBgEditorStudent(null)}
+        />
+      )}
     </>
   )
 }

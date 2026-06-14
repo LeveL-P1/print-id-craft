@@ -6,6 +6,7 @@ import {
   resolveDisplayFieldValue,
   FIELD_GROUPS,
   formatDateValue,
+  getCardTextWrapMode,
 } from "@/lib/field-resolver"
 import { PrintDialog, type PrintConfig } from "./IDMakerDialogs"
 import { generateDirectPdf } from "@/lib/pdf-layout"
@@ -451,7 +452,7 @@ async function renderIdCard(
         const fStyle = field.fontStyle || "normal"
         const { lines, fontSize, lineHeight: baseLineHeight } = fitTextToBoxCanvas(
           ctx, value, fw, fh, fontFamily, fontWeight,
-          printW, field.fontSize, field.textWrap || "wrap", fStyle,
+          printW, field.fontSize, getCardTextWrapMode(field.fieldKey, field.textWrap), fStyle,
           cardWidthMm || 85.6,
         )
         // Honour the user's lineHeight multiplier if set (default 1.2 for multiline, ~1.15 otherwise).
@@ -578,7 +579,7 @@ async function renderIdCardSvg(
                    field.fieldKey === "serialNumber" ? student.serialNumber : "")
       const value = String(val || "").trim()
       if (value) {
-        const wrapMode = ((field as any).textWrap || "wrap") as "nowrap" | "wrap" | "multiline"
+        const wrapMode = getCardTextWrapMode(field.fieldKey, (field as any).textWrap)
         const textAnchor = field.textAlign === "center" ? "middle" : field.textAlign === "right" ? "end" : "start"
         const padding = 4
         const textX = field.textAlign === "center" ? fx + fw / 2 : field.textAlign === "right" ? fx + fw - padding : fx + padding

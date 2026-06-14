@@ -3,6 +3,8 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { storageUpload, storagePublicUrl, ensureBucket } from "@/lib/storage"
+import { PHOTO_BG_STATUS, type PhotoBgStatus } from "@/lib/photo-bg-status"
+import { withStudentPhotoUrl } from "@/lib/student-photo-url"
 
 const BUCKET = "student-photos"
 
@@ -18,6 +20,9 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     const formData = await req.formData()
     const studentId = formData.get("studentId") as string
     const photo = formData.get("photo") as File | null
+    const photoBgStatusRaw = (formData.get("photoBgStatus") as string) || ""
+    const photoBgStatus: PhotoBgStatus | undefined =
+      photoBgStatusRaw === PHOTO_BG_STATUS.REPROCESSED ? PHOTO_BG_STATUS.REPROCESSED : undefined
 
     if (!studentId) {
       return NextResponse.json({ error: "Student ID is required" }, { status: 400 })
@@ -57,21 +62,35 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     const publicUrl = storagePublicUrl(BUCKET, filePath)
 
     // Update student record
-    await prisma.student.update({
+    const updated = await prisma.student.update({
       where: { id: student.id },
-      data: { photoUrl: publicUrl, photoPath: filePath },
+      data: {
+        photoUrl: publicUrl,
+        photoPath: filePath,
+        ...(photoBgStatus ? { photoBgStatus } : {}),
+      },
+      select: {
+        id: true,
+        photoPath: true,
+        photoUrl: true,
+        updatedAt: true,
+        serialNumber: true,
+        formData: true,
+      },
     })
 
-    const fd = student.formData as Record<string, string>
+    const fd = updated.formData as Record<string, string>
+    const mediaUrl = withStudentPhotoUrl(updated).photoUrl
 
     return NextResponse.json({
       success: true,
       data: {
-        studentId: student.id,
+        studentId: updated.id,
         studentName: fd?.fullName || fd?.["Full Name"] || fd?.["Student Name"] || "Unknown",
-        serialNumber: student.serialNumber,
-        photoUrl: publicUrl,
-        photoPath: filePath,
+        serialNumber: updated.serialNumber,
+        photoUrl: mediaUrl,
+        photoPath: updated.photoPath,
+        updatedAt: updated.updatedAt.toISOString(),
       },
     })
   } catch (error: any) {

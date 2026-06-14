@@ -3,6 +3,7 @@ import { useRef, useEffect, useState, useCallback, memo } from "react"
 import {
   resolveDisplayFieldValue as resolveDisplayFieldValueShared,
   resolveFieldValue as resolveFieldValueShared,
+  getCardTextWrapMode,
   formatDateValue,
 } from "@/lib/field-resolver"
 
@@ -105,7 +106,8 @@ async function loadImage(url: string): Promise<HTMLImageElement> {
     return cached
   }
   const img = new Image()
-  img.crossOrigin = "anonymous"
+  const isSameOrigin = url.startsWith("/") || url.startsWith(window.location.origin)
+  if (!isSameOrigin) img.crossOrigin = "anonymous"
   await new Promise<void>((resolve, reject) => {
     img.onload = () => resolve()
     img.onerror = () => reject(new Error("Failed to load: " + url))
@@ -129,6 +131,7 @@ const FIELD_GROUPS: Record<string, string[]> = {
   mob_father: ["mobfather", "mob_father", "fatherphone", "father", "fathername", "phone"],
   phone: ["phone", "mobile", "contact", "fatherphone", "mobfather"],
   class: ["class", "classsection", "class_section"],
+  division: ["division", "div", "section"],
   branch: ["branch"],
   rollno: ["rollno", "roll", "srno", "no", "admissionno"],
   address: ["address", "addr"],
@@ -411,7 +414,7 @@ export default function JpgCardPreview({
             const fStyle = field.fontStyle || "normal"
             const { lines, fontSize, lineHeight: baseLineHeight } = fitTextToBox(
               ctx, String(value), fw, fh, fontFamily, fontWeight, scale,
-              w, field.fontSize, field.textWrap || "wrap", fStyle,
+              w, field.fontSize, getCardTextWrapMode(field.fieldKey, field.textWrap), fStyle,
               cardWidthMm || 85.6,
             )
             // Honour the user's lineHeight multiplier if set.
@@ -599,7 +602,7 @@ export async function generateJpgCard(
         const fontWeight = field.fontWeight || "normal"
         const { lines, fontSize, lineHeight } = fitTextToBox(
           ctx, String(value), fw, fh, fontFamily, fontWeight, outputScale,
-          w, field.fontSize, field.textWrap || "wrap",
+          w, field.fontSize, getCardTextWrapMode(field.fieldKey, field.textWrap),
           "normal",
           cardWidthMm || 85.6,
         )

@@ -12,14 +12,18 @@ const supabaseImageHost = (() => {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Disable SWC Minify due to SyntaxError in onnxruntime-web pre-compiled code
-  swcMinify: false,
   // Performance: enable React strict mode (catches bugs early)
   reactStrictMode: true,
   // Performance: compress responses
   compress: true,
   // Security: power-hide
   poweredByHeader: false,
+  // Next 16 uses Turbopack by default; this app relies on custom webpack
+  // (WASM/ONNX). Keep webpack for production builds on Vercel.
+  turbopack: {},
+  allowedDevOrigins: ['127.0.0.1', 'localhost'],
+  // Externalize heavy WASM packages from the server bundle.
+  serverExternalPackages: ['@imgly/background-removal'],
   // Performance: optimize images
   images: {
     remotePatterns: supabaseImageHost
@@ -39,7 +43,6 @@ const nextConfig = {
       '@supabase/supabase-js',
       'zod',
     ],
-    serverComponentsExternalPackages: ['@imgly/background-removal'],
     // Cache router segments for faster page transitions
     staleTimes: {
       dynamic: 30, // Cache dynamic pages for 30s
@@ -61,9 +64,23 @@ const nextConfig = {
         ],
       },
       // Enable Cross-Origin Isolation for WASM SharedArrayBuffer (ONNX runtime)
-      // Only on submit pages where background removal is used
+      // On submit pages and manufacturer dashboard where AI background removal runs
       {
         source: '/submit/:path*',
+        headers: [
+          { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+          { key: 'Cross-Origin-Embedder-Policy', value: 'credentialless' },
+        ],
+      },
+      {
+        source: '/schools/:path*',
+        headers: [
+          { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+          { key: 'Cross-Origin-Embedder-Policy', value: 'credentialless' },
+        ],
+      },
+      {
+        source: '/dashboard/:path*',
         headers: [
           { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
           { key: 'Cross-Origin-Embedder-Policy', value: 'credentialless' },

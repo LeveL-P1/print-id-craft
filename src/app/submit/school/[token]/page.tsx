@@ -130,12 +130,12 @@ export default function SchoolSubmitPage() {
             </div>
 
             <p style={{ fontSize: 13, color: "#475569", marginBottom: 18, lineHeight: 1.55 }}>
-              Welcome! Please select your child&apos;s class to begin the ID card
-              registration form.
+              Welcome! Please select your child&apos;s section to begin the ID card
+              registration form. You will choose class and division on the next screen.
             </p>
 
             <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 6 }}>
-              Select Class <span style={{ color: "#dc2626" }}>*</span>
+              Select Section <span style={{ color: "#dc2626" }}>*</span>
             </label>
             <select
               value={selectedClassId}
@@ -152,7 +152,7 @@ export default function SchoolSubmitPage() {
                 marginBottom: 16,
               }}
             >
-              <option value="">— Choose a class —</option>
+              <option value="">— Choose a section —</option>
               {config.classes.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}

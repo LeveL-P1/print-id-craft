@@ -11,6 +11,12 @@ import {
   isPrefixedAddressField,
 } from "@/lib/field-resolver"
 import { extractIdentityFields } from "@/lib/submit-fields"
+import {
+  DEFAULT_CLASS_OPTIONS,
+  DIVISIONS,
+  formatClassSection,
+  validateAndBuildClassFields,
+} from "@/lib/section-class"
 
 /* ══════════════════════════════════════════════════════════════
  * normalizeKey — key normalization
@@ -208,11 +214,11 @@ describe("resolveFieldValue", () => {
       )).toBe("Address: Flat 503, Pune")
     })
 
-    it("prints an ADD prefix while resolving imported Address columns", () => {
+    it("prints an Add prefix while resolving imported Address columns", () => {
       expect(resolveDisplayFieldValue(
         { Address: "Sai Shilp Society" },
         "addWithLabel"
-      )).toBe("ADD: Sai Shilp Society")
+      )).toBe("Add: Sai Shilp Society")
     })
 
     it("keeps raw address resolution unprefixed", () => {
@@ -319,6 +325,38 @@ describe("resolveFieldValue", () => {
       for (let i = 0; i < 100; i++) fd[`field_${i}`] = `value_${i}`
       fd["name"] = "Found"
       expect(resolveFieldValue(fd, "name")).toBe("Found")
+    })
+  })
+
+  describe("section class + division", () => {
+    it("formats VI - B for card placeholder", () => {
+      expect(formatClassSection("VI", "B")).toBe("VI - B")
+      expect(formatClassSection("V", "A")).toBe("V - A")
+    })
+
+    it("resolves combined class on card from stored fields", () => {
+      expect(resolveDisplayFieldValue({ classGrade: "V", division: "A" }, "class")).toBe("V - A")
+      expect(resolveDisplayFieldValue({ classGrade: "VI", division: "B" }, "class")).toBe("VI - B")
+    })
+
+    it("hides duplicate division when class is combined", () => {
+      expect(resolveDisplayFieldValue({ class: "V - A", division: "A" }, "division")).toBe("")
+      expect(resolveDisplayFieldValue({ classGrade: "VI", division: "B" }, "division")).toBe("")
+    })
+
+    it("builds combined class on submit", () => {
+      const result = validateAndBuildClassFields(
+        { classGrade: "VII", division: "A" },
+        "Secondary",
+        DEFAULT_CLASS_OPTIONS.SECONDARY
+      )
+      expect(result.ok).toBe(true)
+      if (result.ok) expect(result.class).toBe("VII - A")
+    })
+
+    it("includes divisions A through M", () => {
+      expect(DIVISIONS).toHaveLength(13)
+      expect(DIVISIONS[0]).toBe("A")
     })
   })
 })

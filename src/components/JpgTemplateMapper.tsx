@@ -7,6 +7,7 @@ import {
   type PhotoBorderConfig, type WrapTextConfig,
 } from "./IDMakerDialogs"
 import { resolveDisplayFieldValue, formatDateValue, isPrefixedAddressField } from "@/lib/field-resolver"
+import { isClassDivisionFieldKey } from "@/lib/section-class"
 
 const BG_COLOR_PRESETS = [
   // Neutrals
@@ -113,7 +114,7 @@ const DATE_FORMATS = [
 const FONT_FAMILIES = [
   // Sans-Serif
   "Arial", "Arial Narrow", "Helvetica", "Verdana", "Tahoma", "Trebuchet MS",
-  "Calibri", "Segoe UI", "Lucida Sans", "Franklin Gothic Medium",
+  "Calibri", "Segoe UI", "Lucida Sans", "Franklin Gothic Medium", "Century Gothic",
   // Condensed / Narrow — used when columns are tight (parents' addresses,
   // long names). Combine with fontWeight=bold to get "Narrow Bold".
   "Roboto Condensed", "Oswald", "Open Sans Condensed", "Barlow Condensed",
@@ -136,7 +137,9 @@ const SAMPLE_DATA: Record<string, string> = {
   name: "Avneesh Abhishek Awachat",
   fullName: "Avneesh Abhishek Awachat",
   Student_Name: "Avneesh Abhishek Awachat",
-  class: "Playgroup-Sparkling Starfish(B1)",
+  class: "VI - A",
+  classSection: "VI - A",
+  classDivision: "VI - A",
   branch: "Bibwewadi",
   father: "9650319700",
   mother: "8850257336",
@@ -153,7 +156,7 @@ const SAMPLE_DATA: Record<string, string> = {
   bloodGroup: "B+",
   address: "Flat No. 503, A-Wing, Sai Shilp Society, Pune",
   addressWithLabel: "Address: Flat No. 503, A-Wing, Sai Shilp Society, Pune",
-  addWithLabel: "ADD: Flat No. 503, A-Wing, Sai Shilp Society, Pune",
+  addWithLabel: "Add: Flat No. 503, A-Wing, Sai Shilp Society, Pune",
   admissionNo: "ADM-2025-001",
   photoId: "BB25035",
   serialNumber: "PLAY-B1-0001",
@@ -1574,6 +1577,7 @@ export default function JpgTemplateMapper({
             {/* Field overlays */}
             {mappings.map((m) => {
               const isSelected = m.id === selectedId
+              const isClassDivField = isClassDivisionFieldKey(m.fieldKey)
               // Resolve preview value with this priority:
               //   1. Real student data from the current school (passed via
               //      previewStudent — uses the shared field-resolver so
@@ -1609,7 +1613,7 @@ export default function JpgTemplateMapper({
                       : showPreview
                       ? "none"
                       : `2px ${isSelected ? "solid" : "dashed"} ${
-                          isSelected ? "#3b82f6" : m.type === "flag" ? "#f59e0b" : "rgba(255,255,255,0.6)"
+                          isSelected ? "#3b82f6" : isClassDivField ? "#eab308" : m.type === "flag" ? "#f59e0b" : "rgba(255,255,255,0.6)"
                         }`,
                     borderRadius: (m.type === "photo" || m.type === "flag")
                       ? `${m.photoBorderRadius || 0}px`
@@ -1618,6 +1622,8 @@ export default function JpgTemplateMapper({
                       ? showPreview ? "transparent" : "rgba(59, 130, 246, 0.15)"
                       : m.type === "flag"
                       ? showPreview ? "transparent" : "rgba(245, 158, 11, 0.15)"
+                      : isClassDivField
+                      ? showPreview ? "transparent" : "rgba(234, 179, 8, 0.15)"
                       : showPreview
                       ? "transparent"
                       : isSelected
@@ -1903,7 +1909,7 @@ export default function JpgTemplateMapper({
                 </button>
               </div>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 10, opacity: cardSizeLocked ? 0.6 : 1, pointerEvents: cardSizeLocked ? "none" : "auto" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, opacity: cardSizeLocked ? 0.6 : 1 }}>
                 {/* Card Size Preset */}
                 <div>
                   <label style={{ fontSize: 11, fontWeight: 600, color: "#3b82f6", marginBottom: 4, display: "block" }}>
@@ -2016,6 +2022,8 @@ export default function JpgTemplateMapper({
                     {(["landscape", "portrait"] as const).map((orient) => (
                       <button
                         key={orient}
+                        type="button"
+                        disabled={cardSizeLocked}
                         onClick={() => handleOrientationChange(orient)}
                         style={{
                           flex: 1,
@@ -2026,7 +2034,7 @@ export default function JpgTemplateMapper({
                           color: cardOrientation === orient ? "#1e40af" : "#6b7280",
                           fontSize: 11,
                           fontWeight: 600,
-                          cursor: "pointer",
+                          cursor: cardSizeLocked ? "not-allowed" : "pointer",
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
@@ -2045,7 +2053,9 @@ export default function JpgTemplateMapper({
                     ))}
                   </div>
                 </div>
+              </div>
 
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
                 {/* Print Sides */}
                 <div>
                   <label style={{ fontSize: 11, fontWeight: 600, color: "#3b82f6", marginBottom: 4, display: "block" }}>
@@ -3367,6 +3377,30 @@ export default function JpgTemplateMapper({
               </button>
             )}
 
+            {/* Class - Division button (single combined placeholder) */}
+            {!mappings.find((m) => isClassDivisionFieldKey(m.fieldKey)) && (
+              <button
+                onClick={() => addFieldMapping("class", "Class - Division")}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  border: "1.5px dashed #eab308",
+                  borderRadius: 8,
+                  background: "#fefce8",
+                  color: "#a16207",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  marginBottom: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                📚 Add Class - Division Placeholder
+              </button>
+            )}
+
             {/* Flag button */}
             {!mappings.find((m) => m.type === "flag") && (
               <button
@@ -3395,7 +3429,6 @@ export default function JpgTemplateMapper({
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {[
                 { key: "name", label: "Student Name" },
-                { key: "class", label: "Class-Section" },
                 { key: "branch", label: "Branch" },
                 { key: "rollNo", label: "Roll No. / NO" },
                 { key: "father", label: "Father's Mobile No." },
@@ -3406,7 +3439,7 @@ export default function JpgTemplateMapper({
                 { key: "phone", label: "Phone" },
                 { key: "address", label: "Address" },
                 { key: "addressWithLabel", label: "Address:", prefix: true },
-                { key: "addWithLabel", label: "ADD:", prefix: true },
+                { key: "addWithLabel", label: "Add:", prefix: true },
                 { key: "dateOfBirth", label: "Date of Birth" },
                 { key: "bloodGroup", label: "Blood Group" },
                 { key: "admissionNo", label: "Admission No." },
@@ -3765,14 +3798,14 @@ export default function JpgTemplateMapper({
         <FontDialog
           initial={{
             fontFamily: selectedMapping.fontFamily || "Arial",
-            fontStyle: selectedMapping.fontStyle === "italic" ? (selectedMapping.fontWeight === "bold" ? "Bold Italic" : "Italic") : (selectedMapping.fontWeight === "bold" ? (/(narrow|condensed)/i.test(selectedMapping.fontFamily || "") ? "Narrow Bold" : "Bold") : "Regular"),
+            fontStyle: selectedMapping.fontStyle === "italic" ? (selectedMapping.fontWeight === "bold" ? "Bold Italic" : "Italic") : (selectedMapping.fontWeight === "bold" ? (/(narrow|condensed|century gothic)/i.test(selectedMapping.fontFamily || "") ? "Narrow Bold" : "Bold") : "Regular"),
             fontSize: selectedMapping.fontSize,
             strikeout: selectedMapping.textDecoration === "line-through",
             underline: selectedMapping.textDecoration === "underline",
           }}
           onChange={(cfg: FontConfig) => {
             const isNarrowBold = cfg.fontStyle.toLowerCase().includes("narrow")
-            const nextFontFamily = isNarrowBold && !/(narrow|condensed)/i.test(cfg.fontFamily) ? "Arial Narrow" : cfg.fontFamily
+            const nextFontFamily = isNarrowBold && !/(narrow|condensed|century gothic)/i.test(cfg.fontFamily) ? "Arial Narrow" : cfg.fontFamily
             updateMapping(selectedMapping.id, {
               fontFamily: nextFontFamily,
               fontWeight: cfg.fontStyle.toLowerCase().includes("bold") ? "bold" : "normal",

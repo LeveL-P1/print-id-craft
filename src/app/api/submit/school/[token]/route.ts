@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { buildFormFields, type FormField } from "@/lib/submit-fields"
 import { migrateTemplateToPt } from "@/lib/font-size-units"
 import { getDefaultTemplate } from "@/lib/template-resolver"
+import { DIVISIONS, parseClassOptions, resolveEffectiveClassOptions } from "@/lib/section-class"
 
 /**
  * Public GET — resolves a school-wide registration token to the school
@@ -19,7 +20,7 @@ export async function GET(req: Request, props: { params: Promise<{ token: string
         classes: {
           where: { isActive: true },
           orderBy: { name: "asc" },
-          select: { id: true, name: true, expiresAt: true },
+          select: { id: true, name: true, expiresAt: true, classOptions: true, sectionType: true },
         },
       },
     })
@@ -62,7 +63,7 @@ export async function GET(req: Request, props: { params: Promise<{ token: string
     const rawFieldConf = (template?.fieldConfig || []) as any[]
 
     // Same skip rules as the per-class endpoint — keeps behaviour consistent.
-    const FORM_SKIP_KEYS = new Set(["class", "classSection", "photoUrl", "srNo", "photoId"])
+    const FORM_SKIP_KEYS = new Set(["class", "classSection", "classGrade", "division", "photoUrl", "srNo", "photoId"])
     const FORM_SKIP_LABELS = new Set([
       "class", "class-section", "photo url", "photourl",
       "no", "no.", "photo no", "photo no.", "photo id", "photo number",
@@ -138,14 +139,22 @@ export async function GET(req: Request, props: { params: Promise<{ token: string
         schoolLogo: school.logoUrl,
         schoolId: school.id,
         // Class dropdown — parent picks one before submitting.
-        classes: school.classes.map(c => ({
-          id: c.id,
-          name: c.name,
-          // Drop classes whose individual expiry has passed even if the
-          // school link itself is still active.
-          expired: !!(c.expiresAt && new Date() > c.expiresAt),
-        })).filter(c => !c.expired)
-          .map(({ id, name }) => ({ id, name })),
+        classes: school.classes.map(c => {
+          const classOptions = resolveEffectiveClassOptions(c.classOptions, c.sectionType, c.name)
+          return {
+            id: c.id,
+            name: c.name,
+            classOptions,
+            usesClassPicker: classOptions.length > 0,
+            expired: !!(c.expiresAt && new Date() > c.expiresAt),
+          }
+        }).filter(c => !c.expired)
+          .map(({ id, name, classOptions, usesClassPicker }) => ({
+            id,
+            name,
+            classOptions,
+            usesClassPicker,
+          })),
         fieldConfig: resolvedFieldConfig,
         frontLayout: template?.frontLayout || [],
         backLayout: template?.backLayout || [],

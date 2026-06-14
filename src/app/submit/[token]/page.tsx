@@ -8,11 +8,43 @@ import {
   resolveFieldValue,
   type FieldRole,
 } from "@/lib/field-resolver"
-import { PHOTO_BG_STATUS, type PhotoBgStatus } from "@/lib/photo-bg-status"
-import { prepareStudentPhotoForUpload } from "@/lib/client-photo-upload"
+import { formatClassSection } from "@/lib/section-class"
+import { uploadStudentPhotoResilient } from "@/lib/client-photo-upload"
+
+const SUPPORT_PHONE_DISPLAY = "+91 98818 77607"
+const SUPPORT_PHONE_E164 = "+919881877607"
+const SUPPORT_PHONE_WA = "919881877607"
+
+function buildWhatsAppUrl(message: string) {
+  return `https://wa.me/${SUPPORT_PHONE_WA}?text=${encodeURIComponent(message)}`
+}
+
+function buildSupportWhatsAppMessage(parts: {
+  schoolName?: string
+  className?: string
+  studentName?: string
+  serialNumber?: string
+  reason?: "already_submitted" | "duplicate_blocked"
+}) {
+  const school = parts.schoolName || "the school"
+  const classPart = parts.className ? ` (${parts.className})` : ""
+  const namePart = parts.studentName ? ` for ${parts.studentName}` : ""
+  if (parts.reason === "already_submitted") {
+    return (
+      `Hello, I need help with the ID card form for ${school}${classPart}${namePart}.` +
+      (parts.serialNumber ? ` Registration ID: ${parts.serialNumber}.` : " ") +
+      " Please help."
+    )
+  }
+  return (
+    `Hello, I am trying to submit the ID card form for ${school}${classPart},` +
+    ` but I'm getting a "details already registered" message.` +
+    (parts.studentName ? ` My name is ${parts.studentName}.` : "") +
+    " Please help."
+  )
+}
 
 const JpgCardPreview = dynamic(() => import("@/components/JpgCardPreview"), { ssr: false })
-const PhotoBgProcessor = dynamic(() => import("@/components/PhotoBgProcessor"), { ssr: false })
 const PhotoCropper = dynamic(() => import("@/components/PhotoCropper"), { ssr: false })
 
 type FieldConfig = { key: string; label: string; type: string; required: boolean; role?: string }
@@ -25,8 +57,12 @@ type FormConfig = {
   schoolName: string
   schoolLogo: string | null
   className: string
+  sectionName?: string
   schoolId: string
   classId: string
+  usesClassPicker?: boolean
+  classOptions?: string[]
+  divisions?: string[]
   fieldConfig: FieldConfig[]
   frontLayout: TemplateElement[]
   backLayout: TemplateElement[]
@@ -46,6 +82,9 @@ type FormConfig = {
 
 const fieldRole = (field: FieldConfig): FieldRole =>
   getFieldRole(field.key, field.label, field.role)
+
+const getDisplayClass = (cfg: FormConfig | null, fd: Record<string, string>) =>
+  cfg?.usesClassPicker ? (fd.class || "—") : (cfg?.className || "")
 
 const formatSubmittedDate = (iso: string) => {
   try {
@@ -101,46 +140,6 @@ const wordCount = (s: string): number =>
   (s || "").trim().split(/\s+/).filter(Boolean).length
 
 const ADDRESS_MIN_WORDS = 5
-const PHOTO_UPLOAD_TIMEOUT_MS = 45_000
-const PHOTO_UPLOAD_RETRY_TIMEOUT_MS = 60_000
-
-async function parseApiError(res: Response, fallback: string) {
-  const contentType = res.headers.get("content-type") || ""
-  if (contentType.includes("application/json")) {
-    const data = await res.json().catch(() => null)
-    return data?.error || data?.detail || fallback
-  }
-
-  const text = await res.text().catch(() => "")
-  if (text && !text.trim().startsWith("<!DOCTYPE")) {
-    return text.slice(0, 180)
-  }
-  return fallback
-}
-
-async function uploadFormWithTimeout(formData: FormData, timeoutMs = PHOTO_UPLOAD_TIMEOUT_MS) {
-  const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    return await fetch("/api/upload", {
-      method: "POST",
-      body: formData,
-      signal: controller.signal,
-    })
-  } finally {
-    window.clearTimeout(timeout)
-  }
-}
-
-const isAbortError = (error: unknown) =>
-  error instanceof DOMException && error.name === "AbortError"
-
-function getUploadNetworkErrorMessage(error: unknown) {
-  if (isAbortError(error)) {
-    return "Photo upload is taking too long. Please try again on a stronger network."
-  }
-  return error instanceof Error ? error.message : "Photo upload failed. Please check your internet and try again."
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SampleReferencePhoto — shows a clear illustration of "what a good ID photo
@@ -271,7 +270,7 @@ const IDCardPreview = ({
     Object.entries(formData).forEach(([key, value]) => {
       resolved = resolved.replace(new RegExp(`{{${key}}}`, 'g'), value || "")
     })
-    resolved = resolved.replace(/{{class}}/g, config?.className || "")
+    resolved = resolved.replace(/{{class}}/g, formData.class || config?.className || "")
     resolved = resolved.replace(/{{serialNumber}}/g, "Pending...")
     return resolved
   }
@@ -314,7 +313,7 @@ export default function SubmitPage() {
   const params = useParams()
   const token = params.token as string
 
-  const [step, setStep] = useState<"loading" | "error" | "form" | "photo" | "crop" | "bgprocess" | "review" | "success">("loading")
+  const [step, setStep] = useState<"loading" | "error" | "form" | "photo" | "crop" | "review" | "success">("loading")
   const [errorMsg, setErrorMsg] = useState("")
   const [config, setConfig] = useState<FormConfig | null>(null)
   const [formData, setFormData] = useState<Record<string, string>>({})
@@ -339,8 +338,7 @@ export default function SubmitPage() {
     submittedAt: string
   } | null>(null)
   const [photoVerified, setPhotoVerified] = useState(false)
-  const [bgSkippable, setBgSkippable] = useState(false)
-  const [photoBgStatus, setPhotoBgStatus] = useState<PhotoBgStatus>("")
+  const [photoUploadWarning, setPhotoUploadWarning] = useState("")
 
   // Visible 10-digit text for each mobile-intent field, kept separate from
   // formData so we never round-trip the "+91 " prefix through the input value
@@ -365,8 +363,7 @@ export default function SubmitPage() {
 
   const checkSubmissionStatus = useCallback(async (fd: Record<string, string>) => {
     const name = resolveFieldValue(fd, "name")
-    const father = resolveFieldValue(fd, "father")
-    if (!name || !father) return
+    if (!name || name.trim().length < 3) return
     try {
       const res = await fetch(
         `/api/submit/${token}?statusCheck=1&formData=${encodeURIComponent(JSON.stringify(fd))}`
@@ -392,7 +389,6 @@ export default function SubmitPage() {
       if (!raw) { setDraftRestored(true); return }
       const draft = JSON.parse(raw) as {
         formData?: Record<string, string>
-        bgSkippable?: boolean
         photoVerified?: boolean
         step?: typeof step
         savedAt?: number
@@ -405,7 +401,6 @@ export default function SubmitPage() {
         return
       }
       if (draft.formData) setFormData(draft.formData)
-      if (draft.bgSkippable) setBgSkippable(true)
       if (draft.photoVerified) setPhotoVerified(true)
       const hasAnyData =
         !!(draft.formData && Object.keys(draft.formData).some(k => k !== "class" && (draft.formData?.[k] || "").trim() !== ""))
@@ -431,7 +426,6 @@ export default function SubmitPage() {
     if (step === "loading" || step === "error" || step === "success") return
     const draft = {
       formData,
-      bgSkippable,
       photoVerified,
       step,
       savedAt: Date.now(),
@@ -444,7 +438,7 @@ export default function SubmitPage() {
       } catch { /* give up silently — draft just won't survive this session */ }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formData, bgSkippable, photoVerified, step, draftRestored])
+  }, [formData, photoVerified, step, draftRestored])
 
   const clearDraft = () => {
     if (typeof window === "undefined") return
@@ -457,8 +451,8 @@ export default function SubmitPage() {
       .then(data => {
         if (data.success) {
           setConfig(data.data)
-          // Auto-populate class in formData so template preview always has it
-          if (data.data.className) {
+          // Legacy fixed-class links auto-fill class; section links use dropdowns.
+          if (data.data.className && !data.data.usesClassPicker) {
             setFormData(prev => ({ ...prev, class: data.data.className }))
           }
           // Auto-populate fixed branch if configured
@@ -484,9 +478,9 @@ export default function SubmitPage() {
   useEffect(() => {
     if (!config || step === "loading" || step === "error" || step === "success") return
     const name = resolveFieldValue(formData, "name")
-    const father = resolveFieldValue(formData, "father")
-    if (!name || !father) return
-    checkSubmissionStatus(formData)
+    if (!name || name.trim().length < 3) return
+    const timer = window.setTimeout(() => checkSubmissionStatus(formData), 450)
+    return () => window.clearTimeout(timer)
   }, [config, formData, step, checkSubmissionStatus])
 
   const handleFieldChange = (key: string, value: string) => {
@@ -494,6 +488,31 @@ export default function SubmitPage() {
   }
 
   // Note: PhotoVerifier now returns stable data URLs directly
+
+  const getPreviewBlockReason = () => {
+    if (!config) return "Form is not ready yet. Please try again."
+    if (config.usesClassPicker) {
+      if (!formData.classGrade?.trim()) return "Please select a class."
+      if (!formData.division?.trim()) return "Please select a division."
+    }
+    for (const f of config.fieldConfig) {
+      if (f.key === "class") continue
+      const value = (formData[f.key] || "").trim()
+      const role = fieldRole(f)
+      if (f.required && !value) return `Please fill in ${getCleanLabel(f.label)}.`
+      if (role === "address" && f.required && wordCount(value) < ADDRESS_MIN_WORDS) {
+        return `Please write the full address - at least ${ADDRESS_MIN_WORDS} words (house no, street, area, city, pincode).`
+      }
+      if (role === "mobile" && f.required && stripIndianPrefix(value).length !== 10) {
+        return "Mobile number must be exactly 10 digits (after +91)."
+      }
+      if (role === "branch" && f.required && value.length < 2) return "Please enter the branch name."
+    }
+    if (!photoFile || !photoPreview || !photoVerified) {
+      return "Please upload a clear student photo before preview."
+    }
+    return ""
+  }
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -503,6 +522,16 @@ export default function SubmitPage() {
     // submits with garbage data (a sub-5-word address, an incomplete mobile
     // number, etc.).
     if (config) {
+      if (config.usesClassPicker) {
+        if (!formData.classGrade?.trim()) {
+          setAlertMsg("Please select a class.")
+          return
+        }
+        if (!formData.division?.trim()) {
+          setAlertMsg("Please select a division.")
+          return
+        }
+      }
       for (const f of config.fieldConfig) {
         if (f.key === "class") continue
         const value = (formData[f.key] || "").trim()
@@ -532,7 +561,7 @@ export default function SubmitPage() {
     }
     setAlertMsg("")
 
-    if (!photoFile) {
+    if (!photoFile || !photoPreview || !photoVerified) {
       setStep("photo")
       return
     }
@@ -540,79 +569,78 @@ export default function SubmitPage() {
   }
 
   const handleReview = async () => {
+    const blockReason = getPreviewBlockReason()
+    if (blockReason) {
+      setAlertMsg(blockReason)
+      setStep(blockReason.includes("photo") ? "photo" : "form")
+      return
+    }
     if (photoPreview && !croppedPhoto) {
       setCroppedPhoto(photoPreview)
     }
+    setAlertMsg("")
     setStep("review")
   }
 
   const handleSubmit = async () => {
     if (!config) return
-    if (!croppedPhoto) {
-      setAlertMsg("Please upload a student photo before submitting.")
+    const blockReason = getPreviewBlockReason()
+    if (blockReason || !croppedPhoto) {
+      setAlertMsg(blockReason || "Please upload a student photo before submitting.")
+      setStep(blockReason?.includes("photo") || !croppedPhoto ? "photo" : "form")
       return
     }
     setSubmitting(true)
     setUploadProgress(0)
+    setPhotoUploadWarning("")
+    setAlertMsg("")
+
     try {
-      let photoUrl = ""
-      let photoPath = ""
-      if (croppedPhoto) {
-        try {
-          setUploadProgress(10)
-          const uploadFile = await prepareStudentPhotoForUpload(croppedPhoto)
-          setUploadProgress(25)
-          const fd = new FormData()
-          fd.append("file", uploadFile)
-          fd.append("folder", `students/${config.schoolId}`)
-          fd.append("submitToken", token)
-          setUploadProgress(30)
-          if (typeof navigator !== "undefined" && navigator.onLine === false) {
-            throw new Error("You appear to be offline. Please reconnect and submit again.")
-          }
-          let uploadRes: Response
-          try {
-            uploadRes = await uploadFormWithTimeout(fd, PHOTO_UPLOAD_TIMEOUT_MS)
-          } catch (error) {
-            throw new Error(getUploadNetworkErrorMessage(error))
-          }
-          if (!uploadRes.ok && uploadRes.status >= 500) {
-            setUploadProgress(45)
-            try {
-              uploadRes = await uploadFormWithTimeout(fd, PHOTO_UPLOAD_RETRY_TIMEOUT_MS)
-            } catch (error) {
-              throw new Error(getUploadNetworkErrorMessage(error))
-            }
-          }
-          const uploadData = uploadRes.ok
-            ? await uploadRes.json().catch(() => null)
-            : null
-          setUploadProgress(70)
-          if (uploadRes.ok && uploadData?.success) {
-            photoUrl = uploadData.url
-            photoPath = uploadData.path || ""
-          } else {
-            throw new Error(await parseApiError(uploadRes, "Photo upload failed. Please try again."))
-          }
-          setUploadProgress(80)
-        } catch (photoErr) {
-          console.error("Photo upload failed:", photoErr)
-          photoUrl = ""
-          photoPath = ""
-          setUploadProgress(80)
-        }
-      } else {
-        setUploadProgress(80)
+      const photoResult = await uploadStudentPhotoResilient({
+        croppedPhoto,
+        schoolId: config.schoolId,
+        submitToken: token,
+        onProgress: setUploadProgress,
+      })
+
+      if (photoResult.uploadFailed) {
+        setPhotoUploadWarning(
+          photoResult.lastError ||
+            "Photo upload had a problem — your registration will still be saved."
+        )
       }
 
       setUploadProgress(85)
-      const res = await fetch(`/api/submit/${token}/submit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ formData, photoUrl, photoPath, photoBgStatus }),
-      })
+      let res: Response
+      try {
+        res = await fetch(`/api/submit/${token}/submit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            formData,
+            photoUrl: photoResult.photoUrl,
+            photoPath: photoResult.photoPath,
+            photoDataUrl: photoResult.photoDataUrl,
+            photoBgStatus: "",
+          }),
+        })
+      } catch (networkErr) {
+        console.error("Submit network error:", networkErr)
+        setAlertMsg("Could not reach the server. Please check your internet and try again.")
+        setSubmitting(false)
+        return
+      }
+
       setUploadProgress(95)
-      const data = await res.json()
+      let data: any
+      try {
+        data = await res.json()
+      } catch {
+        setAlertMsg("Unexpected server response. Please try again.")
+        setSubmitting(false)
+        return
+      }
+
       if (data.success) {
         setUploadProgress(100)
         setResult(data.data)
@@ -626,6 +654,7 @@ export default function SubmitPage() {
           }))
         } catch { /* ignore */ }
         setStep("success")
+        setSubmitting(false)
       } else if (data.error === "DUPLICATE_NAME" || data.error === "DUPLICATE_ROLL") {
         setDuplicateInfo({
           studentName: data.existing?.studentName || resolveFieldValue(formData, "name"),
@@ -636,14 +665,12 @@ export default function SubmitPage() {
         setDuplicateBlocked(true)
         setSubmitting(false)
       } else {
-        setAlertMsg(data.message || data.error || "Submission failed")
-        setTimeout(() => setAlertMsg(""), 5000)
+        setAlertMsg(data.message || data.error || "Submission failed. Please try again.")
         setSubmitting(false)
       }
     } catch (err) {
-      console.error(err)
-      setAlertMsg("Submission failed. Please try again.")
-      setTimeout(() => setAlertMsg(""), 5000)
+      console.error("Submit error:", err)
+      setAlertMsg("Something went wrong. Please try again — your details are still on this page.")
       setSubmitting(false)
     }
   }
@@ -711,21 +738,23 @@ export default function SubmitPage() {
             </div>
           )}
 
-          <p style={{ fontSize: 13, color: '#94a3b8' }}>Please save this serial number for your records.</p>
+          <p style={{ fontSize: 13, color: '#94a3b8', marginBottom: 8 }}>Please save this serial number for your records.</p>
+          <p style={{ fontSize: 12, color: '#64748b', lineHeight: 1.55, maxWidth: 420, margin: '0 auto' }}>
+            Your uploaded photo will be processed by the manufacturer. The background will be made plain and the photo will be improved for the final ID card.
+          </p>
         </div>
       </div>
     </div>
   )
 
   if (alreadySubmitted) {
-    const supportPhone = "919881877607"
-    const waMessage = encodeURIComponent(
-      `Hello, I need help with the ID card form for ${config?.schoolName || "the school"}` +
-      (config?.className ? ` (${config.className})` : "") +
-      (alreadySubmitted.studentName ? ` for ${alreadySubmitted.studentName}.` : ".") +
-      ` Registration ID: ${alreadySubmitted.serialNumber}. Please help.`
-    )
-    const waUrl = `https://wa.me/${supportPhone}?text=${waMessage}`
+    const waUrl = buildWhatsAppUrl(buildSupportWhatsAppMessage({
+      schoolName: config?.schoolName,
+      className: getDisplayClass(config, formData),
+      studentName: alreadySubmitted.studentName,
+      serialNumber: alreadySubmitted.serialNumber,
+      reason: "already_submitted",
+    }))
     return (
       <div className="submit-page">
         <div className="submit-container" style={{ maxWidth: 520 }}>
@@ -737,18 +766,18 @@ export default function SubmitPage() {
               margin: '0 auto 20px', fontSize: 36,
             }}>✓</div>
             <h2 style={{ fontSize: 22, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
-              Form Already Submitted
+              Already Registered
             </h2>
             <p style={{ fontSize: 14, color: '#64748b', marginBottom: 8, lineHeight: 1.6 }}>
               {alreadySubmitted.studentName ? (
-                <>You already submitted this form for <strong style={{ color: '#0f172a' }}>{alreadySubmitted.studentName}</strong></>
+                <>This student is already registered: <strong style={{ color: '#0f172a' }}>{alreadySubmitted.studentName}</strong></>
               ) : (
-                <>You already submitted this form</>
+                <>This form has already been submitted</>
               )}
               {alreadySubmitted.submittedAt ? (
                 <> on <strong>{formatSubmittedDate(alreadySubmitted.submittedAt)}</strong></>
               ) : null}
-              {config?.className ? <> in <strong>{config.className}</strong></> : null}.
+              {getDisplayClass(config, formData) ? <> in <strong>{getDisplayClass(config, formData)}</strong></> : null}.
             </p>
             <div style={{ background: '#f8fafc', borderRadius: 12, padding: 16, marginBottom: 20 }}>
               <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>Registration ID</p>
@@ -757,7 +786,7 @@ export default function SubmitPage() {
               </p>
             </div>
             <p style={{ fontSize: 13, color: '#94a3b8', marginBottom: 24, lineHeight: 1.6 }}>
-              Do not fill the form again. Contact the school if you need changes.
+              Do not submit again. Contact support if you need changes.
             </p>
             <a
               href={waUrl}
@@ -770,9 +799,26 @@ export default function SubmitPage() {
                 background: '#25D366', color: 'white',
                 fontSize: 15, fontWeight: 700,
                 textDecoration: 'none',
+                marginBottom: 12,
               }}
             >
-              Contact School on WhatsApp
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/>
+              </svg>
+              Contact Support on WhatsApp
+            </a>
+            <a
+              href={`tel:${SUPPORT_PHONE_E164}`}
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                gap: 8, width: '100%', maxWidth: 320,
+                padding: '12px 20px', borderRadius: 12,
+                background: '#f8fafc', color: '#334155',
+                fontSize: 14, fontWeight: 600,
+                textDecoration: 'none', border: '1px solid #e2e8f0',
+              }}
+            >
+              Call {SUPPORT_PHONE_DISPLAY}
             </a>
           </div>
         </div>
@@ -782,15 +828,12 @@ export default function SubmitPage() {
 
   if (duplicateBlocked) {
     const studentName = duplicateInfo?.studentName || resolveFieldValue(formData, "name")
-    const supportPhone = "919881877607" // +91 98818 77607
-    const waMessage = encodeURIComponent(
-      `Hello, I am trying to submit the ID card form for ${config?.schoolName || "the school"}` +
-      (config?.className ? ` (${config.className})` : "") +
-      `, but I'm getting a "details already registered" message.` +
-      (studentName ? ` My name is ${studentName}.` : "") +
-      ` Please help.`
-    )
-    const waUrl = `https://wa.me/${supportPhone}?text=${waMessage}`
+    const waUrl = buildWhatsAppUrl(buildSupportWhatsAppMessage({
+      schoolName: config?.schoolName,
+      className: getDisplayClass(config, formData),
+      studentName,
+      reason: "duplicate_blocked",
+    }))
     return (
       <div className="submit-page">
         <div className="submit-container" style={{ maxWidth: 520 }}>
@@ -809,7 +852,7 @@ export default function SubmitPage() {
                 ? "This roll number is already registered"
                 : "This student is already registered"}
               {studentName ? <> for <strong style={{ color: '#0f172a' }}>{studentName}</strong></> : null}
-              {config?.className ? <> in <strong>{config.className}</strong></> : null}.
+              {getDisplayClass(config, formData) ? <> in <strong>{getDisplayClass(config, formData)}</strong></> : null}.
               {duplicateInfo?.submittedAt ? (
                 <> Submitted on <strong>{formatSubmittedDate(duplicateInfo.submittedAt)}</strong>.</>
               ) : null}
@@ -823,10 +866,9 @@ export default function SubmitPage() {
               </div>
             )}
             <p style={{ fontSize: 13, color: '#94a3b8', marginBottom: 24, lineHeight: 1.6 }}>
-              You cannot submit again. If you need changes or believe this is a mistake, contact the school on WhatsApp.
+              You cannot submit again. Contact support on WhatsApp if you need changes.
             </p>
 
-            {/* WhatsApp support button */}
             <a
               href={waUrl}
               target="_blank"
@@ -839,35 +881,32 @@ export default function SubmitPage() {
                 fontSize: 15, fontWeight: 700,
                 textDecoration: 'none',
                 boxShadow: '0 4px 12px rgba(37, 211, 102, 0.3)',
-                transition: 'transform 0.15s, box-shadow 0.15s',
+                marginBottom: 12,
               }}
             >
-              {/* WhatsApp glyph */}
               <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                 <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/>
               </svg>
               Chat with Support on WhatsApp
             </a>
 
-            <div style={{ marginTop: 16, fontSize: 12, color: '#94a3b8' }}>
-              Support: <strong style={{ color: '#475569' }}>+91 98818 77607</strong>
-            </div>
-
-            <button
-              onClick={() => {
-                setDuplicateBlocked(false)
-                setDuplicateInfo(null)
-                setStep("form")
-              }}
+            <a
+              href={`tel:${SUPPORT_PHONE_E164}`}
               style={{
-                marginTop: 24, padding: '10px 20px',
-                background: 'transparent', color: '#64748b',
-                border: '1px solid #e2e8f0', borderRadius: 8,
-                fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                gap: 8, width: '100%', maxWidth: 320,
+                padding: '12px 20px', borderRadius: 12,
+                background: '#f8fafc', color: '#334155',
+                fontSize: 14, fontWeight: 600,
+                textDecoration: 'none', border: '1px solid #e2e8f0',
               }}
             >
-              ← Back to form
-            </button>
+              Call {SUPPORT_PHONE_DISPLAY}
+            </a>
+
+            <div style={{ marginTop: 16, fontSize: 12, color: '#94a3b8' }}>
+              Support: <strong style={{ color: '#475569' }}>{SUPPORT_PHONE_DISPLAY}</strong>
+            </div>
           </div>
         </div>
       </div>
@@ -920,6 +959,19 @@ export default function SubmitPage() {
                 )}
               </div>
               <div style={{ textAlign: 'center', marginTop: 8, fontSize: 11, color: '#cbd5e1' }}>Powered by WiseMelon</div>
+              <div style={{
+                marginTop: 12, padding: '12px 14px', borderRadius: 10,
+                background: '#fffbeb', border: '1px solid #fde68a',
+                fontSize: 12, color: '#92400e', lineHeight: 1.55,
+              }}>
+                <strong style={{ display: 'block', marginBottom: 4 }}>Preview only — for reference</strong>
+                This shows how your ID card may look. We have not changed your photo yet.
+                {config?.photoBgColor ? (
+                  <> The manufacturer will make the background plain ({config.photoBgColor}) and prepare your photo for printing.</>
+                ) : (
+                  <> The manufacturer will make the background plain and prepare your photo for printing.</>
+                )}
+              </div>
             </div>
 
             {/* Details Check Panel */}
@@ -932,7 +984,7 @@ export default function SubmitPage() {
                     <img src={croppedPhoto} alt="Photo" style={{ width: 48, height: 60, borderRadius: 6, objectFit: 'cover', border: '2px solid #e2e8f0' }} />
                     <div>
                       <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{resolveFieldValue(formData, "name") || '—'}</div>
-                      <div style={{ fontSize: 12, color: '#64748b' }}>{config?.className}</div>
+                      <div style={{ fontSize: 12, color: '#64748b' }}>{getDisplayClass(config, formData)}</div>
                     </div>
                   </div>
                 )}
@@ -961,7 +1013,7 @@ export default function SubmitPage() {
                     {/* Class (auto-filled) */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '10px 0' }}>
                       <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 500 }}>Class</span>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{config?.className}</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{getDisplayClass(config, formData)}</span>
                     </div>
                   </div>
                 </div>
@@ -991,6 +1043,12 @@ export default function SubmitPage() {
               <div style={{ height: 6, borderRadius: 3, background: '#f1f5f9', overflow: 'hidden' }}>
                 <div style={{ height: '100%', borderRadius: 3, background: 'linear-gradient(90deg, #3b82f6, #2563eb)', width: `${uploadProgress}%`, transition: 'width 0.3s' }} />
               </div>
+            </div>
+          )}
+
+          {photoUploadWarning && (
+            <div style={{ padding: '12px 16px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, color: '#92400e', fontSize: 13, marginBottom: 16 }}>
+              ℹ️ {photoUploadWarning}
             </div>
           )}
 
@@ -1034,16 +1092,21 @@ export default function SubmitPage() {
             {config?.schoolName.charAt(0)}
           </div>
           <h1 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>{config?.schoolName}</h1>
-          <p style={{ fontSize: 13, color: '#3b82f6', fontWeight: 600 }}>ID Registration — {config?.className}</p>
+          <p style={{ fontSize: 13, color: '#3b82f6', fontWeight: 600 }}>
+            ID Registration — {config?.usesClassPicker ? (config.sectionName || config.className) : config?.className}
+          </p>
         </div>
 
-        {/* Step Indicators — background AI runs inside the Photo step */}
+        {/* Step Indicators */}
         <div style={{ display: 'flex', justifyContent: 'center', gap: 6, padding: '16px 20px', background: '#f8fafc', flexWrap: 'wrap' }}>
           {["Details", "Photo", "Review"].map((s, i) => {
             const currentStep = step as string
-            const stepOrder = ["form", "photo", "review"]
-            const visualIdx = currentStep === "bgprocess" ? 1 : stepOrder.indexOf(currentStep)
-            const currentIdx = visualIdx < 0 ? 0 : visualIdx
+            const visualIdx =
+              currentStep === "form" ? 0
+              : currentStep === "photo" || currentStep === "crop" ? 1
+              : currentStep === "review" ? 2
+              : 0
+            const currentIdx = visualIdx
             const isActive = currentIdx === i
             const isDone = currentIdx > i
             return (
@@ -1092,7 +1155,6 @@ export default function SubmitPage() {
                       setPhotoPreview("")
                       setCroppedPhoto("")
                       setPhotoVerified(false)
-                      setBgSkippable(false)
                       setDraftBanner(false)
                     }}
                     style={{
@@ -1107,8 +1169,89 @@ export default function SubmitPage() {
                 </div>
               )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                {/* Auto-filled Class field - read only */}
-                {config?.className && (
+                {config?.usesClassPicker ? (
+                  <>
+                    <div className="form-group">
+                      <label>Section</label>
+                      <input
+                        type="text"
+                        value={config.sectionName || config.className}
+                        readOnly
+                        disabled
+                        style={{ background: '#f1f5f9', color: '#475569', fontWeight: 600, cursor: 'not-allowed', border: '1px solid #e2e8f0' }}
+                      />
+                      <span style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, display: 'block' }}>
+                        Assigned from your registration link
+                      </span>
+                    </div>
+                    <div className="form-group">
+                      <label>
+                        Class <span style={{ color: '#ef4444' }}>*</span>
+                      </label>
+                      <select
+                        required
+                        value={formData.classGrade || ""}
+                        onChange={(e) => {
+                          const classGrade = e.target.value
+                          setFormData((prev) => ({
+                            ...prev,
+                            classGrade,
+                            class: formatClassSection(classGrade, prev.division || ""),
+                          }))
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '11px 12px',
+                          fontSize: 14,
+                          border: '1.5px solid #cbd5e1',
+                          borderRadius: 10,
+                          background: 'white',
+                        }}
+                      >
+                        <option value="">— Choose class —</option>
+                        {(config.classOptions || []).map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label>
+                        Division <span style={{ color: '#ef4444' }}>*</span>
+                      </label>
+                      <select
+                        required
+                        value={formData.division || ""}
+                        onChange={(e) => {
+                          const division = e.target.value
+                          setFormData((prev) => ({
+                            ...prev,
+                            division,
+                            class: formatClassSection(prev.classGrade || "", division),
+                          }))
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '11px 12px',
+                          fontSize: 14,
+                          border: '1.5px solid #cbd5e1',
+                          borderRadius: 10,
+                          background: 'white',
+                        }}
+                      >
+                        <option value="">— Choose division —</option>
+                        {(config.divisions || []).map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                      {formData.class && (
+                        <span style={{ fontSize: 11, color: '#64748b', marginTop: 4, display: 'block' }}>
+                          Will appear on ID card as: <strong>{formData.class}</strong>
+                        </span>
+                      )}
+                    </div>
+                  </>
+                ) : config?.className ? (
+                  /* Legacy fixed-class link — read only */
                   <div className="form-group">
                     <label>Class</label>
                     <input
@@ -1120,7 +1263,7 @@ export default function SubmitPage() {
                     />
                     <span style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, display: 'block' }}>Auto-assigned based on your form link</span>
                   </div>
-                )}
+                ) : null}
                 {config?.fieldConfig.filter(f => f.key !== "class").map(field => {
                   const role = fieldRole(field)
                   const value = formData[field.key] || ""
@@ -1426,8 +1569,7 @@ export default function SubmitPage() {
                 Take one photo — we handle the rest
               </p>
               <p style={{ fontSize: 13, color: '#64748b', marginBottom: 16, textAlign: 'center', lineHeight: 1.6 }}>
-                Tap the camera button below. Stand against any plain wall.
-                We automatically crop, fix lighting, and set the same background colour for every student.
+                Tap the camera button below. Stand straight against a plain wall in school uniform.
               </p>
 
               {/* Reference Sample + Instructions card */}
@@ -1451,7 +1593,7 @@ export default function SubmitPage() {
                     }}>
                       <li><strong>Stand straight</strong> — face the camera</li>
                       <li><strong>Plain wall behind you</strong> — any single colour is fine</li>
-                      <li><strong>Tap Take Photo</strong> — wait a few seconds, done!</li>
+                      <li><strong>Tap Take Photo</strong> — we check it meets ID card rules</li>
                     </ol>
                     {config?.photoBgColor && (
                       <div style={{
@@ -1465,7 +1607,7 @@ export default function SubmitPage() {
                           background: config.photoBgColor,
                           border: '1px solid rgba(0,0,0,0.12)',
                         }} />
-                        <span>Every ID card will use this same background colour — you don&apos;t need to choose anything.</span>
+                        <span>Your ID card will use a plain background. The school will prepare your photo for printing.</span>
                       </div>
                     )}
                   </div>
@@ -1474,13 +1616,10 @@ export default function SubmitPage() {
 
               {!photoPreview ? (
                 <PhotoVerifier
-                  onPhotoAccepted={(file, previewUrl, bgQualityGood) => {
+                  onPhotoAccepted={(file, previewUrl) => {
                     setPhotoFile(file)
                     setPhotoPreview(previewUrl)
                     setPhotoVerified(true)
-                    const skipAi = !!bgQualityGood
-                    setBgSkippable(skipAi)
-                    // Always go to crop step first — user can skip if framing is fine
                     setStep("crop")
                   }}
                   schoolBgColor={config?.photoBgColor}
@@ -1489,19 +1628,17 @@ export default function SubmitPage() {
                 <div style={{ maxWidth: 400, margin: '0 auto' }}>
                   <div style={{
                     padding: '10px 14px',
-                    background: bgSkippable ? '#dcfce7' : '#fef3c7',
+                    background: '#dcfce7',
                     borderRadius: 10, fontSize: 13,
-                    color: bgSkippable ? '#16a34a' : '#92400e',
+                    color: '#16a34a',
                     fontWeight: 600, marginBottom: 12, textAlign: 'center',
                   }}>
-                    {bgSkippable
-                      ? "✅ Photo verified — background is already plain, no AI needed"
-                      : "✅ Photo verified — tap Continue or upload again to re-run background cleanup"}
+                    ✅ Photo passed all checks — tap Continue to crop and review
                   </div>
                   <div style={{ borderRadius: 10, overflow: 'hidden', border: '2px solid #22c55e', maxWidth: 200, margin: '0 auto' }}>
                     <img src={photoPreview} alt="Preview" style={{ width: '100%', display: 'block' }} />
                   </div>
-                  <button onClick={() => { setPhotoPreview(""); setPhotoFile(null); setCroppedPhoto(""); setPhotoVerified(false); setBgSkippable(false); setPhotoBgStatus("") }} className="btn btn-outline" style={{ width: '100%', marginTop: 12, fontSize: 12 }}>
+                  <button onClick={() => { setPhotoPreview(""); setPhotoFile(null); setCroppedPhoto(""); setPhotoVerified(false) }} className="btn btn-outline" style={{ width: '100%', marginTop: 12, fontSize: 12 }}>
                     Choose Different Photo
                   </button>
                 </div>
@@ -1551,66 +1688,18 @@ export default function SubmitPage() {
                 onCropped={(croppedDataUrl) => {
                   setPhotoPreview(croppedDataUrl)
                   setCroppedPhoto(croppedDataUrl)
-                  if (bgSkippable) {
-                    setPhotoBgStatus(PHOTO_BG_STATUS.PLAIN)
-                    setStep("review")
-                  } else {
-                    setStep("bgprocess")
+                  const blockReason = getPreviewBlockReason()
+                  if (blockReason) {
+                    setAlertMsg(blockReason)
+                    setStep(blockReason.includes("photo") ? "photo" : "form")
+                    return
                   }
+                  setAlertMsg("")
+                  setStep("review")
                 }}
                 onCancel={() => {
-                  // Skip crop — use original photo
-                  if (bgSkippable) {
-                    setPhotoBgStatus(PHOTO_BG_STATUS.PLAIN)
-                    setCroppedPhoto(photoPreview)
-                    setStep("review")
-                  } else {
-                    setStep("bgprocess")
-                  }
-                }}
-              />
-
-              <div style={{ marginTop: 16 }}>
-                <button
-                  type="button"
-                  className="btn btn-outline btn-fluid"
-                  style={{ width: '100%', justifyContent: 'center' }}
-                  onClick={() => {
-                    setPhotoPreview("")
-                    setPhotoFile(null)
-                    setCroppedPhoto("")
-                    setPhotoVerified(false)
-                    setBgSkippable(false)
-                    setPhotoBgStatus("")
-                    setStep("photo")
-                  }}
-                >
-                  ← Choose a different photo
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* BACKGROUND PROCESSING STEP */}
-          {step === "bgprocess" && photoPreview && (
-            <div>
-              <PhotoBgProcessor
-                photoUrl={photoPreview}
-                defaultBgColor={config?.photoBgColor || "#FFFFFF"}
-                submitToken={token}
-                schoolId={config?.schoolId}
-                autoConfirm
-                onStatus={setPhotoBgStatus}
-                onProcessed={(processedUrl, status) => {
-                  setPhotoBgStatus(status)
-                  setPhotoPreview(processedUrl)
-                  setCroppedPhoto(processedUrl)
-                  setStep("review")
-                }}
-                onSkip={(status) => {
-                  setPhotoBgStatus(status)
                   setCroppedPhoto(photoPreview)
-                  setStep("review")
+                  handleReview()
                 }}
               />
 
@@ -1624,8 +1713,6 @@ export default function SubmitPage() {
                     setPhotoFile(null)
                     setCroppedPhoto("")
                     setPhotoVerified(false)
-                    setBgSkippable(false)
-                    setPhotoBgStatus("")
                     setStep("photo")
                   }}
                 >

@@ -82,3 +82,143 @@ export async function prepareStudentPhotoForUpload(
     URL.revokeObjectURL(objectUrl)
   }
 }
+
+const UPLOAD_TIMEOUT_MS = 45_000
+const UPLOAD_RETRY_TIMEOUT_MS = 60_000
+const MAX_UPLOAD_ATTEMPTS = 3
+
+export type StudentPhotoUploadResult = {
+  photoUrl: string
+  photoPath: string
+  photoDataUrl: string
+  uploadFailed: boolean
+  lastError?: string
+}
+
+async function parseUploadApiError(res: Response, fallback: string) {
+  const contentType = res.headers.get("content-type") || ""
+  if (contentType.includes("application/json")) {
+    const data = await res.json().catch(() => null)
+    return data?.error || data?.detail || fallback
+  }
+  const text = await res.text().catch(() => "")
+  if (text && !text.trim().startsWith("<!DOCTYPE")) return text.slice(0, 180)
+  return fallback
+}
+
+async function uploadFormWithTimeout(formData: FormData, timeoutMs: number) {
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch("/api/upload", {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+    })
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}
+
+function isUploadAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError"
+}
+
+function uploadNetworkErrorMessage(error: unknown) {
+  if (isUploadAbortError(error)) {
+    return "Photo upload is taking too long. Your details will still be saved."
+  }
+  return error instanceof Error
+    ? error.message
+    : "Photo upload failed. Your details will still be saved."
+}
+
+async function dataUrlFromFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(new Error("Could not read photo"))
+    reader.readAsDataURL(file)
+  })
+}
+
+/** Upload with retries; never throws — submit API can fall back to photoDataUrl. */
+export async function uploadStudentPhotoResilient(options: {
+  croppedPhoto: string
+  schoolId: string
+  submitToken: string
+  onProgress?: (pct: number) => void
+}): Promise<StudentPhotoUploadResult> {
+  const { croppedPhoto, schoolId, submitToken, onProgress } = options
+  let lastError = ""
+
+  try {
+    onProgress?.(10)
+    const uploadFile = await prepareStudentPhotoForUpload(croppedPhoto)
+    const photoDataUrl = await dataUrlFromFile(uploadFile).catch(() => croppedPhoto)
+    onProgress?.(25)
+
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      return {
+        photoUrl: "",
+        photoPath: "",
+        photoDataUrl,
+        uploadFailed: true,
+        lastError: "You appear to be offline. Your details will still be saved.",
+      }
+    }
+
+    const fd = new FormData()
+    fd.append("file", uploadFile)
+    fd.append("folder", `students/${schoolId}`)
+    fd.append("submitToken", submitToken)
+
+    for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt++) {
+      onProgress?.(25 + attempt * 15)
+      const timeoutMs = attempt === 1 ? UPLOAD_TIMEOUT_MS : UPLOAD_RETRY_TIMEOUT_MS
+      try {
+        let uploadRes = await uploadFormWithTimeout(fd, timeoutMs)
+        if (!uploadRes.ok && uploadRes.status >= 500 && attempt < MAX_UPLOAD_ATTEMPTS) {
+          await new Promise((r) => setTimeout(r, 800 * attempt))
+          uploadRes = await uploadFormWithTimeout(fd, UPLOAD_RETRY_TIMEOUT_MS)
+        }
+        if (uploadRes.ok) {
+          const uploadData = await uploadRes.json().catch(() => null)
+          if (uploadData?.success) {
+            onProgress?.(80)
+            return {
+              photoUrl: uploadData.url || "",
+              photoPath: uploadData.path || "",
+              photoDataUrl,
+              uploadFailed: false,
+            }
+          }
+        }
+        lastError = await parseUploadApiError(uploadRes, "Photo upload failed")
+      } catch (error) {
+        lastError = uploadNetworkErrorMessage(error)
+      }
+      if (attempt < MAX_UPLOAD_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, 600 * attempt))
+      }
+    }
+
+    onProgress?.(80)
+    return {
+      photoUrl: "",
+      photoPath: "",
+      photoDataUrl,
+      uploadFailed: true,
+      lastError,
+    }
+  } catch (error) {
+    console.error("Photo upload pipeline error:", error)
+    return {
+      photoUrl: "",
+      photoPath: "",
+      photoDataUrl: croppedPhoto,
+      uploadFailed: true,
+      lastError: error instanceof Error ? error.message : "Photo preparation failed",
+    }
+  }
+}

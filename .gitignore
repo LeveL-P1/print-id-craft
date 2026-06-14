@@ -51,7 +51,6 @@ npm_*.log
 dist/
 release/
 *.txt
-!docker/rembg/requirements.txt
 db-output.txt
 npm-ls-output.txt
 npmls.txt

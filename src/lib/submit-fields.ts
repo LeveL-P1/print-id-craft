@@ -12,7 +12,10 @@
  */
 
 import { prisma } from "@/lib/prisma"
+import { randomUUID } from "crypto"
+import { storagePublicUrl, storageUpload } from "@/lib/storage"
 import {
+  getFieldRole,
   normalizeFormValue,
   resolveFieldValue,
 } from "@/lib/field-resolver"
@@ -27,12 +30,22 @@ export type FormField = {
   role?: string
 }
 
+const ADDRESS_MIN_WORDS = 5
+
+const FORM_SKIP_KEYS = new Set(["class", "classSection", "classGrade", "division", "photoUrl", "srNo", "photoId"])
+const FORM_SKIP_LABELS = new Set([
+  "class", "class-section", "photo url", "photourl",
+  "no", "no.", "photo no", "photo no.", "photo id", "photo number",
+])
+
 /** Keys that are auto-managed by the server and must never be asked
  *  from the parent. Compared after `normalizeKey` so case / spacing /
  *  punctuation differences don't slip through. */
 const AUTO_KEYS_NORM = new Set<string>([
   "class",
   "classsection",
+  "classgrade",
+  "division",
   "photourl",
   "qrcodeurl",
   "srno",          // sr.no.
@@ -112,6 +125,89 @@ export async function buildFormFields(
     type: isPhoneKey(k) ? "tel" : "text",
     required: true,
   }))
+}
+
+export function buildTemplateFallbackFields(template: any): FormField[] {
+  const rawMappings = (template?.fieldMappings || []) as any[]
+  const rawFieldConf = (template?.fieldConfig || []) as any[]
+  const fallback: FormField[] = []
+
+  if (rawFieldConf.length > 0) {
+    for (const f of rawFieldConf) {
+      if (FORM_SKIP_KEYS.has(f.key)) continue
+      if (FORM_SKIP_LABELS.has((f.label || "").toLowerCase().trim())) continue
+      const k = (f.key || "").toLowerCase()
+      const l = (f.label || "").toLowerCase()
+      let formType: string = f.type || "text"
+      if (k === "phone" || k.includes("mob") || l.includes("mobile") || l.includes("phone")) formType = "tel"
+      fallback.push({ key: f.key, label: f.label, type: formType, required: true, role: f.role })
+    }
+  } else if (rawMappings.length > 0) {
+    for (const m of rawMappings) {
+      if (m.type === "photo") continue
+      const k = (m.fieldKey || "").toLowerCase()
+      let formType = "text"
+      if (k.includes("phone") || k.includes("mob") || k === "mob_father" || k === "mother_phone") formType = "tel"
+      fallback.push({ key: m.fieldKey, label: m.label, type: formType, required: true })
+    }
+  }
+
+  return fallback
+}
+
+export async function getPublicSubmissionFields(schoolId: string, template: any): Promise<FormField[]> {
+  const fallback = buildTemplateFallbackFields(template)
+  const fields = await buildFormFields(schoolId, fallback)
+  return fields.map((field) => ({
+    ...field,
+    role: field.role || getFieldRole(field.key, field.label),
+  }))
+}
+
+function stripIndianPrefix(raw: string): string {
+  if (!raw) return ""
+  const explicit = raw.match(/^\+?\s*91[\s-]*(\d{0,10})\s*$/)
+  if (explicit) return explicit[1]
+  const digits = raw.replace(/\D/g, "")
+  if (digits.length === 12 && digits.startsWith("91")) return digits.slice(2)
+  return digits.slice(0, 10)
+}
+
+function wordCount(value: string): number {
+  return (value || "").trim().split(/\s+/).filter(Boolean).length
+}
+
+export function validatePublicSubmissionDetails(
+  formData: Record<string, unknown>,
+  fields: FormField[]
+): { ok: true } | { ok: false; error: string } {
+  const fd = Object.fromEntries(
+    Object.entries(formData || {}).map(([key, value]) => [key, String(value ?? "").trim()])
+  ) as Record<string, string>
+
+  for (const field of fields) {
+    if (field.key === "class") continue
+    const value = (fd[field.key] || "").trim()
+    const label = field.label || field.key
+    const role = getFieldRole(field.key, field.label, field.role)
+
+    if (field.required && !value) {
+      return { ok: false, error: `Please fill in ${label}.` }
+    }
+    if (!value) continue
+
+    if (role === "address" && field.required && wordCount(value) < ADDRESS_MIN_WORDS) {
+      return { ok: false, error: `Please write the full address with at least ${ADDRESS_MIN_WORDS} words.` }
+    }
+    if (role === "mobile" && field.required && stripIndianPrefix(value).length !== 10) {
+      return { ok: false, error: "Mobile number must be exactly 10 digits." }
+    }
+    if (role === "branch" && field.required && value.length < 2) {
+      return { ok: false, error: "Please enter the branch name." }
+    }
+  }
+
+  return { ok: true }
 }
 
 /**
@@ -287,6 +383,26 @@ export async function checkDuplicateSubmission(
     }
   }
 
+  if (indexData.normalizedName) {
+    const byName = await prisma.student.findFirst({
+      where: {
+        classId,
+        normalizedName: indexData.normalizedName,
+        status: { not: "FLAGGED" },
+      },
+      select: { serialNumber: true, submittedAt: true, formData: true },
+    })
+    if (byName) {
+      return toDuplicateResult(
+        "identity",
+        "DUPLICATE_NAME",
+        "This student name is already registered in this class. Contact support for changes.",
+        byName,
+        name
+      )
+    }
+  }
+
   if (indexData.normalizedRollNo) {
     const byRoll = await prisma.student.findFirst({
       where: {
@@ -380,4 +496,93 @@ export async function checkSubmissionStatus(
     submittedAt: dup.existing.submittedAt.toISOString(),
     studentName: dup.existing.studentName,
   }
+}
+
+const PHOTO_BUCKET = "student-photos"
+const MAX_PHOTO_DATA_URL_BYTES = 2.5 * 1024 * 1024
+
+function parsePhotoDataUrl(dataUrl: string): Buffer | null {
+  const match = dataUrl.match(/^data:image\/[^;]+;base64,(.+)$/)
+  if (!match) return null
+  try {
+    const buffer = Buffer.from(match[1], "base64")
+    if (buffer.length === 0 || buffer.length > MAX_PHOTO_DATA_URL_BYTES) return null
+    return buffer
+  } catch {
+    return null
+  }
+}
+
+async function normalizeSubmitPhoto(buffer: Buffer): Promise<Buffer> {
+  try {
+    const sharp = (await import("sharp")).default
+    return await sharp(buffer, { limitInputPixels: 24_000_000 })
+      .rotate()
+      .resize({ width: 768, height: 768, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 86, mozjpeg: true })
+      .toBuffer()
+  } catch {
+    return buffer
+  }
+}
+
+async function persistStudentPhotoFromDataUrl(
+  dataUrl: string,
+  schoolId: string
+): Promise<{ photoUrl: string; photoPath: string }> {
+  const empty = { photoUrl: "", photoPath: "" }
+  if (!dataUrl?.startsWith("data:image/")) return empty
+  try {
+    const raw = parsePhotoDataUrl(dataUrl)
+    if (!raw) return empty
+    const prepared = await normalizeSubmitPhoto(raw)
+    const filePath = `students/${schoolId}/${Date.now()}-${randomUUID()}.jpg`
+    const { error } = await storageUpload(PHOTO_BUCKET, filePath, prepared, {
+      contentType: "image/jpeg",
+      upsert: true,
+    })
+    if (error) {
+      console.error("persistStudentPhotoFromDataUrl failed:", error)
+      return empty
+    }
+    return { photoUrl: storagePublicUrl(PHOTO_BUCKET, filePath), photoPath: filePath }
+  } catch (error) {
+    console.error("persistStudentPhotoFromDataUrl error:", error)
+    return empty
+  }
+}
+
+/** Never throws — student record is created even if photo storage fails. */
+export async function resolveSubmitPhotoFields(options: {
+  photoUrl: string
+  photoPath: string
+  photoDataUrl: string
+  schoolId: string
+}): Promise<{ photoUrl: string; photoPath: string; photoBgStatus: string }> {
+  const pathOk = options.photoPath?.startsWith(`students/${options.schoolId}/`)
+  if (options.photoUrl && pathOk) {
+    return { photoUrl: options.photoUrl, photoPath: options.photoPath, photoBgStatus: "" }
+  }
+  if (options.photoDataUrl) {
+    const persisted = await persistStudentPhotoFromDataUrl(options.photoDataUrl, options.schoolId)
+    if (persisted.photoUrl) return { ...persisted, photoBgStatus: "" }
+  }
+  return {
+    photoUrl: options.photoUrl || "",
+    photoPath: pathOk ? options.photoPath : "",
+    photoBgStatus: "SKIPPED",
+  }
+}
+
+export async function requireValidSubmitPhotoFields(options: {
+  photoUrl: string
+  photoPath: string
+  photoDataUrl: string
+  schoolId: string
+}): Promise<{ photoUrl: string; photoPath: string; photoBgStatus: string }> {
+  const photoFields = await resolveSubmitPhotoFields(options)
+  if (!photoFields.photoUrl || !photoFields.photoPath) {
+    throw new Error("A valid student photo is required. Please upload the photo again.")
+  }
+  return photoFields
 }

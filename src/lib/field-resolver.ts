@@ -5,6 +5,10 @@
  */
 
 import { createHash } from "crypto"
+import {
+  resolveClassDisplayValue,
+  resolveDivisionDisplayValue,
+} from "@/lib/section-class"
 
 /**
  * Normalizes a field key by lowercasing and stripping non-alphanumeric chars.
@@ -24,6 +28,7 @@ export const FIELD_GROUPS: Record<string, string[]> = {
   phone: ["phone", "mobile", "contact", "fatherphone", "mobfather", "contact no", "mobile no", "mob", "ph", "phno", "phoneno"],
   mobile: ["mobile", "phone", "contact", "fatherphone", "mobfather", "mob_father", "mob", "ph", "phno", "phoneno", "mobile no", "contact no", "telephone", "motherphone"],
   class: ["class", "classsection", "class_section", "standard", "grade"],
+  division: ["division", "div", "section"],
   branch: ["branch", "campus", "location"],
   rollno: ["rollno", "roll", "srno", "no", "admissionno", "roll number"],
   address: ["address", "addr", "location"],
@@ -281,10 +286,10 @@ const PREFIXED_ADDRESS_FIELDS: Record<string, string> = {
   addresslabel: "Address:",
   addressprefix: "Address:",
   prefixedaddress: "Address:",
-  addwithlabel: "ADD:",
-  addlabel: "ADD:",
-  addprefix: "ADD:",
-  prefixedadd: "ADD:",
+  addwithlabel: "Add:",
+  addlabel: "Add:",
+  addprefix: "Add:",
+  prefixedadd: "Add:",
 }
 
 export function isPrefixedAddressField(fieldKey: string): boolean {
@@ -297,11 +302,32 @@ export function isPrefixedAddressField(fieldKey: string): boolean {
  * while still pulling the underlying student data from the canonical field.
  */
 export function resolveDisplayFieldValue(fd: Record<string, string>, fieldKey: string): string {
-  const prefix = PREFIXED_ADDRESS_FIELDS[normalizeKey(fieldKey)]
+  const nk = normalizeKey(fieldKey)
+  if (nk === "class" || nk === "classsection" || nk === "classdivision") {
+    return resolveClassDisplayValue(fd)
+  }
+  if (nk === "division" || nk === "div") {
+    return resolveDivisionDisplayValue(fd)
+  }
+
+  const prefix = PREFIXED_ADDRESS_FIELDS[nk]
   if (!prefix) return resolveFieldValue(fd, fieldKey)
 
   const address = resolveFieldValue(fd, "address")
   return address ? `${prefix} ${address}` : ""
+}
+
+/** Class fields auto-shrink to fit; never truncate with ellipsis on ID cards. */
+export function getCardTextWrapMode(
+  fieldKey: string,
+  configured?: string
+): "nowrap" | "wrap" | "multiline" {
+  const nk = normalizeKey(fieldKey)
+  if (nk === "class" || nk === "classsection" || nk === "classdivision" || nk === "division") return "wrap"
+  if (configured === "nowrap" || configured === "wrap" || configured === "multiline") {
+    return configured
+  }
+  return "wrap"
 }
 
 /**

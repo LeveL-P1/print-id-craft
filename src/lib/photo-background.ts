@@ -213,6 +213,9 @@ export async function loadImageToCanvas(url: string, maxDim = 1024): Promise<{
 
 type BgRemovalDevice = "gpu" | "cpu"
 
+/** Full-precision ISNet — best hair/edge quality in @imgly/background-removal (~170MB first download). */
+export const BG_REMOVAL_MODEL = "isnet" as const
+
 let preloadPromise: Promise<BgRemovalDevice> | null = null
 let removalChain: Promise<unknown> = Promise.resolve()
 
@@ -229,13 +232,13 @@ export function preloadBgRemovalModel(): Promise<BgRemovalDevice> {
       const { preload } = await import("@imgly/background-removal")
       try {
         await preload({
-          model: "isnet_fp16",
+          model: BG_REMOVAL_MODEL,
           device: "gpu",
           fetchArgs: { cache: "force-cache" },
         })
         return "gpu" as const
       } catch {
-        await preload({ model: "isnet_fp16", device: "cpu" })
+        await preload({ model: BG_REMOVAL_MODEL, device: "cpu" })
         return "cpu" as const
       }
     }).catch(() => "cpu" as const)
@@ -251,7 +254,7 @@ export async function removeBackgroundWithBestModel(
     const device = await preloadBgRemovalModel()
     const { removeBackground } = await import("@imgly/background-removal")
     const base = {
-      model: "isnet_fp16" as const,
+      model: BG_REMOVAL_MODEL,
       proxyToWorker: true,
       fetchArgs: { cache: "force-cache" as RequestCache },
       output: { format: "image/png" as const, quality: 0.92 },
@@ -267,43 +270,11 @@ export async function removeBackgroundWithBestModel(
     } catch (gpuErr) {
       if (device === "cpu") throw gpuErr
       const { preload } = await import("@imgly/background-removal")
-      await preload({ model: "isnet_fp16", device: "cpu" })
+      await preload({ model: BG_REMOVAL_MODEL, device: "cpu" })
       return await removeBackground(blob, { ...base, device: "cpu" })
     }
   })
 }
-
-export async function removeBackgroundViaServer(
-  blob: Blob,
-  options: {
-    bgColor: string
-    submitToken?: string
-    schoolId?: string
-    onProgress?: (msg: string, pct: number) => void
-  }
-): Promise<Blob> {
-  options.onProgress?.("Trying server background removal…", 10)
-
-  const fd = new FormData()
-  fd.append("file", blob, "photo.jpg")
-  fd.append("bgColor", options.bgColor)
-  fd.append("format", "transparent")
-  if (options.submitToken) fd.append("submitToken", options.submitToken)
-  if (options.schoolId) fd.append("schoolId", options.schoolId)
-
-  const res = await fetch("/api/photo/remove-background", { method: "POST", body: fd })
-  if (!res.ok) {
-    const contentType = res.headers.get("content-type") || ""
-    const message = contentType.includes("application/json")
-      ? (await res.json().catch(() => ({})))?.error
-      : ""
-    throw new Error(message || `Server removal failed (${res.status})`)
-  }
-
-  options.onProgress?.("Server cleanup complete", 90)
-  return await res.blob()
-}
-
 export async function downscaleBlob(blob: Blob, maxDim = 768): Promise<Blob> {
   return new Promise((resolve) => {
     const img = new Image()

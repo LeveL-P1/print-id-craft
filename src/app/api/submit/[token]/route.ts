@@ -4,6 +4,10 @@ import { buildFormFields, checkSubmissionStatus, type FormField } from "@/lib/su
 import { migrateTemplateToPt } from "@/lib/font-size-units"
 import { getFieldRole, inferFieldRole, resolveFieldValue, sortFieldsByRole } from "@/lib/field-resolver"
 import { getTemplateForClass } from "@/lib/template-resolver"
+import {
+  DIVISIONS,
+  resolveEffectiveClassOptions,
+} from "@/lib/section-class"
 
 export async function GET(req: Request, props: { params: Promise<{ token: string }> }) {
   const params = await props.params;
@@ -40,8 +44,7 @@ export async function GET(req: Request, props: { params: Promise<{ token: string
         }
       }
       const name = resolveFieldValue(formData, "name")
-      const father = resolveFieldValue(formData, "father")
-      if (!name || !father) {
+      if (!name) {
         return NextResponse.json({ success: true, data: { submitted: false } })
       }
       const status = await checkSubmissionStatus(cls.id, formData)
@@ -92,7 +95,7 @@ export async function GET(req: Request, props: { params: Promise<{ token: string
     const rawFieldConf = (template?.fieldConfig || []) as any[]
 
     // Keys/labels that students should not fill in (system-managed or auto-filled)
-    const FORM_SKIP_KEYS = new Set(["class", "classSection", "photoUrl", "srNo", "photoId"])
+    const FORM_SKIP_KEYS = new Set(["class", "classSection", "classGrade", "division", "photoUrl", "srNo", "photoId"])
     const FORM_SKIP_LABELS = new Set(["class", "class-section", "photo url", "photourl", "no", "no.", "photo no", "photo no.", "photo id", "photo number"])
 
     // ─────────────────────────────────────────────────────────────────────
@@ -183,14 +186,25 @@ export async function GET(req: Request, props: { params: Promise<{ token: string
     }
     const flagColors = Array.from(flagColorSet).sort((a, b) => a.localeCompare(b))
 
+    const classOptions = resolveEffectiveClassOptions(
+      cls.classOptions,
+      cls.sectionType,
+      cls.name
+    )
+    const usesClassPicker = classOptions.length > 0
+
     return NextResponse.json({
       success: true,
       data: {
         schoolName: cls.school.name,
         schoolLogo: cls.school.logoUrl,
         className: cls.name,
+        sectionName: cls.name,
         schoolId: cls.school.id,
         classId: cls.id,
+        usesClassPicker,
+        classOptions,
+        divisions: usesClassPicker ? [...DIVISIONS] : [],
         fieldConfig: resolvedFieldConfig,
         frontLayout: template?.frontLayout || [],
         backLayout: template?.backLayout || [],
