@@ -148,12 +148,12 @@ function parseDobParts(value: string) {
   const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/)
   if (iso) return { month: iso[2], day: iso[3], year: iso[1].slice(-2) }
 
-  const slash = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/)
+  const slash = trimmed.match(/^(\d{1,2}|MM)\/(\d{1,2}|DD)\/(\d{2,4}|YY)$/)
   if (slash) {
     return {
-      month: slash[1].padStart(2, "0"),
-      day: slash[2].padStart(2, "0"),
-      year: slash[3].slice(-2),
+      month: slash[1] === "MM" ? "" : slash[1].padStart(2, "0"),
+      day: slash[2] === "DD" ? "" : slash[2].padStart(2, "0"),
+      year: slash[3] === "YY" ? "" : slash[3].slice(-2),
     }
   }
 
@@ -181,30 +181,52 @@ function DobSelectInput({
   }
 
   const selectStyle: React.CSSProperties = {
-    flex: 1,
+    width: "100%",
     minWidth: 0,
-    padding: "11px 10px",
+    padding: "12px 10px",
     fontSize: 14,
     border: "1.5px solid #cbd5e1",
     borderRadius: 10,
     background: "white",
   }
 
+  const partStyle: React.CSSProperties = {
+    flex: 1,
+    minWidth: 0,
+  }
+
+  const partLabelStyle: React.CSSProperties = {
+    display: "block",
+    fontSize: 11,
+    fontWeight: 700,
+    color: "#475569",
+    marginBottom: 5,
+  }
+
   return (
     <div>
       <div style={{ display: "flex", gap: 8 }}>
-        <select required={required} aria-label="Month" value={parts.month} onChange={(e) => update({ month: e.target.value })} style={selectStyle}>
-          <option value="">MM</option>
-          {DOB_MONTHS.map((month) => <option key={month} value={month}>{month}</option>)}
-        </select>
-        <select required={required} aria-label="Day" value={parts.day} onChange={(e) => update({ day: e.target.value })} style={selectStyle}>
-          <option value="">DD</option>
-          {DOB_DAYS.map((day) => <option key={day} value={day}>{day}</option>)}
-        </select>
-        <select required={required} aria-label="Year" value={parts.year} onChange={(e) => update({ year: e.target.value })} style={selectStyle}>
-          <option value="">YY</option>
-          {DOB_YEARS.map((year) => <option key={year} value={year}>{year}</option>)}
-        </select>
+        <div style={partStyle}>
+          <label style={partLabelStyle}>Month</label>
+          <select required={required} aria-label="Month" value={parts.month} onChange={(e) => update({ month: e.target.value })} style={selectStyle}>
+            <option value="">MM</option>
+            {DOB_MONTHS.map((month) => <option key={month} value={month}>{month}</option>)}
+          </select>
+        </div>
+        <div style={partStyle}>
+          <label style={partLabelStyle}>Date</label>
+          <select required={required} aria-label="Date" value={parts.day} onChange={(e) => update({ day: e.target.value })} style={selectStyle}>
+            <option value="">DD</option>
+            {DOB_DAYS.map((day) => <option key={day} value={day}>{day}</option>)}
+          </select>
+        </div>
+        <div style={partStyle}>
+          <label style={partLabelStyle}>Year</label>
+          <select required={required} aria-label="Year" value={parts.year} onChange={(e) => update({ year: e.target.value })} style={selectStyle}>
+            <option value="">YY</option>
+            {DOB_YEARS.map((year) => <option key={year} value={year}>{year}</option>)}
+          </select>
+        </div>
       </div>
       <span style={{ fontSize: 11, color: "#94a3b8", marginTop: 4, display: "block" }}>
         Format: MM/DD/YY
