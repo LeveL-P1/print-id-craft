@@ -141,7 +141,7 @@ const ADDRESS_MIN_WORDS = 5
 
 const DOB_MONTHS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"))
 const DOB_DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0"))
-const DOB_YEARS = Array.from({ length: 90 }, (_, i) => String(new Date().getFullYear() - i).slice(-2))
+const DOB_YEARS = Array.from({ length: 90 }, (_, i) => String(new Date().getFullYear() - i))
 
 function parseDobParts(value: string) {
   const trimmed = (value || "").trim()
@@ -153,7 +153,7 @@ function parseDobParts(value: string) {
     return {
       month: slash[1] === "MM" ? "" : slash[1].padStart(2, "0"),
       day: slash[2] === "DD" ? "" : slash[2].padStart(2, "0"),
-      year: slash[3] === "YY" ? "" : slash[3].slice(-2),
+      year: slash[3] === "YY" ? "" : slash[3].length === 2 ? `20${slash[3]}` : slash[3],
     }
   }
 
@@ -162,7 +162,7 @@ function parseDobParts(value: string) {
 
 function buildDobValue(month: string, day: string, year: string) {
   if (!month && !day && !year) return ""
-  return `${month || "MM"}/${day || "DD"}/${year || "YY"}`
+  return `${month || "MM"}/${day || "DD"}/${year || "YYYY"}`
 }
 
 function DobSelectInput({
@@ -223,13 +223,13 @@ function DobSelectInput({
         <div style={partStyle}>
           <label style={partLabelStyle}>Year</label>
           <select required={required} aria-label="Year" value={parts.year} onChange={(e) => update({ year: e.target.value })} style={selectStyle}>
-            <option value="">YY</option>
+            <option value="">YYYY</option>
             {DOB_YEARS.map((year) => <option key={year} value={year}>{year}</option>)}
           </select>
         </div>
       </div>
       <span style={{ fontSize: 11, color: "#94a3b8", marginTop: 4, display: "block" }}>
-        Format: MM/DD/YY
+        Format: MM/DD/YYYY
       </span>
     </div>
   )
@@ -600,8 +600,8 @@ export default function SubmitPage() {
       if (role === "mobile" && f.required && stripIndianPrefix(value).length !== 10) {
         return "Mobile number must be exactly 10 digits (after +91)."
       }
-      if (role === "dob" && f.required && !/^\d{2}\/\d{2}\/\d{2}$/.test(value)) {
-        return "Please select date of birth in MM/DD/YY format."
+      if (role === "dob" && f.required && !/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
+        return "Please select date of birth in MM/DD/YYYY format."
       }
       if (role === "branch" && f.required && value.length < 2) return "Please enter the branch name."
     }
@@ -650,8 +650,8 @@ export default function SubmitPage() {
             return
           }
         }
-        if (role === "dob" && f.required && !/^\d{2}\/\d{2}\/\d{2}$/.test(value)) {
-          setAlertMsg("Please select date of birth in MM/DD/YY format.")
+        if (role === "dob" && f.required && !/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
+          setAlertMsg("Please select date of birth in MM/DD/YYYY format.")
           return
         }
         if (role === "branch" && f.required && value.length < 2) {
