@@ -21,7 +21,7 @@ describe("GET /api/schools/[id]/export/archive", () => {
     ;(prisma.student.count as any).mockResolvedValue(15001)
 
     const req = new Request("http://localhost:3000/api/schools/s1/export/archive?limit=15000")
-    const res = await GET(req, { params: { id: "s1" } })
+    const res = await GET(req, { params: Promise.resolve({ id: "s1" }) })
     const data = await res.json()
 
     expect(res.status).toBe(413)

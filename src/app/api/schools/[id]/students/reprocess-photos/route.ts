@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { PHOTO_BG_STATUS } from "@/lib/photo-bg-status"
 import { withStudentPhotoUrl } from "@/lib/student-photo-url"
+import { getDefaultTemplate, getTemplateForClass } from "@/lib/template-resolver"
 
 export const maxDuration = 30
 
@@ -35,11 +36,7 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
 
     const [filteredCount, template, students] = await Promise.all([
       prisma.student.count({ where: filterWhere }),
-      prisma.template.findFirst({
-        where: { schoolId: params.id },
-        orderBy: { updatedAt: "desc" },
-        select: { photoBgColor: true },
-      }),
+      classId ? getTemplateForClass(classId) : getDefaultTemplate(params.id),
       prisma.student.findMany({
         where: filterWhere,
         select: {

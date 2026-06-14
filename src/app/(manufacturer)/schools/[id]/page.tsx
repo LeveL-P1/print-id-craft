@@ -126,6 +126,7 @@ type StudentData = {
   serialNumber: string
   photoUrl: string
   photoPath?: string
+  photoUpdatedAt?: number
   photoBgStatus?: string
   formData: any
   status: string
@@ -137,7 +138,8 @@ type StudentData = {
 }
 
 function getStudentPhotoUrl(s: Pick<StudentData, "id" | "photoUrl" | "photoPath" | "formData">): string {
-  if (s.photoPath) return `/api/media/student-photo/${s.id}`
+  const version = (s as { photoUpdatedAt?: number }).photoUpdatedAt
+  if (s.photoPath) return `/api/media/student-photo/${s.id}${version ? `?v=${version}` : ""}`
   if (s.photoUrl) return s.photoUrl
   const fd = s.formData as Record<string, string> | undefined
   const fromForm = fd?.photoUrl || fd?.["Photo URL"] || fd?.["photo url"]
@@ -1615,6 +1617,56 @@ export default function SchoolDetailPage() {
       defaultBgColor: (tpl as { photoBgColor?: string })?.photoBgColor || reprocessBgColor || "#FFFFFF",
     })
   }
+
+  const persistPhotoBgColor = useCallback(async (color: string) => {
+    const normalized = color.toUpperCase()
+    if (!/^#[0-9A-F]{6}$/.test(normalized)) {
+      throw new Error("Enter a valid background colour like #FFFFFF")
+    }
+
+    const selectedClass = classFilter ? classes.find((c) => c.id === classFilter) : null
+    const templateId = selectedClass?.templateId || schoolTemplates[0]?.id || templateData?.id
+    const url = templateId
+      ? `/api/schools/${schoolId}/templates/${templateId}`
+      : `/api/schools/${schoolId}/template`
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ photoBgColor: normalized }),
+    })
+    const data = await res.json().catch(() => null)
+    if (!res.ok || !data?.success) {
+      throw new Error(data?.error || "Failed to save background colour")
+    }
+
+    setReprocessBgColor(normalized)
+    setTemplateData((prev: any) => prev ? { ...prev, photoBgColor: normalized } : prev)
+    setSchoolTemplates((prev) => prev.map((tpl) => (
+      tpl.id === data.data.id ? { ...tpl, photoBgColor: normalized } : tpl
+    )))
+    setClasses((prev) => prev.map((cls) => (
+      cls.templateId === data.data.id && cls.template
+        ? { ...cls, template: { ...cls.template, photoBgColor: normalized } as any }
+        : cls
+    )))
+  }, [classFilter, classes, schoolId, schoolTemplates, templateData?.id])
+
+  const updateStudentPhotoInState = useCallback((studentId: string, photoUrl: string, photoPath?: string) => {
+    const photoUpdatedAt = Date.now()
+    const update = (student: StudentData): StudentData =>
+      student.id === studentId
+        ? {
+            ...student,
+            photoUrl,
+            photoPath: photoPath || student.photoPath,
+            photoBgStatus: "REPROCESSED",
+            photoUpdatedAt,
+          }
+        : student
+
+    setStudents((prev) => prev.map(update))
+    setSelectedStudent((prev) => prev ? update(prev) : prev)
+  }, [])
 
   const openReprocessModal = async () => {
     setReprocessOpen(true)
@@ -3880,6 +3932,8 @@ export default function SchoolDetailPage() {
                         students={reprocessInfo.students}
                         bgColor={reprocessBgColor}
                         onBgColorChange={setReprocessBgColor}
+                        onBgColorCommit={persistPhotoBgColor}
+                        onPhotoSaved={updateStudentPhotoInState}
                         onComplete={handleBatchBgComplete}
                         onClose={() => setReprocessOpen(false)}
                       />
@@ -4557,11 +4611,11 @@ export default function SchoolDetailPage() {
           studentName={bgEditorStudent.name}
           photoUrl={bgEditorStudent.photoUrl}
           defaultBgColor={bgEditorStudent.defaultBgColor}
-          onSaved={(newPhotoUrl) => {
+          onBgColorCommit={persistPhotoBgColor}
+          onSaved={(newPhotoUrl, newPhotoPath, savedBgColor) => {
             toast.success("Photo background updated!")
-            if (selectedStudent?.id === bgEditorStudent.id) {
-              setSelectedStudent({ ...selectedStudent, photoUrl: newPhotoUrl })
-            }
+            if (savedBgColor) setReprocessBgColor(savedBgColor)
+            updateStudentPhotoInState(bgEditorStudent.id, newPhotoUrl, newPhotoPath)
             setBgEditorStudent(null)
             fetchStudents(studentPage)
           }}

@@ -72,6 +72,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     })
 
     const fd = student.formData as Record<string, string>
+    const mediaUrl = withStudentPhotoUrl({ id: student.id, photoPath: filePath, photoUrl: publicUrl }).photoUrl
+    const versionedMediaUrl = `${mediaUrl}${mediaUrl.includes("?") ? "&" : "?"}v=${Date.now()}`
 
     return NextResponse.json({
       success: true,
@@ -79,7 +81,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         studentId: student.id,
         studentName: fd?.fullName || fd?.["Full Name"] || fd?.["Student Name"] || "Unknown",
         serialNumber: student.serialNumber,
-        photoUrl: withStudentPhotoUrl({ id: student.id, photoPath: filePath, photoUrl: publicUrl }).photoUrl,
+        photoUrl: versionedMediaUrl,
         photoPath: filePath,
       },
     })

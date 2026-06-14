@@ -17,6 +17,8 @@ type Props = {
   students: BatchStudent[]
   bgColor: string
   onBgColorChange: (color: string) => void
+  onBgColorCommit?: (color: string) => Promise<void>
+  onPhotoSaved?: (studentId: string, photoUrl: string, photoPath?: string) => void
   onComplete: (stats: { processed: number; failed: number }) => void
   onClose: () => void
 }
@@ -26,6 +28,8 @@ export default function ManufacturerBgBatchProcessor({
   students,
   bgColor,
   onBgColorChange,
+  onBgColorCommit,
+  onPhotoSaved,
   onComplete,
   onClose,
 }: Props) {
@@ -72,13 +76,14 @@ export default function ManufacturerBgBatchProcessor({
       if (!res.ok || !data.success) {
         throw new Error(data.error || "Upload failed")
       }
+      onPhotoSaved?.(student.id, data.data.photoUrl, data.data.photoPath)
       return true
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed"
       setErrors((prev) => [...prev.slice(-49), { serialNumber: student.serialNumber, error: message }])
       return false
     }
-  }, [schoolId, bgColor])
+  }, [schoolId, bgColor, onPhotoSaved])
 
   const runBatch = useCallback(async () => {
     if (students.length === 0) return
@@ -86,6 +91,18 @@ export default function ManufacturerBgBatchProcessor({
     abortRef.current = false
     pausedRef.current = false
     setPaused(false)
+    setProgressMsg("Saving background colour...")
+    setItemProgress(0)
+
+    try {
+      await onBgColorCommit?.(bgColor)
+    } catch (err: unknown) {
+      setRunning(false)
+      setProgressMsg("")
+      const message = err instanceof Error ? err.message : "Failed to save background colour"
+      setErrors((prev) => [...prev.slice(-49), { serialNumber: "Settings", error: message }])
+      return
+    }
 
     let ok = processed
     let fail = failed
@@ -117,7 +134,7 @@ export default function ManufacturerBgBatchProcessor({
     if (!abortRef.current) {
       onComplete({ processed: ok, failed: fail })
     }
-  }, [students, processOne, processed, failed, currentIdx, onComplete])
+  }, [students, processOne, processed, failed, currentIdx, onComplete, onBgColorCommit, bgColor])
 
   const total = students.length
   const overallPct = total > 0 ? Math.round(((currentIdx + (itemProgress / 100)) / total) * 100) : 0

@@ -42,7 +42,7 @@ describe('POST /api/schools/[id]/students/import', () => {
         method: 'POST',
         body: createMockFormData()
       })
-      const res = await POST(req, { params: { id: 's1' } })
+      const res = await POST(req, { params: Promise.resolve({ id: 's1' }) })
       expect(res.status).toBe(401)
       const data = await res.json()
       expect(data.error).toBe('Unauthorized')
@@ -54,7 +54,7 @@ describe('POST /api/schools/[id]/students/import', () => {
         method: 'POST',
         body: createMockFormData()
       })
-      const res = await POST(req, { params: { id: 's1' } })
+      const res = await POST(req, { params: Promise.resolve({ id: 's1' }) })
       expect(res.status).toBe(401)
     })
     
@@ -63,7 +63,7 @@ describe('POST /api/schools/[id]/students/import', () => {
         method: 'POST',
         body: createMockFormData(undefined, true) // no file
       })
-      const res = await POST(req, { params: { id: 's1' } })
+      const res = await POST(req, { params: Promise.resolve({ id: 's1' }) })
       expect(res.status).toBe(400)
     })
   })
@@ -76,7 +76,7 @@ describe('POST /api/schools/[id]/students/import', () => {
         body: createMockFormData(csvStr)
       })
       
-      const res = await POST(req, { params: { id: 's1' } })
+      const res = await POST(req, { params: Promise.resolve({ id: 's1' }) })
       
       expect(res.status).toBe(200)
       const data = await res.json()
@@ -98,7 +98,7 @@ describe('POST /api/schools/[id]/students/import', () => {
         method: 'POST',
         body: createMockFormData('Full Name\nError Student')
       })
-      const res = await POST(req, { params: { id: 's1' } })
+      const res = await POST(req, { params: Promise.resolve({ id: 's1' }) })
       
       expect(res.status).toBe(500)
       const data = await res.json()

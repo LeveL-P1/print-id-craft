@@ -11,7 +11,8 @@ type Props = {
   studentName: string
   photoUrl: string
   defaultBgColor: string
-  onSaved: (photoUrl: string) => void
+  onBgColorCommit?: (color: string) => Promise<void>
+  onSaved: (photoUrl: string, photoPath?: string, bgColor?: string) => void
   onClose: () => void
 }
 
@@ -21,6 +22,7 @@ export default function ManufacturerPhotoBgEditor({
   studentName,
   photoUrl,
   defaultBgColor,
+  onBgColorCommit,
   onSaved,
   onClose,
 }: Props) {
@@ -98,6 +100,7 @@ export default function ManufacturerPhotoBgEditor({
     setSaving(true)
     setError("")
     try {
+      await onBgColorCommit?.(bgColor)
       const file = await prepareStudentPhotoForUpload(processedUrl, {
         fileName: `${studentId}.jpg`,
       })
@@ -113,7 +116,7 @@ export default function ManufacturerPhotoBgEditor({
       if (!res.ok || !data.success) {
         throw new Error(data.error || "Save failed")
       }
-      onSaved(data.data.photoUrl)
+      onSaved(data.data.photoUrl, data.data.photoPath, bgColor)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Save failed")
     } finally {

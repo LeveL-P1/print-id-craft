@@ -58,7 +58,7 @@ export async function GET(_req: Request, props: { params: Promise<{ studentId: s
     status: 200,
     headers: {
       "Content-Type": contentTypeFromPath(student.photoPath),
-      "Cache-Control": "private, max-age=300",
+      "Cache-Control": "private, max-age=0, must-revalidate",
       "Cross-Origin-Resource-Policy": "same-origin",
     },
   })
