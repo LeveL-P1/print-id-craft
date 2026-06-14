@@ -5,11 +5,24 @@ import { prisma } from "@/lib/prisma"
 import { PHOTO_BG_STATUS } from "@/lib/photo-bg-status"
 import { withStudentPhotoUrl } from "@/lib/student-photo-url"
 import { getDefaultTemplate, getTemplateForClass } from "@/lib/template-resolver"
+import { formatClassSection } from "@/lib/section-class"
 
 export const maxDuration = 30
 
 const PHOTO_BG_MODES = new Set(["skipped", "unprocessed", "all"])
 const MAX_STUDENTS_LIST = 5000
+
+function uniqueValues(...values: Array<string | undefined | null>) {
+  return Array.from(new Set(
+    values
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  ))
+}
+
+function jsonEqualsAny(path: string, values: string[]) {
+  return values.map((value) => ({ formData: { path: [path], equals: value } }))
+}
 
 export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params
@@ -21,6 +34,8 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
 
     const url = new URL(req.url)
     const classId = url.searchParams.get("classId")
+    const classGrade = url.searchParams.get("classGrade")?.trim()
+    const division = url.searchParams.get("division")?.trim()
     const modeParam = url.searchParams.get("mode") || "skipped"
     const mode = PHOTO_BG_MODES.has(modeParam) ? modeParam : "skipped"
 
@@ -29,6 +44,52 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
       photoPath: { not: "" },
     }
     if (classId) baseWhere.classId = classId
+
+    const andFilters: any[] = []
+    if (classGrade && division) {
+      const gradeValues = uniqueValues(classGrade, classGrade.toUpperCase(), classGrade.toLowerCase())
+      const divisionValues = uniqueValues(division, division.toUpperCase(), division.toLowerCase())
+      const classValues = uniqueValues(
+        formatClassSection(classGrade, division),
+        `${classGrade}-${division}`,
+        `${classGrade} ${division}`,
+        `${classGrade.toUpperCase()} - ${division.toUpperCase()}`
+      )
+      andFilters.push({
+        OR: [
+          {
+            AND: [
+              { OR: [...jsonEqualsAny("classGrade", gradeValues), ...jsonEqualsAny("CLASSGRADE", gradeValues)] },
+              { OR: [...jsonEqualsAny("division", divisionValues), ...jsonEqualsAny("DIVISION", divisionValues), ...jsonEqualsAny("section", divisionValues)] },
+            ],
+          },
+          { OR: [...jsonEqualsAny("class", classValues), ...jsonEqualsAny("classSection", classValues), ...jsonEqualsAny("CLASS", classValues)] },
+        ],
+      })
+    } else if (classGrade) {
+      const gradeValues = uniqueValues(classGrade, classGrade.toUpperCase(), classGrade.toLowerCase())
+      andFilters.push({
+        OR: [
+          ...jsonEqualsAny("classGrade", gradeValues),
+          ...jsonEqualsAny("CLASSGRADE", gradeValues),
+          ...jsonEqualsAny("class", gradeValues),
+          ...jsonEqualsAny("classSection", gradeValues),
+        ],
+      })
+    } else if (division) {
+      const divisionValues = uniqueValues(division, division.toUpperCase(), division.toLowerCase())
+      andFilters.push({
+        OR: [
+          ...jsonEqualsAny("division", divisionValues),
+          ...jsonEqualsAny("DIVISION", divisionValues),
+          ...jsonEqualsAny("section", divisionValues),
+        ],
+      })
+    }
+
+    if (andFilters.length > 0) {
+      ;(baseWhere as any).AND = andFilters
+    }
 
     const skippedWhere = { ...baseWhere, photoBgStatus: PHOTO_BG_STATUS.SKIPPED }
     const unprocessedWhere = { ...baseWhere, photoBgStatus: { in: ["", PHOTO_BG_STATUS.SKIPPED] } }

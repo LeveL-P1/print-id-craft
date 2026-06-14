@@ -116,7 +116,7 @@ export default function ManufacturerBgBatchProcessor({
       if (abortRef.current) break
 
       setCurrentIdx(idx)
-      setProgressMsg(`Processing ${students[idx].serialNumber}...`)
+      setProgressMsg(`Processing and saving ${students[idx].serialNumber}...`)
       setItemProgress(0)
 
       const success = await processOne(students[idx])
@@ -148,7 +148,8 @@ export default function ManufacturerBgBatchProcessor({
       }}>
         {modelReady
           ? "Local AI model ready on this PC. Processing runs entirely in your browser."
-          : "Downloading AI model on first use (~170MB, best quality). Cached for future runs."}
+                            : "Downloading AI model on first use (~170MB, best quality). Cached for future runs."}
+        {" "}Each processed photo is saved automatically.
       </div>
 
       <div style={{
@@ -238,7 +239,7 @@ export default function ManufacturerBgBatchProcessor({
               disabled={total === 0}
               style={{ fontSize: 13, background: "#8b5cf6" }}
             >
-              {processed + failed > 0 ? "Continue" : `Process ${total} Photos Locally`}
+              {processed + failed > 0 ? "Continue Auto-Save" : `Process & Auto-Save ${total} Photos`}
             </button>
           </>
         )}

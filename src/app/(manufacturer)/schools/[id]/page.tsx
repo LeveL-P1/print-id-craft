@@ -1585,6 +1585,11 @@ export default function SchoolDetailPage() {
     try {
       const params = new URLSearchParams()
       if (classFilter) params.set("classId", classFilter)
+      if (gradeClassFilter) {
+        const [classGrade, division = ""] = gradeClassFilter.split("|")
+        if (classGrade) params.set("classGrade", classGrade)
+        if (division) params.set("division", division)
+      }
       params.set("mode", "all")
       const res = await fetch(`/api/schools/${schoolId}/students/reprocess-photos?${params.toString()}`)
       const data = await res.json()
@@ -1669,6 +1674,10 @@ export default function SchoolDetailPage() {
   }, [])
 
   const openReprocessModal = async () => {
+    if (!classFilter) {
+      toast.error("Select a section/class first, then process photos for that class.")
+      return
+    }
     setReprocessOpen(true)
     await fetchReprocessInfo()
   }
@@ -1678,6 +1687,11 @@ export default function SchoolDetailPage() {
     fetchStudents(studentPage)
     fetchReprocessInfo()
   }
+
+  const selectedBatchClassLabel = [
+    selectedStudentSection?.name,
+    gradeClassFilter && sectionClassPickerOptions.find((o) => o.value === gradeClassFilter)?.label,
+  ].filter(Boolean).join(" / ") || "Selected class"
 
   // Flag management handlers
   const fetchFlags = async () => {
@@ -2780,9 +2794,9 @@ export default function SchoolDetailPage() {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
                 Bulk Upload Photos
               </button>
-              <button className="btn btn-outline" onClick={() => openReprocessModal()} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#8b5cf6', color: '#7c3aed' }} title="Run local AI background removal on all photos in the current filter">
+              <button className="btn btn-outline" onClick={() => openReprocessModal()} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#8b5cf6', color: '#7c3aed' }} title="Select a section/class, then run local AI background removal and auto-save every processed photo">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
-                Process All Photos (AI Background)
+                Process Class Photos (AI Background)
               </button>
               <button className="btn btn-outline" onClick={openAddStudent} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#22c55e', color: '#16a34a' }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
@@ -3900,10 +3914,10 @@ export default function SchoolDetailPage() {
                 <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>
-                      Process All Photos — AI Background
+                      Process Class Photos - AI Background
                     </h2>
                     <p style={{ fontSize: 13, color: '#64748b' }}>
-                      Remove backgrounds and apply a plain colour to every photo in the current filter. Runs locally on this PC.
+                      {selectedBatchClassLabel}: remove backgrounds, apply the selected plain colour, and automatically save each processed photo.
                     </p>
                   </div>
                   <button onClick={() => setReprocessOpen(false)} style={{ width: 32, height: 32, borderRadius: 8, border: 'none', background: '#f1f5f9', cursor: 'pointer', fontSize: 16 }}>✕</button>
@@ -3917,7 +3931,7 @@ export default function SchoolDetailPage() {
                         <div style={{ padding: 16, background: '#eef2ff', borderRadius: 12, textAlign: 'center' }}>
                           <div style={{ fontSize: 28, fontWeight: 700, color: '#4f46e5' }}>{reprocessInfo.skippedCount}</div>
                           <div style={{ fontSize: 12, color: '#6366f1' }}>
-                            Total photos{classFilter ? ' (filtered class)' : ''}
+                            Photos in {selectedBatchClassLabel}
                           </div>
                         </div>
                         <div style={{ padding: 16, background: '#f0fdf4', borderRadius: 12, textAlign: 'center' }}>
