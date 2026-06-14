@@ -169,8 +169,8 @@ function parseDobParts(value: string) {
   const slash = trimmed.match(/^(\d{1,2}|MM)\/(\d{1,2}|DD)\/(\d{2,4}|YY|YYYY)$/)
   if (slash) {
     return {
-      month: slash[1] === "MM" ? "" : slash[1].padStart(2, "0"),
-      day: slash[2] === "DD" ? "" : slash[2].padStart(2, "0"),
+      day: slash[1] === "DD" ? "" : slash[1].padStart(2, "0"),
+      month: slash[2] === "MM" ? "" : slash[2].padStart(2, "0"),
       year: slash[3] === "YY" || slash[3] === "YYYY" ? "" : slash[3].length === 2 ? `20${slash[3]}` : slash[3],
     }
   }
@@ -180,7 +180,7 @@ function parseDobParts(value: string) {
 
 function buildDobValue(month: string, day: string, year: string) {
   if (!month && !day && !year) return ""
-  return `${month || "MM"}/${day || "DD"}/${year || "YYYY"}`
+  return `${day || "DD"}/${month || "MM"}/${year || "YYYY"}`
 }
 
 function DobSelectInput({
@@ -225,17 +225,17 @@ function DobSelectInput({
     <div>
       <div style={{ display: "flex", gap: 8 }}>
         <div style={partStyle}>
-          <label style={partLabelStyle}>Month</label>
-          <select required={required} aria-label="Month" value={parts.month} onChange={(e) => update({ month: e.target.value })} style={selectStyle}>
-            <option value="">MM</option>
-            {DOB_MONTHS.map((month) => <option key={month} value={month}>{month}</option>)}
-          </select>
-        </div>
-        <div style={partStyle}>
           <label style={partLabelStyle}>Date</label>
           <select required={required} aria-label="Date" value={parts.day} onChange={(e) => update({ day: e.target.value })} style={selectStyle}>
             <option value="">DD</option>
             {DOB_DAYS.map((day) => <option key={day} value={day}>{day}</option>)}
+          </select>
+        </div>
+        <div style={partStyle}>
+          <label style={partLabelStyle}>Month</label>
+          <select required={required} aria-label="Month" value={parts.month} onChange={(e) => update({ month: e.target.value })} style={selectStyle}>
+            <option value="">MM</option>
+            {DOB_MONTHS.map((month) => <option key={month} value={month}>{month}</option>)}
           </select>
         </div>
         <div style={partStyle}>
@@ -247,7 +247,7 @@ function DobSelectInput({
         </div>
       </div>
       <span style={{ fontSize: 11, color: "#94a3b8", marginTop: 4, display: "block" }}>
-        Format: MM/DD/YYYY
+        Format: DD/MM/YYYY
       </span>
     </div>
   )
@@ -689,7 +689,7 @@ export default function SubmitPage() {
         return "Mobile number must be exactly 10 digits (after +91)."
       }
       if (role === "dob" && f.required && !/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
-        return "Please select date of birth in MM/DD/YYYY format."
+        return "Please select date of birth in DD/MM/YYYY format."
       }
       if (role === "branch" && f.required && value.length < 2) return "Please enter the branch name."
     }
@@ -737,7 +737,7 @@ export default function SubmitPage() {
           }
         }
         if (role === "dob" && f.required && !/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
-          showMissingField(f.key, "Please select the full date of birth: Month, Date, and Year.")
+          showMissingField(f.key, "Please select the full date of birth: Date, Month, and Year.")
           return
         }
         if (role === "branch" && f.required && value.length < 2) {
