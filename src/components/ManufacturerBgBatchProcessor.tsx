@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { processPhotoBackgroundLocal } from "@/lib/photo-bg-composite-client"
 import { prepareStudentPhotoForUpload } from "@/lib/client-photo-upload"
 import { preloadBgRemovalModel } from "@/lib/photo-background"
+import { cacheBustPhotoUrl } from "@/lib/student-photo-url"
 
 export type BatchStudent = {
   id: string
@@ -18,7 +19,7 @@ type Props = {
   bgColor: string
   onBgColorChange: (color: string) => void
   onBgColorCommit?: (color: string) => Promise<void>
-  onPhotoSaved?: (studentId: string, photoUrl: string, photoPath?: string) => void
+  onPhotoSaved?: (studentId: string, photoUrl: string, photoPath?: string, updatedAt?: string) => void
   onComplete: (stats: { processed: number; failed: number }) => void
   onClose: () => void
 }
@@ -54,7 +55,7 @@ export default function ManufacturerBgBatchProcessor({
   const processOne = useCallback(async (student: BatchStudent): Promise<boolean> => {
     try {
       const { dataUrl } = await processPhotoBackgroundLocal(
-        student.photoUrl,
+        cacheBustPhotoUrl(student.photoUrl),
         bgColor,
         (msg, pct) => {
           setProgressMsg(msg)
@@ -76,7 +77,7 @@ export default function ManufacturerBgBatchProcessor({
       if (!res.ok || !data.success) {
         throw new Error(data.error || "Upload failed")
       }
-      onPhotoSaved?.(student.id, data.data.photoUrl, data.data.photoPath)
+      onPhotoSaved?.(student.id, data.data.photoUrl, data.data.photoPath, data.data.updatedAt)
       return true
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed"

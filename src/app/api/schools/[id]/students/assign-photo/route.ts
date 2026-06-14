@@ -62,27 +62,35 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     const publicUrl = storagePublicUrl(BUCKET, filePath)
 
     // Update student record
-    await prisma.student.update({
+    const updated = await prisma.student.update({
       where: { id: student.id },
       data: {
         photoUrl: publicUrl,
         photoPath: filePath,
         ...(photoBgStatus ? { photoBgStatus } : {}),
       },
+      select: {
+        id: true,
+        photoPath: true,
+        photoUrl: true,
+        updatedAt: true,
+        serialNumber: true,
+        formData: true,
+      },
     })
 
-    const fd = student.formData as Record<string, string>
-    const mediaUrl = withStudentPhotoUrl({ id: student.id, photoPath: filePath, photoUrl: publicUrl }).photoUrl
-    const versionedMediaUrl = `${mediaUrl}${mediaUrl.includes("?") ? "&" : "?"}v=${Date.now()}`
+    const fd = updated.formData as Record<string, string>
+    const mediaUrl = withStudentPhotoUrl(updated).photoUrl
 
     return NextResponse.json({
       success: true,
       data: {
-        studentId: student.id,
+        studentId: updated.id,
         studentName: fd?.fullName || fd?.["Full Name"] || fd?.["Student Name"] || "Unknown",
-        serialNumber: student.serialNumber,
-        photoUrl: versionedMediaUrl,
-        photoPath: filePath,
+        serialNumber: updated.serialNumber,
+        photoUrl: mediaUrl,
+        photoPath: updated.photoPath,
+        updatedAt: updated.updatedAt.toISOString(),
       },
     })
   } catch (error: any) {

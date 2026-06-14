@@ -13,6 +13,7 @@ import {
   resolveEffectiveClassOptions,
   type SectionType,
 } from "@/lib/section-class"
+import { photoCacheVersion, studentPhotoUrl as buildStudentPhotoUrl } from "@/lib/student-photo-url"
 
 // Lazy-load heavy components — only loaded when their tab is active
 const IDCardPreview = dynamic(() => import("@/components/IDCardPreview"), { ssr: false })
@@ -127,6 +128,7 @@ type StudentData = {
   photoUrl: string
   photoPath?: string
   photoUpdatedAt?: number
+  updatedAt?: string
   photoBgStatus?: string
   formData: any
   status: string
@@ -137,13 +139,17 @@ type StudentData = {
   class: { id: string; name: string }
 }
 
-function getStudentPhotoUrl(s: Pick<StudentData, "id" | "photoUrl" | "photoPath" | "formData">): string {
-  const version = (s as { photoUpdatedAt?: number }).photoUpdatedAt
-  if (s.photoPath) return `/api/media/student-photo/${s.id}${version ? `?v=${version}` : ""}`
-  if (s.photoUrl) return s.photoUrl
+function getStudentPhotoUrl(s: Pick<StudentData, "id" | "photoUrl" | "photoPath" | "formData" | "updatedAt" | "photoUpdatedAt">): string {
+  const fromMedia = buildStudentPhotoUrl(s)
+  if (fromMedia) return fromMedia
   const fd = s.formData as Record<string, string> | undefined
   const fromForm = fd?.photoUrl || fd?.["Photo URL"] || fd?.["photo url"]
   return typeof fromForm === "string" ? fromForm : ""
+}
+
+function studentPhotoCacheKey(s: Pick<StudentData, "id" | "updatedAt" | "photoUpdatedAt">): string {
+  const version = photoCacheVersion(s)
+  return version ? `${s.id}-${version}` : s.id
 }
 
 function studentHasPhoto(s: Pick<StudentData, "id" | "photoUrl" | "photoPath" | "formData">): boolean {
@@ -422,6 +428,11 @@ export default function SchoolDetailPage() {
         setStudents(data.data)
         setStudentTotal(data.pagination.total)
         setStudentPage(data.pagination.page)
+        setSelectedStudent((prev) => {
+          if (!prev) return prev
+          const fresh = data.data.find((s: StudentData) => s.id === prev.id)
+          return fresh || prev
+        })
       } else {
         toast.error(data.error || "Failed to load students")
       }
@@ -1205,7 +1216,7 @@ export default function SchoolDetailPage() {
         if (data.success) {
           toast.success("Photo updated!")
           if (selectedStudent?.id === studentId) {
-            setSelectedStudent({ ...selectedStudent, photoUrl: data.data.photoUrl })
+            updateStudentPhotoInState(studentId, data.data.photoUrl, data.data.photoPath, data.data.updatedAt)
           }
           fetchStudents(studentPage)
         } else {
@@ -1656,8 +1667,13 @@ export default function SchoolDetailPage() {
     )))
   }, [classFilter, classes, schoolId, schoolTemplates, templateData?.id])
 
-  const updateStudentPhotoInState = useCallback((studentId: string, photoUrl: string, photoPath?: string) => {
-    const photoUpdatedAt = Date.now()
+  const updateStudentPhotoInState = useCallback((
+    studentId: string,
+    photoUrl: string,
+    photoPath?: string,
+    updatedAt?: string
+  ) => {
+    const photoUpdatedAt = updatedAt ? new Date(updatedAt).getTime() : Date.now()
     const update = (student: StudentData): StudentData =>
       student.id === studentId
         ? {
@@ -1666,11 +1682,23 @@ export default function SchoolDetailPage() {
             photoPath: photoPath || student.photoPath,
             photoBgStatus: "REPROCESSED",
             photoUpdatedAt,
+            updatedAt: updatedAt || new Date(photoUpdatedAt).toISOString(),
           }
         : student
 
     setStudents((prev) => prev.map(update))
     setSelectedStudent((prev) => prev ? update(prev) : prev)
+    setReprocessInfo((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        students: prev.students.map((s) =>
+          s.id === studentId
+            ? { ...s, photoUrl: buildStudentPhotoUrl({ id: s.id, photoPath: photoPath || undefined, photoUrl, updatedAt, photoUpdatedAt }) }
+            : s
+        ),
+      }
+    })
   }, [])
 
   const openReprocessModal = async () => {
@@ -3078,6 +3106,7 @@ export default function SchoolDetailPage() {
                       }
                       const studentName = (fd?.fullName || fd?.name || fd?.["Full Name"] || fd?.["Student Name"] || "—") as string
                       const displayPhotoUrl = getStudentPhotoUrl(s)
+                      const photoCacheKey = studentPhotoCacheKey(s)
                       const hasPhoto = studentHasPhoto(s)
                       const isNameColumn = (k: string) => ["fullName", "name", "studentName"].includes(k)
 
@@ -3095,6 +3124,7 @@ export default function SchoolDetailPage() {
                                 }}
                               >
                                 <img
+                                  key={photoCacheKey}
                                   src={displayPhotoUrl}
                                   alt={studentName}
                                   loading="lazy"
@@ -3129,6 +3159,7 @@ export default function SchoolDetailPage() {
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                                       {displayPhotoUrl && (
                                         <img
+                                          key={photoCacheKey}
                                           src={displayPhotoUrl}
                                           alt=""
                                           loading="lazy"
@@ -3147,7 +3178,7 @@ export default function SchoolDetailPage() {
                               <td style={{ fontWeight: 500 }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                   {displayPhotoUrl && (
-                                    <img src={displayPhotoUrl} alt="" loading="lazy" style={{ width: 32, height: 42, borderRadius: 6, objectFit: 'cover', border: '1px solid #e2e8f0' }} />
+                                    <img key={photoCacheKey} src={displayPhotoUrl} alt="" loading="lazy" style={{ width: 32, height: 42, borderRadius: 6, objectFit: 'cover', border: '1px solid #e2e8f0' }} />
                                   )}
                                   {studentName}
                                 </div>
@@ -4374,6 +4405,7 @@ export default function SchoolDetailPage() {
         const studentTemplate = resolveStudentTemplate(studentClass, selectedStudent, templateData)
 
         const detailPhotoUrl = getStudentPhotoUrl(selectedStudent)
+        const detailPhotoCacheKey = studentPhotoCacheKey(selectedStudent)
 
         // Determine critical missing fields
         const missingItems: string[] = []
@@ -4419,7 +4451,7 @@ export default function SchoolDetailPage() {
                     }}
                   >
                     {detailPhotoUrl ? (
-                      <img src={detailPhotoUrl} alt={studentName || "Student photo"} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <img key={detailPhotoCacheKey} src={detailPhotoUrl} alt={studentName || "Student photo"} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     ) : (
                       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 4, color: '#ef4444' }}>
                         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -4487,6 +4519,7 @@ export default function SchoolDetailPage() {
                     <div>
                       <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>FRONT SIDE</div>
                       <JpgCardPreview
+                        key={detailPhotoCacheKey}
                         templateImageUrl={studentTemplate.templateImageUrl}
                         fieldMappings={studentTemplate.fieldMappings as any[]}
                         formData={selectedStudent.formData as Record<string, string>}
@@ -4502,6 +4535,7 @@ export default function SchoolDetailPage() {
                       <div>
                         <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>BACK SIDE</div>
                         <JpgCardPreview
+                          key={`back-${detailPhotoCacheKey}`}
                           templateImageUrl={studentTemplate.backTemplateImageUrl}
                           fieldMappings={studentTemplate.backFieldMappings as any[] || []}
                           formData={selectedStudent.formData as Record<string, string>}
@@ -4526,6 +4560,7 @@ export default function SchoolDetailPage() {
                     <div>
                       <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 8, textAlign: 'center' }}>FRONT</div>
                       <IDCardPreview
+                        key={detailPhotoCacheKey}
                         layout={studentTemplate.frontLayout || []}
                         widthMm={studentTemplate.cardWidthMm || 85.6}
                         heightMm={studentTemplate.cardHeightMm || 54.0}
@@ -4626,10 +4661,10 @@ export default function SchoolDetailPage() {
           photoUrl={bgEditorStudent.photoUrl}
           defaultBgColor={bgEditorStudent.defaultBgColor}
           onBgColorCommit={persistPhotoBgColor}
-          onSaved={(newPhotoUrl, newPhotoPath, savedBgColor) => {
+          onSaved={(newPhotoUrl, newPhotoPath, savedBgColor, updatedAt) => {
             toast.success("Photo background updated!")
             if (savedBgColor) setReprocessBgColor(savedBgColor)
-            updateStudentPhotoInState(bgEditorStudent.id, newPhotoUrl, newPhotoPath)
+            updateStudentPhotoInState(bgEditorStudent.id, newPhotoUrl, newPhotoPath, updatedAt)
             setBgEditorStudent(null)
             fetchStudents(studentPage)
           }}

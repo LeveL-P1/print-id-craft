@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import { processPhotoBackgroundLocal } from "@/lib/photo-bg-composite-client"
 import { prepareStudentPhotoForUpload } from "@/lib/client-photo-upload"
 import { preloadBgRemovalModel } from "@/lib/photo-background"
+import { cacheBustPhotoUrl } from "@/lib/student-photo-url"
 
 type Props = {
   schoolId: string
@@ -12,7 +13,7 @@ type Props = {
   photoUrl: string
   defaultBgColor: string
   onBgColorCommit?: (color: string) => Promise<void>
-  onSaved: (photoUrl: string, photoPath?: string, bgColor?: string) => void
+  onSaved: (photoUrl: string, photoPath?: string, bgColor?: string, updatedAt?: string) => void
   onClose: () => void
 }
 
@@ -48,7 +49,35 @@ export default function ManufacturerPhotoBgEditor({
     setOriginalUrl(photoUrl)
   }, [photoUrl])
 
-  const runProcessing = useCallback(async () => {
+  const saveProcessedPhoto = useCallback(async (dataUrl: string) => {
+    setSaving(true)
+    setError("")
+    try {
+      await onBgColorCommit?.(bgColor)
+      const file = await prepareStudentPhotoForUpload(dataUrl, {
+        fileName: `${studentId}.jpg`,
+      })
+      const fd = new FormData()
+      fd.append("photo", file)
+      fd.append("studentId", studentId)
+      fd.append("photoBgStatus", "REPROCESSED")
+      const res = await fetch(`/api/schools/${schoolId}/students/assign-photo`, {
+        method: "POST",
+        body: fd,
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Save failed")
+      }
+      onSaved(data.data.photoUrl, data.data.photoPath, bgColor, data.data.updatedAt)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Save failed")
+    } finally {
+      setSaving(false)
+    }
+  }, [bgColor, onBgColorCommit, onSaved, schoolId, studentId])
+
+  const runProcessing = useCallback(async (autoSave: boolean) => {
     if (!photoUrl) return
     setProcessing(true)
     setError("")
@@ -57,7 +86,7 @@ export default function ManufacturerPhotoBgEditor({
 
     try {
       const { dataUrl } = await processPhotoBackgroundLocal(
-        photoUrl,
+        cacheBustPhotoUrl(photoUrl),
         bgColor,
         (msg, pct) => {
           setProgressMsg(msg)
@@ -65,13 +94,16 @@ export default function ManufacturerPhotoBgEditor({
         }
       )
       setProcessedUrl(dataUrl)
+      if (autoSave) {
+        await saveProcessedPhoto(dataUrl)
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Background removal failed"
       setError(message)
     } finally {
       setProcessing(false)
     }
-  }, [photoUrl, bgColor])
+  }, [photoUrl, bgColor, saveProcessedPhoto])
 
   const handleColorChange = (color: string) => {
     setBgColor(color.toUpperCase())
@@ -99,36 +131,12 @@ export default function ManufacturerPhotoBgEditor({
       const saved = await handleSaveColor()
       if (!saved) return
     }
-    await runProcessing()
+    await runProcessing(true)
   }
 
   const handleSave = async () => {
     if (!processedUrl) return
-    setSaving(true)
-    setError("")
-    try {
-      await onBgColorCommit?.(bgColor)
-      const file = await prepareStudentPhotoForUpload(processedUrl, {
-        fileName: `${studentId}.jpg`,
-      })
-      const fd = new FormData()
-      fd.append("photo", file)
-      fd.append("studentId", studentId)
-      fd.append("photoBgStatus", "REPROCESSED")
-      const res = await fetch(`/api/schools/${schoolId}/students/assign-photo`, {
-        method: "POST",
-        body: fd,
-      })
-      const data = await res.json()
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || "Save failed")
-      }
-      onSaved(data.data.photoUrl, data.data.photoPath, bgColor)
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Save failed")
-    } finally {
-      setSaving(false)
-    }
+    await saveProcessedPhoto(processedUrl)
   }
 
   return (
@@ -154,6 +162,7 @@ export default function ManufacturerPhotoBgEditor({
           <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>
             Runs locally on this PC using the full ISNet model (best quality for hair and edges). First use downloads about 170MB (cached afterward).
             {modelReady ? " Model ready." : " Preparing model..."}
+            {" "}Processed photos are saved automatically.
           </p>
         </div>
 
@@ -166,7 +175,7 @@ export default function ManufacturerPhotoBgEditor({
               type="color"
               value={bgColor}
               onChange={(e) => handleColorChange(e.target.value)}
-              disabled={processing}
+              disabled={processing || saving}
               style={{ width: 48, height: 40, border: "1px solid #cbd5e1", borderRadius: 8, padding: 2 }}
             />
             <div>
@@ -175,7 +184,7 @@ export default function ManufacturerPhotoBgEditor({
                 value={bgColor}
                 onChange={(e) => handleColorChange(e.target.value)}
                 maxLength={7}
-                disabled={processing}
+                disabled={processing || saving}
                 style={{
                   marginTop: 6, width: 110, padding: "7px 9px", border: "1px solid #cbd5e1",
                   borderRadius: 8, fontSize: 12, fontWeight: 600,
@@ -213,15 +222,19 @@ export default function ManufacturerPhotoBgEditor({
                 border: `2px solid ${processedUrl ? "#8b5cf6" : "#e2e8f0"}`,
                 aspectRatio: "3/4", background: bgColor,
               }}>
-                {processing ? (
+                {processing || saving ? (
                   <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 12 }}>
                     <div className="login-spinner" style={{
                       width: 32, height: 32, borderColor: "rgba(139,92,246,0.2)", borderTopColor: "#8b5cf6", marginBottom: 10,
                     }} />
-                    <div style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>{progressMsg}</div>
-                    <div style={{ width: "80%", height: 4, background: "#e2e8f0", borderRadius: 2, marginTop: 8 }}>
-                      <div style={{ height: "100%", width: `${progress}%`, background: "#8b5cf6", borderRadius: 2, transition: "width 0.3s" }} />
+                    <div style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>
+                      {saving ? "Saving processed photo…" : progressMsg}
                     </div>
+                    {!saving && (
+                      <div style={{ width: "80%", height: 4, background: "#e2e8f0", borderRadius: 2, marginTop: 8 }}>
+                        <div style={{ height: "100%", width: `${progress}%`, background: "#8b5cf6", borderRadius: 2, transition: "width 0.3s" }} />
+                      </div>
+                    )}
                   </div>
                 ) : processedUrl ? (
                   <img src={processedUrl} alt="Processed" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
@@ -244,7 +257,7 @@ export default function ManufacturerPhotoBgEditor({
           )}
 
           <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
-            <button className="btn btn-outline" onClick={onClose} disabled={saving} style={{ fontSize: 13 }}>
+            <button className="btn btn-outline" onClick={onClose} disabled={processing || saving} style={{ fontSize: 13 }}>
               Cancel
             </button>
             <button
@@ -256,21 +269,22 @@ export default function ManufacturerPhotoBgEditor({
               {saving && !processedUrl ? "Saving..." : "Save Colour"}
             </button>
             <button
-              className="btn btn-outline"
+              className="btn btn-primary"
               onClick={handleRunAi}
               disabled={processing || saving}
-              style={{ fontSize: 13, borderColor: "#8b5cf6", color: "#7c3aed" }}
-            >
-              {processedUrl ? "Re-run AI" : "Run AI"}
-            </button>
-            <button
-              className="btn btn-primary"
-              onClick={handleSave}
-              disabled={!processedUrl || processing || saving}
               style={{ fontSize: 13, background: "#8b5cf6", padding: "8px 20px" }}
             >
-              {saving ? "Saving..." : "Save Processed Photo"}
+              {processing || saving ? "Processing…" : processedUrl ? "Re-run & Save" : "Run AI & Save"}
             </button>
+            {processedUrl && !processing && !saving && (
+              <button
+                className="btn btn-outline"
+                onClick={handleSave}
+                style={{ fontSize: 13, borderColor: "#8b5cf6", color: "#7c3aed" }}
+              >
+                Save Again
+              </button>
+            )}
           </div>
         </div>
       </div>

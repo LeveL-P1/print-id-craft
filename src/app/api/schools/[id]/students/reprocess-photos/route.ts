@@ -105,6 +105,7 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
           serialNumber: true,
           photoPath: true,
           photoUrl: true,
+          updatedAt: true,
           formData: true,
         },
         orderBy: { submittedAt: "asc" },

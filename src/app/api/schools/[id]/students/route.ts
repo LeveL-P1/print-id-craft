@@ -120,6 +120,7 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
           flagNote: true,
           teacherComment: true,
           submittedAt: true,
+          updatedAt: true,
           classId: true,
           class: { select: { id: true, name: true } },
         },

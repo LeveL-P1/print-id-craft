@@ -16,7 +16,7 @@ export const BG_JPEG_QUALITY = 0.88
 
 export async function photoUrlToBlob(url: string): Promise<Blob> {
   try {
-    const response = await fetch(url, { credentials: "include" })
+    const response = await fetch(url, { credentials: "include", cache: "no-store" })
     if (response.ok) return await response.blob()
   } catch { /* fall through */ }
 
