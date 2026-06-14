@@ -66,44 +66,11 @@ export function compositeTransparentOntoColor(
       const ctx = canvas.getContext("2d")
       if (!ctx) { reject(new Error("Canvas unavailable")); return }
 
+      // Keep soft alpha from the model — hard thresholds and edge erosion cut off fine hair.
+      ctx.fillStyle = `rgb(${targetRgb.r},${targetRgb.g},${targetRgb.b})`
+      ctx.fillRect(0, 0, w, h)
       ctx.drawImage(img, 0, 0)
-      try {
-        const imageData = ctx.getImageData(0, 0, w, h)
-        const data = imageData.data
-        const total = w * h
-
-        for (let i = 0; i < total; i++) {
-          data[i * 4 + 3] = data[i * 4 + 3] >= 128 ? 255 : 0
-        }
-
-        const fgMask = new Uint8Array(total)
-        for (let i = 0; i < total; i++) fgMask[i] = data[i * 4 + 3] === 255 ? 1 : 0
-
-        for (let y = 0; y < h; y++) {
-          for (let x = 0; x < w; x++) {
-            const idx = y * w + x
-            if (!fgMask[idx]) continue
-            const isEdge =
-              x === 0 || !fgMask[idx - 1] ||
-              x === w - 1 || !fgMask[idx + 1] ||
-              y === 0 || !fgMask[idx - w] ||
-              y === h - 1 || !fgMask[idx + w]
-            if (isEdge) data[idx * 4 + 3] = 0
-          }
-        }
-
-        ctx.putImageData(imageData, 0, 0)
-      } catch { /* use raw mask */ }
-
-      const finalCanvas = document.createElement("canvas")
-      finalCanvas.width = w
-      finalCanvas.height = h
-      const fCtx = finalCanvas.getContext("2d")
-      if (!fCtx) { reject(new Error("Canvas unavailable")); return }
-      fCtx.fillStyle = `rgb(${targetRgb.r},${targetRgb.g},${targetRgb.b})`
-      fCtx.fillRect(0, 0, w, h)
-      fCtx.drawImage(canvas, 0, 0)
-      resolve(finalCanvas.toDataURL("image/jpeg", BG_JPEG_QUALITY))
+      resolve(canvas.toDataURL("image/jpeg", BG_JPEG_QUALITY))
     }
     img.onerror = () => reject(new Error("Transparent image load failed"))
     img.src = transparentDataUrl

@@ -9,11 +9,9 @@ import {
   type FieldRole,
 } from "@/lib/field-resolver"
 import { formatClassSection } from "@/lib/section-class"
-import { PHOTO_BG_STATUS, type PhotoBgStatus } from "@/lib/photo-bg-status"
 import { prepareStudentPhotoForUpload } from "@/lib/client-photo-upload"
 
 const JpgCardPreview = dynamic(() => import("@/components/JpgCardPreview"), { ssr: false })
-const PhotoBgProcessor = dynamic(() => import("@/components/PhotoBgProcessor"), { ssr: false })
 const PhotoCropper = dynamic(() => import("@/components/PhotoCropper"), { ssr: false })
 
 type FieldConfig = { key: string; label: string; type: string; required: boolean; role?: string }
@@ -322,7 +320,7 @@ export default function SubmitPage() {
   const params = useParams()
   const token = params.token as string
 
-  const [step, setStep] = useState<"loading" | "error" | "form" | "photo" | "crop" | "bgprocess" | "review" | "success">("loading")
+  const [step, setStep] = useState<"loading" | "error" | "form" | "photo" | "crop" | "review" | "success">("loading")
   const [errorMsg, setErrorMsg] = useState("")
   const [config, setConfig] = useState<FormConfig | null>(null)
   const [formData, setFormData] = useState<Record<string, string>>({})
@@ -347,8 +345,6 @@ export default function SubmitPage() {
     submittedAt: string
   } | null>(null)
   const [photoVerified, setPhotoVerified] = useState(false)
-  const [bgSkippable, setBgSkippable] = useState(false)
-  const [photoBgStatus, setPhotoBgStatus] = useState<PhotoBgStatus>("")
 
   // Visible 10-digit text for each mobile-intent field, kept separate from
   // formData so we never round-trip the "+91 " prefix through the input value
@@ -400,7 +396,6 @@ export default function SubmitPage() {
       if (!raw) { setDraftRestored(true); return }
       const draft = JSON.parse(raw) as {
         formData?: Record<string, string>
-        bgSkippable?: boolean
         photoVerified?: boolean
         step?: typeof step
         savedAt?: number
@@ -413,7 +408,6 @@ export default function SubmitPage() {
         return
       }
       if (draft.formData) setFormData(draft.formData)
-      if (draft.bgSkippable) setBgSkippable(true)
       if (draft.photoVerified) setPhotoVerified(true)
       const hasAnyData =
         !!(draft.formData && Object.keys(draft.formData).some(k => k !== "class" && (draft.formData?.[k] || "").trim() !== ""))
@@ -439,7 +433,6 @@ export default function SubmitPage() {
     if (step === "loading" || step === "error" || step === "success") return
     const draft = {
       formData,
-      bgSkippable,
       photoVerified,
       step,
       savedAt: Date.now(),
@@ -452,7 +445,7 @@ export default function SubmitPage() {
       } catch { /* give up silently — draft just won't survive this session */ }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formData, bgSkippable, photoVerified, step, draftRestored])
+  }, [formData, photoVerified, step, draftRestored])
 
   const clearDraft = () => {
     if (typeof window === "undefined") return
@@ -627,7 +620,7 @@ export default function SubmitPage() {
       const res = await fetch(`/api/submit/${token}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ formData, photoUrl, photoPath, photoBgStatus }),
+        body: JSON.stringify({ formData, photoUrl, photoPath, photoBgStatus: "" }),
       })
       setUploadProgress(95)
       const data = await res.json()
@@ -729,7 +722,10 @@ export default function SubmitPage() {
             </div>
           )}
 
-          <p style={{ fontSize: 13, color: '#94a3b8' }}>Please save this serial number for your records.</p>
+          <p style={{ fontSize: 13, color: '#94a3b8', marginBottom: 8 }}>Please save this serial number for your records.</p>
+          <p style={{ fontSize: 12, color: '#64748b', lineHeight: 1.55, maxWidth: 420, margin: '0 auto' }}>
+            Your uploaded photo will be processed by the manufacturer. The background will be made plain and the photo will be improved for the final ID card.
+          </p>
         </div>
       </div>
     </div>
@@ -938,6 +934,19 @@ export default function SubmitPage() {
                 )}
               </div>
               <div style={{ textAlign: 'center', marginTop: 8, fontSize: 11, color: '#cbd5e1' }}>Powered by WiseMelon</div>
+              <div style={{
+                marginTop: 12, padding: '12px 14px', borderRadius: 10,
+                background: '#fffbeb', border: '1px solid #fde68a',
+                fontSize: 12, color: '#92400e', lineHeight: 1.55,
+              }}>
+                <strong style={{ display: 'block', marginBottom: 4 }}>Preview only — for reference</strong>
+                This shows how your ID card may look. We have not changed your photo yet.
+                {config?.photoBgColor ? (
+                  <> The manufacturer will make the background plain ({config.photoBgColor}) and prepare your photo for printing.</>
+                ) : (
+                  <> The manufacturer will make the background plain and prepare your photo for printing.</>
+                )}
+              </div>
             </div>
 
             {/* Details Check Panel */}
@@ -1057,13 +1066,16 @@ export default function SubmitPage() {
           </p>
         </div>
 
-        {/* Step Indicators — background AI runs inside the Photo step */}
+        {/* Step Indicators */}
         <div style={{ display: 'flex', justifyContent: 'center', gap: 6, padding: '16px 20px', background: '#f8fafc', flexWrap: 'wrap' }}>
           {["Details", "Photo", "Review"].map((s, i) => {
             const currentStep = step as string
-            const stepOrder = ["form", "photo", "review"]
-            const visualIdx = currentStep === "bgprocess" ? 1 : stepOrder.indexOf(currentStep)
-            const currentIdx = visualIdx < 0 ? 0 : visualIdx
+            const visualIdx =
+              currentStep === "form" ? 0
+              : currentStep === "photo" || currentStep === "crop" ? 1
+              : currentStep === "review" ? 2
+              : 0
+            const currentIdx = visualIdx
             const isActive = currentIdx === i
             const isDone = currentIdx > i
             return (
@@ -1112,7 +1124,6 @@ export default function SubmitPage() {
                       setPhotoPreview("")
                       setCroppedPhoto("")
                       setPhotoVerified(false)
-                      setBgSkippable(false)
                       setDraftBanner(false)
                     }}
                     style={{
@@ -1552,7 +1563,7 @@ export default function SubmitPage() {
                     }}>
                       <li><strong>Stand straight</strong> — face the camera</li>
                       <li><strong>Plain wall behind you</strong> — any single colour is fine</li>
-                      <li><strong>Tap Take Photo</strong> — wait a few seconds, done!</li>
+                      <li><strong>Tap Take Photo</strong> — we check it meets ID card rules</li>
                     </ol>
                     {config?.photoBgColor && (
                       <div style={{
@@ -1566,7 +1577,7 @@ export default function SubmitPage() {
                           background: config.photoBgColor,
                           border: '1px solid rgba(0,0,0,0.12)',
                         }} />
-                        <span>Every ID card will use this same background colour — you don&apos;t need to choose anything.</span>
+                        <span>Your ID card will use a plain background colour. You do not need to worry about the exact shade — the manufacturer will set it when printing.</span>
                       </div>
                     )}
                   </div>
@@ -1575,13 +1586,10 @@ export default function SubmitPage() {
 
               {!photoPreview ? (
                 <PhotoVerifier
-                  onPhotoAccepted={(file, previewUrl, bgQualityGood) => {
+                  onPhotoAccepted={(file, previewUrl) => {
                     setPhotoFile(file)
                     setPhotoPreview(previewUrl)
                     setPhotoVerified(true)
-                    const skipAi = !!bgQualityGood
-                    setBgSkippable(skipAi)
-                    // Always go to crop step first — user can skip if framing is fine
                     setStep("crop")
                   }}
                   schoolBgColor={config?.photoBgColor}
@@ -1590,19 +1598,17 @@ export default function SubmitPage() {
                 <div style={{ maxWidth: 400, margin: '0 auto' }}>
                   <div style={{
                     padding: '10px 14px',
-                    background: bgSkippable ? '#dcfce7' : '#fef3c7',
+                    background: '#dcfce7',
                     borderRadius: 10, fontSize: 13,
-                    color: bgSkippable ? '#16a34a' : '#92400e',
+                    color: '#16a34a',
                     fontWeight: 600, marginBottom: 12, textAlign: 'center',
                   }}>
-                    {bgSkippable
-                      ? "✅ Photo verified — background is already plain, no AI needed"
-                      : "✅ Photo verified — tap Continue or upload again to re-run background cleanup"}
+                    ✅ Photo passed all checks — tap Continue to crop and review
                   </div>
                   <div style={{ borderRadius: 10, overflow: 'hidden', border: '2px solid #22c55e', maxWidth: 200, margin: '0 auto' }}>
                     <img src={photoPreview} alt="Preview" style={{ width: '100%', display: 'block' }} />
                   </div>
-                  <button onClick={() => { setPhotoPreview(""); setPhotoFile(null); setCroppedPhoto(""); setPhotoVerified(false); setBgSkippable(false); setPhotoBgStatus("") }} className="btn btn-outline" style={{ width: '100%', marginTop: 12, fontSize: 12 }}>
+                  <button onClick={() => { setPhotoPreview(""); setPhotoFile(null); setCroppedPhoto(""); setPhotoVerified(false) }} className="btn btn-outline" style={{ width: '100%', marginTop: 12, fontSize: 12 }}>
                     Choose Different Photo
                   </button>
                 </div>
@@ -1652,62 +1658,9 @@ export default function SubmitPage() {
                 onCropped={(croppedDataUrl) => {
                   setPhotoPreview(croppedDataUrl)
                   setCroppedPhoto(croppedDataUrl)
-                  if (bgSkippable) {
-                    setPhotoBgStatus(PHOTO_BG_STATUS.PLAIN)
-                    setStep("review")
-                  } else {
-                    setStep("bgprocess")
-                  }
-                }}
-                onCancel={() => {
-                  // Skip crop — use original photo
-                  if (bgSkippable) {
-                    setPhotoBgStatus(PHOTO_BG_STATUS.PLAIN)
-                    setCroppedPhoto(photoPreview)
-                    setStep("review")
-                  } else {
-                    setStep("bgprocess")
-                  }
-                }}
-              />
-
-              <div style={{ marginTop: 16 }}>
-                <button
-                  type="button"
-                  className="btn btn-outline btn-fluid"
-                  style={{ width: '100%', justifyContent: 'center' }}
-                  onClick={() => {
-                    setPhotoPreview("")
-                    setPhotoFile(null)
-                    setCroppedPhoto("")
-                    setPhotoVerified(false)
-                    setBgSkippable(false)
-                    setPhotoBgStatus("")
-                    setStep("photo")
-                  }}
-                >
-                  ← Choose a different photo
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* BACKGROUND PROCESSING STEP */}
-          {step === "bgprocess" && photoPreview && (
-            <div>
-              <PhotoBgProcessor
-                photoUrl={photoPreview}
-                defaultBgColor={config?.photoBgColor || "#FFFFFF"}
-                autoConfirm
-                onStatus={setPhotoBgStatus}
-                onProcessed={(processedUrl, status) => {
-                  setPhotoBgStatus(status)
-                  setPhotoPreview(processedUrl)
-                  setCroppedPhoto(processedUrl)
                   setStep("review")
                 }}
-                onSkip={(status) => {
-                  setPhotoBgStatus(status)
+                onCancel={() => {
                   setCroppedPhoto(photoPreview)
                   setStep("review")
                 }}
@@ -1723,8 +1676,6 @@ export default function SubmitPage() {
                     setPhotoFile(null)
                     setCroppedPhoto("")
                     setPhotoVerified(false)
-                    setBgSkippable(false)
-                    setPhotoBgStatus("")
                     setStep("photo")
                   }}
                 >

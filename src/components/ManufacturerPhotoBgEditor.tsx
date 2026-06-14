@@ -142,7 +142,7 @@ export default function ManufacturerPhotoBgEditor({
             AI Background - {studentName}
           </h2>
           <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>
-            Runs locally on this PC using the ISNet model. First use downloads about 80MB (cached afterward).
+            Runs locally on this PC using the full ISNet model (best quality for hair and edges). First use downloads about 170MB (cached afterward).
             {modelReady ? " Model ready." : " Preparing model..."}
           </p>
         </div>

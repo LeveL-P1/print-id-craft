@@ -131,7 +131,7 @@ export default function ManufacturerBgBatchProcessor({
       }}>
         {modelReady
           ? "Local AI model ready on this PC. Processing runs entirely in your browser."
-          : "Downloading AI model on first use (~80MB). Cached for future runs."}
+          : "Downloading AI model on first use (~170MB, best quality). Cached for future runs."}
       </div>
 
       <div style={{
