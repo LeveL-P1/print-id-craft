@@ -589,8 +589,8 @@ export default function SubmitPage() {
     return ""
   }
 
-  const handleFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleFormSubmit = (e?: React.FormEvent | React.MouseEvent) => {
+    e?.preventDefault()
 
     // Per-field validation for the parent-friendly intents. We surface the
     // first error inline via setAlertMsg + early return so the form never
@@ -1208,7 +1208,7 @@ export default function SubmitPage() {
         <div style={{ padding: 24 }}>
           {/* FORM STEP */}
           {step === "form" && (
-            <form onSubmit={handleFormSubmit}>
+            <form onSubmit={handleFormSubmit} noValidate>
               {/* Draft-restored banner — shown when we successfully restored
                   the parent's previous progress after an accidental back /
                   refresh / tab close. They can opt out by clicking "Start fresh". */}
@@ -1634,7 +1634,12 @@ export default function SubmitPage() {
                   )
                 })}
               </div>
-              <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: 24, padding: '14px', fontSize: 15 }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleFormSubmit}
+                style={{ width: '100%', marginTop: 24, padding: '14px', fontSize: 15 }}
+              >
                 Next: Upload Photo →
               </button>
             </form>
