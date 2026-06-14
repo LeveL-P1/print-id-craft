@@ -1,8 +1,8 @@
 "use client"
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useParams } from "next/navigation"
 import PhotoVerifier from "@/components/PhotoVerifier"
-import JpgCardPreview, { generateJpgCard } from "@/components/JpgCardPreview"
+import JpgCardPreview from "@/components/JpgCardPreview"
 import PhotoCropper from "@/components/PhotoCropper"
 import {
   getFieldRole,
@@ -27,13 +27,15 @@ const safeFilePart = (value: string) =>
     .replace(/^-+|-+$/g, "")
     .slice(0, 50) || "student"
 
-function downloadDataUrl(dataUrl: string, fileName: string) {
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
-  a.href = dataUrl
+  a.href = url
   a.download = fileName
   document.body.appendChild(a)
   a.click()
   a.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 function buildSupportWhatsAppMessage(parts: {
@@ -436,6 +438,8 @@ export default function SubmitPage() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [alertMsg, setAlertMsg] = useState("")
   const [previewDownloadStatus, setPreviewDownloadStatus] = useState<"" | "downloaded" | "unavailable">("")
+  const successPreviewRef = useRef<HTMLDivElement>(null)
+  const previewDownloadAttemptedRef = useRef(false)
   const [duplicateBlocked, setDuplicateBlocked] = useState(false)
   const [duplicateInfo, setDuplicateInfo] = useState<{
     studentName: string
@@ -597,6 +601,46 @@ export default function SubmitPage() {
   const handleFieldChange = (key: string, value: string) => {
     setFormData(prev => ({ ...prev, [key]: value }))
   }
+
+  const getPreviewFileName = useCallback(() => {
+    const studentName = resolveFieldValue(formData, "name")
+    const serial = result?.serialNumber || "preview"
+    return `${safeFilePart(`${studentName || "student"}-${serial}`)}-id-preview.jpg`
+  }, [formData, result?.serialNumber])
+
+  const downloadRenderedPreview = useCallback(async () => {
+    const canvas = successPreviewRef.current?.querySelector("canvas")
+    if (!canvas) throw new Error("Preview image is not ready yet")
+
+    const blob = await new Promise<Blob | null>((resolve) => {
+      try {
+        canvas.toBlob(resolve, "image/jpeg", 0.92)
+      } catch {
+        resolve(null)
+      }
+    })
+    if (!blob) throw new Error("Preview image could not be prepared")
+
+    downloadBlob(blob, getPreviewFileName())
+    setPreviewDownloadStatus("downloaded")
+  }, [getPreviewFileName])
+
+  useEffect(() => {
+    if (step !== "success" || !result || previewDownloadAttemptedRef.current) return
+    if (!config?.templateImageUrl || !config.fieldMappings?.length) {
+      setPreviewDownloadStatus("unavailable")
+      return
+    }
+
+    previewDownloadAttemptedRef.current = true
+    const timer = window.setTimeout(() => {
+      downloadRenderedPreview().catch((downloadErr) => {
+        console.warn("Could not auto-download rendered ID preview:", downloadErr)
+        setPreviewDownloadStatus("unavailable")
+      })
+    }, 900)
+    return () => window.clearTimeout(timer)
+  }, [step, result, config?.templateImageUrl, config?.fieldMappings, downloadRenderedPreview])
 
   // Note: PhotoVerifier now returns stable data URLs directly
 
@@ -764,6 +808,7 @@ export default function SubmitPage() {
         setResult(data.data)
         clearDraft()
         setPreviewDownloadStatus("")
+        previewDownloadAttemptedRef.current = false
         try {
           const studentName = resolveFieldValue(formData, "name")
           window.localStorage.setItem(SUBMITTED_KEY, JSON.stringify({
@@ -772,28 +817,6 @@ export default function SubmitPage() {
             submittedAt: new Date().toISOString(),
           }))
         } catch { /* ignore */ }
-        try {
-          if (config.templateImageUrl && config.fieldMappings?.length > 0) {
-            const studentName = resolveFieldValue(formData, "name")
-            const fileBase = safeFilePart(`${studentName || "student"}-${data.data.serialNumber || "preview"}`)
-            const previewDataUrl = await generateJpgCard(
-              config.templateImageUrl,
-              config.fieldMappings,
-              formData,
-              croppedPhoto,
-              1,
-              undefined,
-              (config as any).cardWidthMm || 85.6,
-            )
-            downloadDataUrl(previewDataUrl, `${fileBase}-id-preview.jpg`)
-            setPreviewDownloadStatus("downloaded")
-          } else {
-            setPreviewDownloadStatus("unavailable")
-          }
-        } catch (downloadErr) {
-          console.warn("Could not auto-download ID preview:", downloadErr)
-          setPreviewDownloadStatus("unavailable")
-        }
         setStep("success")
         setSubmitting(false)
       } else if (data.error === "DUPLICATE_NAME" || data.error === "DUPLICATE_ROLL") {
@@ -859,7 +882,7 @@ export default function SubmitPage() {
           {config && (
             <div style={{ marginBottom: 24 }}>
               {config.templateImageUrl && config.fieldMappings?.length > 0 ? (
-                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <div ref={successPreviewRef} style={{ display: 'flex', justifyContent: 'center' }}>
                   <JpgCardPreview
                     templateImageUrl={config.templateImageUrl}
                     fieldMappings={config.fieldMappings}
@@ -887,8 +910,35 @@ export default function SubmitPage() {
           )}
           {previewDownloadStatus === "unavailable" && (
             <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 8 }}>
-              Preview download was not available on this device. Your registration is still saved.
+              Automatic preview download was blocked. Your registration is still saved.
             </p>
+          )}
+          {config?.templateImageUrl && config.fieldMappings?.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                previewDownloadAttemptedRef.current = true
+                downloadRenderedPreview().catch((downloadErr) => {
+                  console.warn("Manual preview download failed:", downloadErr)
+                  setPreviewDownloadStatus("unavailable")
+                })
+              }}
+              style={{
+                width: '100%',
+                maxWidth: 320,
+                margin: '0 auto 12px',
+                padding: '12px 16px',
+                borderRadius: 10,
+                border: 'none',
+                background: 'linear-gradient(135deg, #2563eb, #4f46e5)',
+                color: 'white',
+                fontSize: 14,
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              Download ID Preview
+            </button>
           )}
           <p style={{ fontSize: 12, color: '#64748b', lineHeight: 1.55, maxWidth: 420, margin: '0 auto' }}>
             Your uploaded photo will be processed by the manufacturer. The background will be made plain and the photo will be improved for the final ID card.
