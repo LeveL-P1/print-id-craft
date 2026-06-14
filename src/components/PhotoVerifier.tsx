@@ -381,10 +381,10 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         if (!hasPerson) {
           checks.push({
             passed: false,
-            severity: "critical",
+            severity: "warning",
             label: "Face Detected",
             detail: faceResult.detail,
-            tip: faceResult.tip || "Upload a clear front-facing photo of your face for the ID card",
+            tip: faceResult.tip || "If this photo is correct, continue with Use photo anyway",
           })
         } else if (faceResult.rough) {
           checks.push({
@@ -408,10 +408,10 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
           const singleFace = faceResult.count === 1
           checks.push({
             passed: singleFace,
-            severity: singleFace ? "info" : "critical",
+            severity: singleFace ? "info" : "warning",
             label: "One Student Only",
             detail: singleFace ? "1 person found" : `${faceResult.count} people found`,
-            tip: singleFace ? undefined : "Only the student should be in the photo — no group photos",
+            tip: singleFace ? undefined : "Only the student should be in the photo. Continue if this is a correct single-student photo.",
           })
         }
 
@@ -473,10 +473,10 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         }
 
         URL.revokeObjectURL(url)
-        const criticalFails = checks.filter(c => !c.passed && c.severity === "critical")
-        // Warnings are advisory — only true critical failures block upload.
-        const valid = criticalFails.length === 0
-        const canOverride = criticalFails.length === 0
+        const failedChecks = checks.filter(c => !c.passed)
+        const blockingFails = failedChecks.filter(c => c.severity === "critical")
+        const valid = failedChecks.length === 0
+        const canOverride = blockingFails.length === 0
 
         resolve({ valid, canOverride, checks })
       }
@@ -1191,8 +1191,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
       setResult(verificationResult)
       setVerifying(false)
 
-      const criticalFails = verificationResult.checks.filter(c => !c.passed && c.severity === "critical")
-      if (criticalFails.length === 0) {
+      if (verificationResult.valid) {
         onPhotoAccepted(file, previewUrl, true)
       }
     } catch (error) {
