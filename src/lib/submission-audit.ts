@@ -9,6 +9,7 @@ type PublicSubmissionAuditInput = {
   schoolId: string
   schoolName?: string
   classId?: string | null
+  sectionType?: string | null
   sectionName?: string | null
   classValue?: string | null
   classGrade?: string | null
@@ -52,6 +53,7 @@ export async function recordPublicSubmissionAudit(input: PublicSubmissionAuditIn
       token: input.token,
       schoolName: trimText(input.schoolName),
       classId: input.classId || undefined,
+      sectionType: trimText(input.sectionType),
       sectionName: trimText(input.sectionName),
       classValue: trimText(input.classValue),
       classGrade: trimText(input.classGrade),

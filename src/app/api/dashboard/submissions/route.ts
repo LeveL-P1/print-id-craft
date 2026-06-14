@@ -22,6 +22,18 @@ function stageFromEvent(event: { type: string; metadata: unknown }) {
   return typeof metadata.stage === "string" ? metadata.stage : "UNKNOWN"
 }
 
+function classLabel(metadata: Record<string, any>) {
+  if (metadata.classValue) return String(metadata.classValue)
+  if (metadata.classGrade && metadata.division) return `${metadata.classGrade} - ${metadata.division}`
+  return metadata.classGrade || metadata.sectionName || "-"
+}
+
+function categoryLabel(metadata: Record<string, any>) {
+  if (metadata.sectionType) return String(metadata.sectionType).replace(/_/g, " ")
+  if (metadata.sectionName) return String(metadata.sectionName)
+  return "-"
+}
+
 export async function GET(req: Request) {
   try {
     const session = await getServerSession(authOptions)
@@ -32,24 +44,43 @@ export async function GET(req: Request) {
     const url = new URL(req.url)
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || 12), 1), 50)
     const schoolId = url.searchParams.get("schoolId") || undefined
-    const events = await prisma.systemEvent.findMany({
-      where: {
-        ...(schoolId ? { schoolId } : {}),
-        OR: [
-          ...SUBMISSION_CATEGORIES.map((category) => ({
-            type: "MAINTENANCE" as const,
-            metadata: { path: ["category"], equals: category },
-          })),
-          { type: "SUBMIT_FAILED" },
-        ],
-      },
-      orderBy: { createdAt: "desc" },
-      take: limit,
-    })
+    const baseWhere = {
+      ...(schoolId ? { schoolId } : {}),
+    }
+    const timelineWhere = {
+      ...baseWhere,
+      OR: [
+        ...SUBMISSION_CATEGORIES.map((category) => ({
+          type: "MAINTENANCE" as const,
+          metadata: { path: ["category"], equals: category },
+        })),
+        { type: "SUBMIT_FAILED" as const },
+      ],
+    }
+    const latestSavedWhere = {
+      ...baseWhere,
+      type: "MAINTENANCE" as const,
+      metadata: { path: ["category"], equals: "PUBLIC_SUBMISSION_RECEIVED" },
+    }
+
+    const [events, savedEvents] = await Promise.all([
+      prisma.systemEvent.findMany({
+        where: timelineWhere,
+        orderBy: { createdAt: "desc" },
+        take: limit,
+      }),
+      prisma.systemEvent.findMany({
+        where: latestSavedWhere,
+        orderBy: { createdAt: "desc" },
+        take: 200,
+      }),
+    ])
 
     const submissionEvents = events
 
-    const schoolIds = Array.from(new Set(submissionEvents.map((event) => event.schoolId).filter(Boolean))) as string[]
+    const schoolIds = Array.from(new Set(
+      [...submissionEvents, ...savedEvents].map((event) => event.schoolId).filter(Boolean)
+    )) as string[]
     const schools = schoolIds.length
       ? await prisma.school.findMany({
           where: { id: { in: schoolIds } },
@@ -71,10 +102,13 @@ export async function GET(req: Request) {
         schoolName: metadata.schoolName || (event.schoolId ? schoolNameById.get(event.schoolId) : null) || "Unknown school",
         source: metadata.source || null,
         classId: metadata.classId || null,
+        sectionType: metadata.sectionType || null,
+        category: categoryLabel(metadata),
         sectionName: metadata.sectionName || null,
         classValue: metadata.classValue || null,
         classGrade: metadata.classGrade || null,
         division: metadata.division || null,
+        classLabel: classLabel(metadata),
         studentName: metadata.studentName || null,
         studentId: metadata.studentId || null,
         serialNumber: metadata.serialNumber || null,
@@ -85,7 +119,40 @@ export async function GET(req: Request) {
       }
     })
 
-    const res = NextResponse.json({ success: true, data })
+    const latestByClass = Array.from(
+      savedEvents.reduce((groups, event) => {
+        const metadata = metadataObject(event.metadata)
+        const key = [
+          event.schoolId || "",
+          metadata.sectionType || "",
+          metadata.sectionName || "",
+          metadata.classValue || metadata.classGrade || "",
+          metadata.division || "",
+        ].join("|")
+
+        if (!groups.has(key)) {
+          groups.set(key, {
+            key,
+            latestAt: event.createdAt.toISOString(),
+            schoolId: event.schoolId,
+            schoolName: metadata.schoolName || (event.schoolId ? schoolNameById.get(event.schoolId) : null) || "Unknown school",
+            category: categoryLabel(metadata),
+            sectionType: metadata.sectionType || null,
+            sectionName: metadata.sectionName || null,
+            classValue: metadata.classValue || null,
+            classGrade: metadata.classGrade || null,
+            division: metadata.division || null,
+            classLabel: classLabel(metadata),
+            studentName: metadata.studentName || null,
+            serialNumber: metadata.serialNumber || null,
+          })
+        }
+
+        return groups
+      }, new Map<string, any>()).values()
+    ).slice(0, 24)
+
+    const res = NextResponse.json({ success: true, data, latestByClass })
     res.headers.set("Cache-Control", "no-store")
     return res
   } catch (error) {
