@@ -16,6 +16,21 @@ type Rect = { x: number; y: number; w: number; h: number }
 
 const CROP_OUTPUT_MAX_WIDTH = 720
 const CROP_JPEG_QUALITY = 0.88
+const MAX_VIEWPORT_WIDTH = 480
+const MAX_VIEWPORT_HEIGHT_RATIO = 0.58
+
+function fitImageViewport(
+  naturalW: number,
+  naturalH: number,
+  maxW: number,
+  maxH: number
+): { w: number; h: number } {
+  const iAspect = naturalW / naturalH
+  if (iAspect >= maxW / maxH) {
+    return { w: maxW, h: maxW / iAspect }
+  }
+  return { w: maxH * iAspect, h: maxH }
+}
 
 /**
  * PhotoCropper — interactive crop UI with a fixed aspect ratio.
@@ -37,8 +52,9 @@ export default function PhotoCropper({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
-  // Rendered image bounds inside the container (CSS px), accounting for
-  // object-fit:contain letter-boxing.
+  const [viewport, setViewport] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
+  // Rendered image bounds inside the container (CSS px). When the viewport
+  // matches the photo aspect ratio this covers the full image.
   const [imgBox, setImgBox] = useState<Rect>({ x: 0, y: 0, w: 0, h: 0 })
   const [crop, setCrop] = useState<Rect>({ x: 0, y: 0, w: 0, h: 0 })
   const [natural, setNatural] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
@@ -54,39 +70,40 @@ export default function PhotoCropper({
     const container = containerRef.current
     const img = imgRef.current
     if (!container || !img || !img.naturalWidth) return
-    const cRect = container.getBoundingClientRect()
-    const cw = cRect.width
-    const ch = cRect.height
-    const iAspect = img.naturalWidth / img.naturalHeight
-    const cAspect = cw / ch
-    // object-fit: contain — letterbox to keep aspect ratio.
-    let dispW: number, dispH: number
-    if (iAspect > cAspect) {
-      dispW = cw
-      dispH = cw / iAspect
-    } else {
-      dispH = ch
-      dispW = ch * iAspect
-    }
-    const box: Rect = {
-      x: (cw - dispW) / 2,
-      y: (ch - dispH) / 2,
-      w: dispW,
-      h: dispH,
-    }
-    setImgBox(box)
+
+    const parentW = container.parentElement?.getBoundingClientRect().width ?? MAX_VIEWPORT_WIDTH
+    const maxW = Math.min(
+      MAX_VIEWPORT_WIDTH,
+      parentW,
+      typeof window !== "undefined" ? window.innerWidth - 48 : MAX_VIEWPORT_WIDTH
+    )
+    const maxH = typeof window !== "undefined"
+      ? Math.min(window.innerHeight * MAX_VIEWPORT_HEIGHT_RATIO, 560)
+      : 560
+
+    const { w: dispW, h: dispH } = fitImageViewport(
+      img.naturalWidth,
+      img.naturalHeight,
+      maxW,
+      maxH
+    )
+
+    setViewport({ w: dispW, h: dispH })
     setNatural({ w: img.naturalWidth, h: img.naturalHeight })
 
-    // Default crop: 80% of whichever axis the aspect ratio constrains.
-    let cropW = dispW * 0.8
+    const box: Rect = { x: 0, y: 0, w: dispW, h: dispH }
+    setImgBox(box)
+
+    // Default crop: centred portrait frame, clamped to the full photo bounds.
+    let cropW = Math.min(dispW, dispH * aspectRatio)
     let cropH = cropW / aspectRatio
-    if (cropH > dispH * 0.95) {
-      cropH = dispH * 0.95
+    if (cropH > dispH) {
+      cropH = dispH
       cropW = cropH * aspectRatio
     }
     setCrop({
-      x: box.x + (dispW - cropW) / 2,
-      y: box.y + (dispH - cropH) / 2,
+      x: (dispW - cropW) / 2,
+      y: (dispH - cropH) / 2,
       w: cropW,
       h: cropH,
     })
@@ -206,15 +223,17 @@ export default function PhotoCropper({
     touchAction: "none",
   }
 
+  const aspectLabel = aspectRatio === 3 / 4 ? "3:4" : `${aspectRatio.toFixed(2)}:1`
+
   return (
     <div>
       <div
         ref={containerRef}
         style={{
           position: "relative",
-          width: "100%",
-          maxWidth: 360,
-          aspectRatio: "3 / 4",
+          width: viewport.w ? `${viewport.w}px` : "100%",
+          height: viewport.h ? `${viewport.h}px` : 280,
+          maxWidth: "100%",
           margin: "0 auto",
           background: "#0f172a",
           borderRadius: 12,
@@ -286,7 +305,7 @@ export default function PhotoCropper({
       </div>
 
       <div style={{ marginTop: 10, fontSize: 11, color: "#64748b", textAlign: "center", lineHeight: 1.5 }}>
-        Drag the box to move · Drag corners to resize · Aspect locked to 3:4
+        Drag the box to move · Drag corners to resize · Crop anywhere on the full photo · Aspect locked to {aspectLabel}
       </div>
 
       <div style={{ display: "flex", gap: 10, marginTop: 14 }}>

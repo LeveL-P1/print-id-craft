@@ -12,14 +12,17 @@ const supabaseImageHost = (() => {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Disable SWC Minify due to SyntaxError in onnxruntime-web pre-compiled code
-  swcMinify: false,
   // Performance: enable React strict mode (catches bugs early)
   reactStrictMode: true,
   // Performance: compress responses
   compress: true,
   // Security: power-hide
   poweredByHeader: false,
+  // Next 16 uses Turbopack by default; this app relies on custom webpack
+  // (WASM/ONNX). Keep webpack for production builds on Vercel.
+  turbopack: {},
+  // Externalize heavy WASM packages from the server bundle.
+  serverExternalPackages: ['@imgly/background-removal'],
   // Performance: optimize images
   images: {
     remotePatterns: supabaseImageHost
@@ -39,7 +42,6 @@ const nextConfig = {
       '@supabase/supabase-js',
       'zod',
     ],
-    serverComponentsExternalPackages: ['@imgly/background-removal'],
     // Cache router segments for faster page transitions
     staleTimes: {
       dynamic: 30, // Cache dynamic pages for 30s
