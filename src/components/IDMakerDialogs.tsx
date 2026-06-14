@@ -1105,7 +1105,7 @@ export function PrintDialog({
           <span style={{ fontSize: 11, color: "#555" }}>(mm)</span>
         </div>
         <div style={{ fontSize: 10, color: "#666", marginTop: 4 }}>
-          Card dimensions are set in the template editor. Adjust the gap below to control spacing.
+          PDF output uses this exact size. Adjust only the gap/position below to control spacing.
         </div>
       </div>
 
@@ -1153,7 +1153,7 @@ export function PrintDialog({
           <span style={{ fontSize: 11, color: "#555" }}>(in mm)</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-          <label style={{ width: 150, fontSize: 11 }}>2nd Position (Card Width)</label>
+          <label style={{ width: 150, fontSize: 11 }}>2nd Card Start X (pitch)</label>
           <WinInput
             type="number"
             value={Number(hPitch.toFixed(1))}
@@ -1174,7 +1174,7 @@ export function PrintDialog({
           <span style={{ fontSize: 11, color: "#555" }}>(in mm)</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <label style={{ width: 150, fontSize: 11 }}>2nd Position (Card Height)</label>
+          <label style={{ width: 150, fontSize: 11 }}>2nd Card Start Y (pitch)</label>
           <WinInput
             type="number"
             value={Number(vPitch.toFixed(1))}

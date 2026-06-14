@@ -1,8 +1,10 @@
 "use client"
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useParams } from "next/navigation"
-import dynamic from "next/dynamic"
 import PhotoVerifier from "@/components/PhotoVerifier"
+import JpgCardPreview from "@/components/JpgCardPreview"
+import PhotoCropper from "@/components/PhotoCropper"
+import PhotoBgProcessor from "@/components/PhotoBgProcessor"
 import {
   getFieldRole,
   resolveFieldValue,
@@ -10,6 +12,8 @@ import {
 } from "@/lib/field-resolver"
 import { formatClassSection } from "@/lib/section-class"
 import { uploadStudentPhotoResilient } from "@/lib/client-photo-upload"
+import { preloadBgRemovalModel } from "@/lib/photo-background"
+import { PHOTO_BG_STATUS, type PhotoBgStatus } from "@/lib/photo-bg-status"
 
 const SUPPORT_PHONE_DISPLAY = "+91 98818 77607"
 const SUPPORT_PHONE_E164 = "+919881877607"
@@ -17,6 +21,24 @@ const SUPPORT_PHONE_WA = "919881877607"
 
 function buildWhatsAppUrl(message: string) {
   return `https://wa.me/${SUPPORT_PHONE_WA}?text=${encodeURIComponent(message)}`
+}
+
+const safeFilePart = (value: string) =>
+  (value || "student")
+    .trim()
+    .replace(/[^a-z0-9]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 50) || "student"
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = fileName
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 function buildSupportWhatsAppMessage(parts: {
@@ -43,9 +65,6 @@ function buildSupportWhatsAppMessage(parts: {
     " Please help."
   )
 }
-
-const JpgCardPreview = dynamic(() => import("@/components/JpgCardPreview"), { ssr: false })
-const PhotoCropper = dynamic(() => import("@/components/PhotoCropper"), { ssr: false })
 
 type FieldConfig = { key: string; label: string; type: string; required: boolean; role?: string }
 type TemplateElement = { 
@@ -140,6 +159,102 @@ const wordCount = (s: string): number =>
   (s || "").trim().split(/\s+/).filter(Boolean).length
 
 const ADDRESS_MIN_WORDS = 5
+
+const DOB_MONTHS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"))
+const DOB_DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0"))
+const DOB_YEARS = Array.from({ length: 90 }, (_, i) => String(new Date().getFullYear() - i))
+
+function parseDobParts(value: string) {
+  const trimmed = (value || "").trim()
+  const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (iso) return { month: iso[2], day: iso[3], year: iso[1] }
+
+  const slash = trimmed.match(/^(\d{1,2}|DD)\/(\d{1,2}|MM)\/(\d{2,4}|YY|YYYY)$/)
+  if (slash) {
+    return {
+      day: slash[1] === "DD" ? "" : slash[1].padStart(2, "0"),
+      month: slash[2] === "MM" ? "" : slash[2].padStart(2, "0"),
+      year: slash[3] === "YY" || slash[3] === "YYYY" ? "" : slash[3].length === 2 ? `20${slash[3]}` : slash[3],
+    }
+  }
+
+  return { month: "", day: "", year: "" }
+}
+
+function buildDobValue(month: string, day: string, year: string) {
+  if (!month && !day && !year) return ""
+  return `${day || "DD"}/${month || "MM"}/${year || "YYYY"}`
+}
+
+function DobSelectInput({
+  value,
+  required,
+  onChange,
+}: {
+  value: string
+  required: boolean
+  onChange: (value: string) => void
+}) {
+  const parts = parseDobParts(value)
+  const update = (next: Partial<typeof parts>) => {
+    const merged = { ...parts, ...next }
+    onChange(buildDobValue(merged.month, merged.day, merged.year))
+  }
+
+  const selectStyle: React.CSSProperties = {
+    width: "100%",
+    minWidth: 0,
+    padding: "12px 10px",
+    fontSize: 14,
+    border: "1.5px solid #cbd5e1",
+    borderRadius: 10,
+    background: "white",
+  }
+
+  const partStyle: React.CSSProperties = {
+    flex: 1,
+    minWidth: 0,
+  }
+
+  const partLabelStyle: React.CSSProperties = {
+    display: "block",
+    fontSize: 11,
+    fontWeight: 700,
+    color: "#475569",
+    marginBottom: 5,
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <div style={partStyle}>
+          <label style={partLabelStyle}>Date</label>
+          <select required={required} aria-label="Date" value={parts.day} onChange={(e) => update({ day: e.target.value })} style={selectStyle}>
+            <option value="">DD</option>
+            {DOB_DAYS.map((day) => <option key={day} value={day}>{day}</option>)}
+          </select>
+        </div>
+        <div style={partStyle}>
+          <label style={partLabelStyle}>Month</label>
+          <select required={required} aria-label="Month" value={parts.month} onChange={(e) => update({ month: e.target.value })} style={selectStyle}>
+            <option value="">MM</option>
+            {DOB_MONTHS.map((month) => <option key={month} value={month}>{month}</option>)}
+          </select>
+        </div>
+        <div style={partStyle}>
+          <label style={partLabelStyle}>Year</label>
+          <select required={required} aria-label="Year" value={parts.year} onChange={(e) => update({ year: e.target.value })} style={selectStyle}>
+            <option value="">YYYY</option>
+            {DOB_YEARS.map((year) => <option key={year} value={year}>{year}</option>)}
+          </select>
+        </div>
+      </div>
+      <span style={{ fontSize: 11, color: "#94a3b8", marginTop: 4, display: "block" }}>
+        Format: DD/MM/YYYY
+      </span>
+    </div>
+  )
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SampleReferencePhoto — shows a clear illustration of "what a good ID photo
@@ -295,7 +410,7 @@ const IDCardPreview = ({
           }}
         >
           {el.type === 'photo' ? (
-            <img src={croppedPhoto || "https://via.placeholder.com/150?text=Photo"} alt="Student" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <img src={croppedPhoto || "https://via.placeholder.com/150?text=Photo"} alt="Student" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           ) : el.type === 'logo' ? (
             <img src={config?.schoolLogo || "https://via.placeholder.com/150?text=Logo"} alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           ) : el.type === 'qr' ? (
@@ -313,7 +428,7 @@ export default function SubmitPage() {
   const params = useParams()
   const token = params.token as string
 
-  const [step, setStep] = useState<"loading" | "error" | "form" | "photo" | "crop" | "review" | "success">("loading")
+  const [step, setStep] = useState<"loading" | "error" | "form" | "photo" | "crop" | "bg" | "review" | "success">("loading")
   const [errorMsg, setErrorMsg] = useState("")
   const [config, setConfig] = useState<FormConfig | null>(null)
   const [formData, setFormData] = useState<Record<string, string>>({})
@@ -325,6 +440,10 @@ export default function SubmitPage() {
   const [result, setResult] = useState<{ serialNumber: string; studentId: string } | null>(null)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [alertMsg, setAlertMsg] = useState("")
+  const [missingFieldKey, setMissingFieldKey] = useState("")
+  const [previewDownloadStatus, setPreviewDownloadStatus] = useState<"" | "downloaded" | "unavailable">("")
+  const successPreviewRef = useRef<HTMLDivElement>(null)
+  const previewDownloadAttemptedRef = useRef(false)
   const [duplicateBlocked, setDuplicateBlocked] = useState(false)
   const [duplicateInfo, setDuplicateInfo] = useState<{
     studentName: string
@@ -339,6 +458,7 @@ export default function SubmitPage() {
   } | null>(null)
   const [photoVerified, setPhotoVerified] = useState(false)
   const [photoUploadWarning, setPhotoUploadWarning] = useState("")
+  const [photoBgStatus, setPhotoBgStatus] = useState<PhotoBgStatus>("")
 
   // Visible 10-digit text for each mobile-intent field, kept separate from
   // formData so we never round-trip the "+91 " prefix through the input value
@@ -440,6 +560,19 @@ export default function SubmitPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData, photoVerified, step, draftRestored])
 
+  // Preload the ISNet background-removal model while the parent is on photo/crop
+  // so AI processing after crop feels faster on first use.
+  useEffect(() => {
+    if (step === "photo" || step === "crop") {
+      preloadBgRemovalModel().catch(() => {})
+    }
+  }, [step])
+
+  const goToBgProcessing = useCallback(() => {
+    setPhotoBgStatus("")
+    setStep("bg")
+  }, [])
+
   const clearDraft = () => {
     if (typeof window === "undefined") return
     try { window.localStorage.removeItem(DRAFT_KEY) } catch { /* ignore */ }
@@ -483,9 +616,75 @@ export default function SubmitPage() {
     return () => window.clearTimeout(timer)
   }, [config, formData, step, checkSubmissionStatus])
 
+  const getMissingFieldStyle = (key: string): React.CSSProperties =>
+    missingFieldKey === key
+      ? {
+          outline: "2px solid #ef4444",
+          outlineOffset: 4,
+          borderRadius: 12,
+          background: "#fff7f7",
+        }
+      : {}
+
+  const scrollToField = (key: string) => {
+    if (typeof window === "undefined") return
+    window.setTimeout(() => {
+      document
+        .querySelector(`[data-field-key="${key.replace(/"/g, '\\"')}"]`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" })
+    }, 50)
+  }
+
+  const showMissingField = (key: string, message: string) => {
+    setMissingFieldKey(key)
+    setAlertMsg(message)
+    scrollToField(key)
+  }
+
   const handleFieldChange = (key: string, value: string) => {
     setFormData(prev => ({ ...prev, [key]: value }))
+    if (missingFieldKey === key) setMissingFieldKey("")
   }
+
+  const getPreviewFileName = useCallback(() => {
+    const studentName = resolveFieldValue(formData, "name")
+    const serial = result?.serialNumber || "preview"
+    return `${safeFilePart(`${studentName || "student"}-${serial}`)}-id-preview.jpg`
+  }, [formData, result?.serialNumber])
+
+  const downloadRenderedPreview = useCallback(async () => {
+    const canvas = successPreviewRef.current?.querySelector("canvas")
+    if (!canvas) throw new Error("Preview image is not ready yet")
+
+    const blob = await new Promise<Blob | null>((resolve) => {
+      try {
+        canvas.toBlob(resolve, "image/jpeg", 0.92)
+      } catch {
+        resolve(null)
+      }
+    })
+    if (!blob) throw new Error("Preview image could not be prepared")
+
+    downloadBlob(blob, getPreviewFileName())
+    setPreviewDownloadStatus("downloaded")
+  }, [getPreviewFileName])
+
+  useEffect(() => {
+    if (step !== "success" || !result || previewDownloadAttemptedRef.current) return
+    if (!config?.templateImageUrl || !config.fieldMappings?.length) {
+      setPreviewDownloadStatus("unavailable")
+      return
+    }
+
+    previewDownloadAttemptedRef.current = true
+    const timer = window.setTimeout(() => {
+      downloadRenderedPreview().catch((downloadErr) => {
+        console.warn("Could not auto-download rendered ID preview:", downloadErr)
+        setPreviewDownloadStatus("unavailable")
+      })
+    }, 900)
+    return () => window.clearTimeout(timer)
+  }, [step, result, config?.templateImageUrl, config?.fieldMappings, downloadRenderedPreview])
 
   // Note: PhotoVerifier now returns stable data URLs directly
 
@@ -506,6 +705,9 @@ export default function SubmitPage() {
       if (role === "mobile" && f.required && stripIndianPrefix(value).length !== 10) {
         return "Mobile number must be exactly 10 digits (after +91)."
       }
+      if (role === "dob" && f.required && !/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
+        return "Please select date of birth in DD/MM/YYYY format."
+      }
       if (role === "branch" && f.required && value.length < 2) return "Please enter the branch name."
     }
     if (!photoFile || !photoPreview || !photoVerified) {
@@ -514,21 +716,19 @@ export default function SubmitPage() {
     return ""
   }
 
-  const handleFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleFormSubmit = (e?: React.FormEvent | React.MouseEvent) => {
+    e?.preventDefault()
 
-    // Per-field validation for the parent-friendly intents. We surface the
-    // first error inline via setAlertMsg + early return so the form never
-    // submits with garbage data (a sub-5-word address, an incomplete mobile
-    // number, etc.).
+    // Per-field validation for the parent-friendly intents. We show the first
+    // missing detail, highlight that input, and scroll it into view.
     if (config) {
       if (config.usesClassPicker) {
         if (!formData.classGrade?.trim()) {
-          setAlertMsg("Please select a class.")
+          showMissingField("classGrade", "Please select a class.")
           return
         }
         if (!formData.division?.trim()) {
-          setAlertMsg("Please select a division.")
+          showMissingField("division", "Please select a division.")
           return
         }
       }
@@ -537,29 +737,34 @@ export default function SubmitPage() {
         const value = (formData[f.key] || "").trim()
         const role = fieldRole(f)
         if (f.required && !value) {
-          setAlertMsg(`Please fill in ${getCleanLabel(f.label)}.`)
+          showMissingField(f.key, `Please fill in ${getCleanLabel(f.label)}.`)
           return
         }
         if (role === "address" && f.required) {
           if (wordCount(value) < ADDRESS_MIN_WORDS) {
-            setAlertMsg(`Please write the full address — at least ${ADDRESS_MIN_WORDS} words (house no, street, area, city, pincode).`)
+            showMissingField(f.key, `Please write the full address - at least ${ADDRESS_MIN_WORDS} words (house no, street, area, city, pincode).`)
             return
           }
         }
         if (role === "mobile" && f.required) {
           const local = stripIndianPrefix(value)
           if (local.length !== 10) {
-            setAlertMsg("Mobile number must be exactly 10 digits (after +91).")
+            showMissingField(f.key, "Mobile number must be exactly 10 digits (after +91).")
             return
           }
         }
+        if (role === "dob" && f.required && !/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
+          showMissingField(f.key, "Please select the full date of birth: Date, Month, and Year.")
+          return
+        }
         if (role === "branch" && f.required && value.length < 2) {
-          setAlertMsg("Please enter the branch name.")
+          showMissingField(f.key, "Please enter the branch name.")
           return
         }
       }
     }
     setAlertMsg("")
+    setMissingFieldKey("")
 
     if (!photoFile || !photoPreview || !photoVerified) {
       setStep("photo")
@@ -572,6 +777,7 @@ export default function SubmitPage() {
     const blockReason = getPreviewBlockReason()
     if (blockReason) {
       setAlertMsg(blockReason)
+      setMissingFieldKey("")
       setStep(blockReason.includes("photo") ? "photo" : "form")
       return
     }
@@ -579,7 +785,8 @@ export default function SubmitPage() {
       setCroppedPhoto(photoPreview)
     }
     setAlertMsg("")
-    setStep("review")
+    setMissingFieldKey("")
+    goToBgProcessing()
   }
 
   const handleSubmit = async () => {
@@ -588,6 +795,15 @@ export default function SubmitPage() {
     if (blockReason || !croppedPhoto) {
       setAlertMsg(blockReason || "Please upload a student photo before submitting.")
       setStep(blockReason?.includes("photo") || !croppedPhoto ? "photo" : "form")
+      return
+    }
+    if (
+      config.photoBgColor &&
+      photoBgStatus !== PHOTO_BG_STATUS.PROCESSED &&
+      photoBgStatus !== PHOTO_BG_STATUS.PLAIN
+    ) {
+      setAlertMsg("Please wait while we prepare your photo background, then try again.")
+      goToBgProcessing()
       return
     }
     setSubmitting(true)
@@ -621,7 +837,7 @@ export default function SubmitPage() {
             photoUrl: photoResult.photoUrl,
             photoPath: photoResult.photoPath,
             photoDataUrl: photoResult.photoDataUrl,
-            photoBgStatus: "",
+            photoBgStatus: photoBgStatus || "",
           }),
         })
       } catch (networkErr) {
@@ -645,6 +861,8 @@ export default function SubmitPage() {
         setUploadProgress(100)
         setResult(data.data)
         clearDraft()
+        setPreviewDownloadStatus("")
+        previewDownloadAttemptedRef.current = false
         try {
           const studentName = resolveFieldValue(formData, "name")
           window.localStorage.setItem(SUBMITTED_KEY, JSON.stringify({
@@ -718,7 +936,7 @@ export default function SubmitPage() {
           {config && (
             <div style={{ marginBottom: 24 }}>
               {config.templateImageUrl && config.fieldMappings?.length > 0 ? (
-                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <div ref={successPreviewRef} style={{ display: 'flex', justifyContent: 'center' }}>
                   <JpgCardPreview
                     templateImageUrl={config.templateImageUrl}
                     fieldMappings={config.fieldMappings}
@@ -739,8 +957,45 @@ export default function SubmitPage() {
           )}
 
           <p style={{ fontSize: 13, color: '#94a3b8', marginBottom: 8 }}>Please save this serial number for your records.</p>
+          {previewDownloadStatus === "downloaded" && (
+            <p style={{ fontSize: 12, color: '#16a34a', fontWeight: 700, marginBottom: 8 }}>
+              ID preview image downloaded to your device.
+            </p>
+          )}
+          {previewDownloadStatus === "unavailable" && (
+            <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 8 }}>
+              Automatic preview download was blocked. Your registration is still saved.
+            </p>
+          )}
+          {config?.templateImageUrl && config.fieldMappings?.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                previewDownloadAttemptedRef.current = true
+                downloadRenderedPreview().catch((downloadErr) => {
+                  console.warn("Manual preview download failed:", downloadErr)
+                  setPreviewDownloadStatus("unavailable")
+                })
+              }}
+              style={{
+                width: '100%',
+                maxWidth: 320,
+                margin: '0 auto 12px',
+                padding: '12px 16px',
+                borderRadius: 10,
+                border: 'none',
+                background: 'linear-gradient(135deg, #2563eb, #4f46e5)',
+                color: 'white',
+                fontSize: 14,
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              Download ID Preview
+            </button>
+          )}
           <p style={{ fontSize: 12, color: '#64748b', lineHeight: 1.55, maxWidth: 420, margin: '0 auto' }}>
-            Your uploaded photo will be processed by the manufacturer. The background will be made plain and the photo will be improved for the final ID card.
+            Your photo background has been prepared automatically for the ID card preview.
           </p>
         </div>
       </div>
@@ -965,11 +1220,17 @@ export default function SubmitPage() {
                 fontSize: 12, color: '#92400e', lineHeight: 1.55,
               }}>
                 <strong style={{ display: 'block', marginBottom: 4 }}>Preview only — for reference</strong>
-                This shows how your ID card may look. We have not changed your photo yet.
-                {config?.photoBgColor ? (
-                  <> The manufacturer will make the background plain ({config.photoBgColor}) and prepare your photo for printing.</>
+                {photoBgStatus === PHOTO_BG_STATUS.PROCESSED || photoBgStatus === PHOTO_BG_STATUS.PLAIN ? (
+                  <>Your photo background has been prepared{config?.photoBgColor ? <> ({config.photoBgColor})</> : null} for the ID card preview below.</>
                 ) : (
-                  <> The manufacturer will make the background plain and prepare your photo for printing.</>
+                  <>
+                    This shows how your ID card may look.
+                    {config?.photoBgColor ? (
+                      <> The background will be made plain ({config.photoBgColor}) for printing.</>
+                    ) : (
+                      <> The background will be made plain for printing.</>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -981,7 +1242,7 @@ export default function SubmitPage() {
                 {/* Student Photo Thumbnail */}
                 {croppedPhoto && (
                   <div style={{ padding: '16px 16px 0', display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <img src={croppedPhoto} alt="Photo" style={{ width: 48, height: 60, borderRadius: 6, objectFit: 'cover', border: '2px solid #e2e8f0' }} />
+                    <img src={croppedPhoto} alt="Photo" style={{ width: 48, height: 60, borderRadius: 6, objectFit: 'contain', border: '2px solid #e2e8f0', background: '#f8fafc' }} />
                     <div>
                       <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{resolveFieldValue(formData, "name") || '—'}</div>
                       <div style={{ fontSize: 12, color: '#64748b' }}>{getDisplayClass(config, formData)}</div>
@@ -1055,7 +1316,8 @@ export default function SubmitPage() {
           {/* Alert message */}
           {alertMsg && (
             <div style={{ padding: '12px 16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, color: '#ef4444', fontSize: 13, marginBottom: 16 }}>
-              ⚠️ {alertMsg}
+              <strong>{missingFieldKey ? "Add missing details" : "Please check this"}</strong>
+              <div style={{ marginTop: 3 }}>{alertMsg}</div>
             </div>
           )}
 
@@ -1103,7 +1365,7 @@ export default function SubmitPage() {
             const currentStep = step as string
             const visualIdx =
               currentStep === "form" ? 0
-              : currentStep === "photo" || currentStep === "crop" ? 1
+              : currentStep === "photo" || currentStep === "crop" || currentStep === "bg" ? 1
               : currentStep === "review" ? 2
               : 0
             const currentIdx = visualIdx
@@ -1129,7 +1391,7 @@ export default function SubmitPage() {
         <div style={{ padding: 24 }}>
           {/* FORM STEP */}
           {step === "form" && (
-            <form onSubmit={handleFormSubmit}>
+            <form onSubmit={handleFormSubmit} noValidate>
               {/* Draft-restored banner — shown when we successfully restored
                   the parent's previous progress after an accidental back /
                   refresh / tab close. They can opt out by clicking "Start fresh". */}
@@ -1155,6 +1417,7 @@ export default function SubmitPage() {
                       setPhotoPreview("")
                       setCroppedPhoto("")
                       setPhotoVerified(false)
+                      setPhotoBgStatus("")
                       setDraftBanner(false)
                     }}
                     style={{
@@ -1166,6 +1429,12 @@ export default function SubmitPage() {
                   >
                     Start fresh
                   </button>
+                </div>
+              )}
+              {alertMsg && (
+                <div style={{ padding: '12px 16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, color: '#ef4444', fontSize: 13, marginBottom: 16 }}>
+                  <strong>{missingFieldKey ? "Add missing details" : "Please check this"}</strong>
+                  <div style={{ marginTop: 3 }}>{alertMsg}</div>
                 </div>
               )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -1184,7 +1453,7 @@ export default function SubmitPage() {
                         Assigned from your registration link
                       </span>
                     </div>
-                    <div className="form-group">
+                    <div className="form-group" data-field-key="classGrade" style={getMissingFieldStyle("classGrade")}>
                       <label>
                         Class <span style={{ color: '#ef4444' }}>*</span>
                       </label>
@@ -1193,6 +1462,7 @@ export default function SubmitPage() {
                         value={formData.classGrade || ""}
                         onChange={(e) => {
                           const classGrade = e.target.value
+                          if (missingFieldKey === "classGrade") setMissingFieldKey("")
                           setFormData((prev) => ({
                             ...prev,
                             classGrade,
@@ -1214,7 +1484,7 @@ export default function SubmitPage() {
                         ))}
                       </select>
                     </div>
-                    <div className="form-group">
+                    <div className="form-group" data-field-key="division" style={getMissingFieldStyle("division")}>
                       <label>
                         Division <span style={{ color: '#ef4444' }}>*</span>
                       </label>
@@ -1223,6 +1493,7 @@ export default function SubmitPage() {
                         value={formData.division || ""}
                         onChange={(e) => {
                           const division = e.target.value
+                          if (missingFieldKey === "division") setMissingFieldKey("")
                           setFormData((prev) => ({
                             ...prev,
                             division,
@@ -1277,7 +1548,7 @@ export default function SubmitPage() {
                       ? mobileLocals[field.key]
                       : stripIndianPrefix(value)
                     return (
-                      <div key={field.key} className="form-group">
+                      <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                         <label>
                           {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
@@ -1321,7 +1592,7 @@ export default function SubmitPage() {
                     const wc = wordCount(value)
                     const ok = wc >= ADDRESS_MIN_WORDS
                     return (
-                      <div key={field.key} className="form-group">
+                      <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                         <label>
                           {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
@@ -1351,7 +1622,7 @@ export default function SubmitPage() {
                     const opts = config?.flagColors || []
                     if (opts.length > 0) {
                       return (
-                        <div key={field.key} className="form-group">
+                        <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                           <label>
                             {getCleanLabel(field.label)}
                             {field.required && <span style={{ color: '#ef4444' }}> *</span>}
@@ -1372,7 +1643,7 @@ export default function SubmitPage() {
                     }
                     // Fallback: free text (e.g. first student in the school)
                     return (
-                      <div key={field.key} className="form-group">
+                      <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                         <label>
                           {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
@@ -1391,16 +1662,15 @@ export default function SubmitPage() {
                   // ── Date of birth ──
                   if (role === "dob") {
                     return (
-                      <div key={field.key} className="form-group">
+                      <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                         <label>
                           {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
                         </label>
-                        <input
-                          type="date"
+                        <DobSelectInput
                           required={field.required}
                           value={value}
-                          onChange={e => handleFieldChange(field.key, e.target.value)}
+                          onChange={(nextValue) => handleFieldChange(field.key, nextValue)}
                         />
                       </div>
                     )
@@ -1410,7 +1680,7 @@ export default function SubmitPage() {
                   if (role === "branch") {
                     if (config?.fixedBranch) return null
                     return (
-                      <div key={field.key} className="form-group">
+                      <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                         <label>
                           {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
@@ -1429,7 +1699,7 @@ export default function SubmitPage() {
                   // ── Blood group ──
                   if (role === "bloodgroup") {
                     return (
-                      <div key={field.key} className="form-group">
+                      <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                         <label>
                           {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
@@ -1455,7 +1725,7 @@ export default function SubmitPage() {
                     // "GR No." doesn't see a single-digit roll-number style hint.
                     const example = /gr/.test(lbl) || /admission/.test(lbl) ? "2851" : "7"
                     return (
-                      <div key={field.key} className="form-group">
+                      <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                         <label>
                           {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
@@ -1487,7 +1757,7 @@ export default function SubmitPage() {
                             : "Darshan Sunil Choudhari"
                     const showOrderHint = role === "name" && !lbl.includes("surname")
                     return (
-                      <div key={field.key} className="form-group">
+                      <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                         <label>
                           {getCleanLabel(field.label)}
                           {showOrderHint && (
@@ -1521,7 +1791,7 @@ export default function SubmitPage() {
 
                   // ── Generic fallback: previous behaviour ──
                   return (
-                    <div key={field.key} className="form-group">
+                    <div key={field.key} className="form-group" data-field-key={field.key} style={getMissingFieldStyle(field.key)}>
                       <label>
                         {getCleanLabel(field.label)}
                         {field.required && <span style={{ color: '#ef4444' }}> *</span>}
@@ -1556,7 +1826,12 @@ export default function SubmitPage() {
                   )
                 })}
               </div>
-              <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: 24, padding: '14px', fontSize: 15 }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleFormSubmit}
+                style={{ width: '100%', marginTop: 24, padding: '14px', fontSize: 15 }}
+              >
                 Next: Upload Photo →
               </button>
             </form>
@@ -1607,7 +1882,7 @@ export default function SubmitPage() {
                           background: config.photoBgColor,
                           border: '1px solid rgba(0,0,0,0.12)',
                         }} />
-                        <span>Your ID card will use a plain background. The school will prepare your photo for printing.</span>
+                        <span>We automatically remove the background and apply this colour to your ID photo.</span>
                       </div>
                     )}
                   </div>
@@ -1619,7 +1894,10 @@ export default function SubmitPage() {
                   onPhotoAccepted={(file, previewUrl) => {
                     setPhotoFile(file)
                     setPhotoPreview(previewUrl)
+                    setCroppedPhoto("")
                     setPhotoVerified(true)
+                    setPhotoBgStatus("")
+                    setAlertMsg("")
                     setStep("crop")
                   }}
                   schoolBgColor={config?.photoBgColor}
@@ -1633,12 +1911,12 @@ export default function SubmitPage() {
                     color: '#16a34a',
                     fontWeight: 600, marginBottom: 12, textAlign: 'center',
                   }}>
-                    ✅ Photo passed all checks — tap Continue to crop and review
+                    Photo passed all checks - tap Continue to crop
                   </div>
                   <div style={{ borderRadius: 10, overflow: 'hidden', border: '2px solid #22c55e', maxWidth: 200, margin: '0 auto' }}>
                     <img src={photoPreview} alt="Preview" style={{ width: '100%', display: 'block' }} />
                   </div>
-                  <button onClick={() => { setPhotoPreview(""); setPhotoFile(null); setCroppedPhoto(""); setPhotoVerified(false) }} className="btn btn-outline" style={{ width: '100%', marginTop: 12, fontSize: 12 }}>
+                  <button onClick={() => { setPhotoPreview(""); setPhotoFile(null); setCroppedPhoto(""); setPhotoVerified(false); setPhotoBgStatus("") }} className="btn btn-outline" style={{ width: '100%', marginTop: 12, fontSize: 12 }}>
                     Choose Different Photo
                   </button>
                 </div>
@@ -1658,9 +1936,11 @@ export default function SubmitPage() {
                     type="button"
                     className="btn btn-primary btn-fluid"
                     style={{ flex: 1, justifyContent: 'center' }}
-                    onClick={() => setStep("crop")}
+                    onClick={() => {
+                      setStep("crop")
+                    }}
                   >
-                    Crop & Continue
+                    Continue to Crop
                   </button>
                 </div>
               )}
@@ -1686,7 +1966,6 @@ export default function SubmitPage() {
                 photoUrl={photoPreview}
                 aspectRatio={3 / 4}
                 onCropped={(croppedDataUrl) => {
-                  setPhotoPreview(croppedDataUrl)
                   setCroppedPhoto(croppedDataUrl)
                   const blockReason = getPreviewBlockReason()
                   if (blockReason) {
@@ -1695,7 +1974,7 @@ export default function SubmitPage() {
                     return
                   }
                   setAlertMsg("")
-                  setStep("review")
+                  goToBgProcessing()
                 }}
                 onCancel={() => {
                   setCroppedPhoto(photoPreview)
@@ -1713,12 +1992,35 @@ export default function SubmitPage() {
                     setPhotoFile(null)
                     setCroppedPhoto("")
                     setPhotoVerified(false)
+                    setPhotoBgStatus("")
                     setStep("photo")
                   }}
                 >
-                  ← Choose a different photo
+                  Choose a different photo
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* BACKGROUND REMOVAL STEP — runs ISNet locally, same model as manufacturer */}
+          {step === "bg" && croppedPhoto && (
+            <div>
+              <PhotoBgProcessor
+                photoUrl={croppedPhoto}
+                defaultBgColor={config?.photoBgColor || "#FFFFFF"}
+                autoConfirm
+                autoSkipAfterMs={0}
+                onProcessed={(processedDataUrl, status) => {
+                  setCroppedPhoto(processedDataUrl)
+                  setPhotoBgStatus(status)
+                  setStep("review")
+                }}
+                onSkip={(status) => {
+                  setPhotoBgStatus(status)
+                  setStep("review")
+                }}
+                onStatus={setPhotoBgStatus}
+              />
             </div>
           )}
         </div>

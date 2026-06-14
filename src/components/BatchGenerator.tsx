@@ -45,6 +45,12 @@ type FieldMapping = {
   locked?: boolean
 }
 
+const formatMm = (value: number | undefined | null) => {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return "0"
+  return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, "")
+}
+
 // Editor reference image width (px). Field.fontSize is stored relative to this.
 const BATCH_EDITOR_REFERENCE_WIDTH = 600
 
@@ -2033,7 +2039,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
               <span style={{ fontSize: 16 }}>🪪</span>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 11, marginBottom: 1 }}>Card Size (Saved)</div>
-                <div style={{ fontWeight: 600 }}>{templateCardDims.w} × {templateCardDims.h} mm</div>
+                <div style={{ fontWeight: 600 }}>{formatMm(templateCardDims.w)} × {formatMm(templateCardDims.h)} mm</div>
               </div>
             </div>
           )}
@@ -2054,7 +2060,10 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
               <div>
                 <div style={{ fontWeight: 700, fontSize: 11, marginBottom: 1 }}>Print Setup (Saved)</div>
                 <div style={{ fontWeight: 600 }}>
-                  {printConfig.paper} ({printConfig.paperWidth}×{printConfig.paperHeight}mm) · Card {printConfig.h2ndPosition}×{printConfig.v2ndPosition}mm
+                  {printConfig.paper} ({formatMm(printConfig.paperWidth)}×{formatMm(printConfig.paperHeight)}mm) · Card {formatMm(templateCardDims?.w ?? printConfig.cardWidthMm)}×{formatMm(templateCardDims?.h ?? printConfig.cardHeightMm)}mm
+                </div>
+                <div style={{ fontSize: 10, color: "#3b82f6", marginTop: 1 }}>
+                  Pitch/spacing: H {formatMm(printConfig.h2ndPosition)}mm · V {formatMm(printConfig.v2ndPosition)}mm
                 </div>
               </div>
             </div>
