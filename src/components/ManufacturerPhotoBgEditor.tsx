@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { processPhotoBackgroundLocal } from "@/lib/photo-bg-composite-client"
 import { prepareStudentPhotoForUpload } from "@/lib/client-photo-upload"
 import { preloadBgRemovalModel } from "@/lib/photo-background"
@@ -35,7 +35,7 @@ export default function ManufacturerPhotoBgEditor({
   const [processedUrl, setProcessedUrl] = useState<string | null>(null)
   const [error, setError] = useState("")
   const [modelReady, setModelReady] = useState(false)
-  const startedRef = useRef(false)
+  const [colorSaved, setColorSaved] = useState(true)
 
   useEffect(() => {
     preloadBgRemovalModel()
@@ -49,8 +49,7 @@ export default function ManufacturerPhotoBgEditor({
   }, [photoUrl])
 
   const runProcessing = useCallback(async () => {
-    if (!photoUrl || startedRef.current) return
-    startedRef.current = true
+    if (!photoUrl) return
     setProcessing(true)
     setError("")
     setProcessedUrl(null)
@@ -67,7 +66,6 @@ export default function ManufacturerPhotoBgEditor({
       )
       setProcessedUrl(dataUrl)
     } catch (err: unknown) {
-      startedRef.current = false
       const message = err instanceof Error ? err.message : "Background removal failed"
       setError(message)
     } finally {
@@ -75,24 +73,33 @@ export default function ManufacturerPhotoBgEditor({
     }
   }, [photoUrl, bgColor])
 
-  useEffect(() => {
-    if (!photoUrl) return
-    const timer = window.setTimeout(() => {
-      startedRef.current = false
-      runProcessing()
-    }, 300)
-    return () => window.clearTimeout(timer)
-  }, [photoUrl, bgColor, runProcessing])
-
-  const handleRetry = () => {
-    startedRef.current = false
-    runProcessing()
-  }
-
   const handleColorChange = (color: string) => {
     setBgColor(color.toUpperCase())
-    startedRef.current = false
+    setColorSaved(false)
     setProcessedUrl(null)
+  }
+
+  const handleSaveColor = async (): Promise<boolean> => {
+    setSaving(true)
+    setError("")
+    try {
+      await onBgColorCommit?.(bgColor)
+      setColorSaved(true)
+      return true
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to save background colour")
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleRunAi = async () => {
+    if (!colorSaved) {
+      const saved = await handleSaveColor()
+      if (!saved) return
+    }
+    await runProcessing()
   }
 
   const handleSave = async () => {
@@ -174,6 +181,9 @@ export default function ManufacturerPhotoBgEditor({
                   borderRadius: 8, fontSize: 12, fontWeight: 600,
                 }}
               />
+              <div style={{ marginTop: 6, fontSize: 11, color: colorSaved ? "#16a34a" : "#b45309", fontWeight: 600 }}>
+                {colorSaved ? "Colour saved. Ready to run AI." : "Save colour before processing."}
+              </div>
             </div>
           </div>
 
@@ -239,11 +249,19 @@ export default function ManufacturerPhotoBgEditor({
             </button>
             <button
               className="btn btn-outline"
-              onClick={handleRetry}
+              onClick={() => { void handleSaveColor() }}
+              disabled={processing || saving}
+              style={{ fontSize: 13, borderColor: "#0ea5e9", color: "#0284c7" }}
+            >
+              {saving && !processedUrl ? "Saving..." : "Save Colour"}
+            </button>
+            <button
+              className="btn btn-outline"
+              onClick={handleRunAi}
               disabled={processing || saving}
               style={{ fontSize: 13, borderColor: "#8b5cf6", color: "#7c3aed" }}
             >
-              Re-run AI
+              {processedUrl ? "Re-run AI" : "Run AI"}
             </button>
             <button
               className="btn btn-primary"
