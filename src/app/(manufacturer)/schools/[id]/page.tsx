@@ -6,7 +6,9 @@ import { toast } from "sonner"
 import dynamic from "next/dynamic"
 import {
   DEFAULT_CLASS_OPTIONS,
+  DIVISIONS,
   SECTION_TYPE_LABELS,
+  formatClassSection,
   resolveEffectiveClassOptions,
   type SectionType,
 } from "@/lib/section-class"
@@ -174,6 +176,9 @@ export default function SchoolDetailPage() {
   const [studentTotal, setStudentTotal] = useState(0)
   const [statusFilter, setStatusFilter] = useState("")
   const [classFilter, setClassFilter] = useState("")
+  const [gradeClassFilter, setGradeClassFilter] = useState("")
+  const [showStudentAddSection, setShowStudentAddSection] = useState(false)
+  const [studentTabNewSectionName, setStudentTabNewSectionName] = useState("")
   const [exportingFormat, setExportingFormat] = useState<"csv" | "excel" | "archive" | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [searchInput, setSearchInput] = useState("")
@@ -370,15 +375,19 @@ export default function SchoolDetailPage() {
 
   const fetchStudents = async (
     page = 1,
-    overrides?: { status?: string; classId?: string; search?: string }
+    overrides?: { status?: string; classId?: string; classGrade?: string; division?: string; search?: string }
   ) => {
     try {
       const params = new URLSearchParams({ page: String(page), limit: "50" })
       const status = overrides?.status ?? statusFilter
       const classId = overrides?.classId ?? classFilter
+      const classGrade = overrides?.classGrade ?? (gradeClassFilter ? gradeClassFilter.split("|")[0] : "")
+      const division = overrides?.division ?? (gradeClassFilter ? gradeClassFilter.split("|")[1] || "" : "")
       const search = overrides?.search ?? searchQuery
       if (status) params.set("status", status)
       if (classId) params.set("classId", classId)
+      if (classGrade) params.set("classGrade", classGrade)
+      if (division) params.set("division", division)
       if (search) params.set("search", search)
       const res = await fetch(`/api/schools/${schoolId}/students?${params}`, { cache: 'no-store' })
       const data = await res.json()
@@ -420,6 +429,7 @@ export default function SchoolDetailPage() {
   useEffect(() => {
     setStatusFilter("")
     setClassFilter("")
+    setGradeClassFilter("")
     setSearchQuery("")
     setSearchInput("")
     setStudentPage(1)
@@ -444,7 +454,12 @@ export default function SchoolDetailPage() {
       setTabLoading(true)
       fetchStudents().finally(() => setTabLoading(false))
     }
-  }, [statusFilter, classFilter, searchQuery])
+  }, [statusFilter, classFilter, gradeClassFilter, searchQuery])
+
+  useEffect(() => {
+    setGradeClassFilter("")
+    setStudentPage(1)
+  }, [classFilter])
 
   // Lazy-load tab data when switching tabs
   useEffect(() => {
@@ -529,6 +544,73 @@ export default function SchoolDetailPage() {
       setAddingClass(false)
     }
   }
+
+  const handleAddSectionFromStudentsTab = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!studentTabNewSectionName.trim()) return
+    setAddingClass(true)
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/classes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: studentTabNewSectionName.trim() }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        toast.success("Section created!")
+        setStudentTabNewSectionName("")
+        setShowStudentAddSection(false)
+        await fetchClasses(false)
+        if (data.data?.id) setClassFilter(data.data.id)
+      } else {
+        toast.error(data.error || "Failed to create section")
+      }
+    } catch {
+      toast.error("Failed to create section")
+    } finally {
+      setAddingClass(false)
+    }
+  }
+
+  const selectedStudentSection = useMemo(
+    () => classes.find((c) => c.id === classFilter) || null,
+    [classes, classFilter]
+  )
+
+  const sectionClassPickerOptions = useMemo(() => {
+    if (!selectedStudentSection) return []
+    const grades = resolveEffectiveClassOptions(
+      selectedStudentSection.classOptions,
+      selectedStudentSection.sectionType,
+      selectedStudentSection.name
+    )
+    const seen = new Set<string>()
+    const options: Array<{ value: string; label: string }> = []
+
+    const addOption = (grade: string, division: string, label?: string) => {
+      const value = `${grade}|${division}`
+      if (seen.has(value)) return
+      seen.add(value)
+      options.push({
+        value,
+        label: label || formatClassSection(grade, division),
+      })
+    }
+
+    for (const grade of grades) {
+      for (const div of DIVISIONS) addOption(grade, div)
+    }
+
+    for (const { label } of selectedStudentSection.studentBreakdown?.byClass || []) {
+      const parsed = label.match(/^(.+?)\s*-+\s*([A-M])$/i)
+      if (parsed) addOption(parsed[1].trim(), parsed[2].toUpperCase(), label)
+      else if (label && label !== "Unassigned") addOption(label, "", label)
+    }
+
+    return options.sort((a, b) =>
+      a.label.localeCompare(b.label, undefined, { numeric: true })
+    )
+  }, [selectedStudentSection])
 
   const startEditClassOptions = (cls: ClassData) => {
     setEditingClassOptionsFor(cls.id)
@@ -2645,9 +2727,9 @@ export default function SchoolDetailPage() {
               )}
             </div>
 
-            <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
               <input placeholder="Search by name or serial..." value={searchInput} onChange={e => { const v = e.target.value; setSearchInput(v); if (searchTimerRef.current) clearTimeout(searchTimerRef.current); searchTimerRef.current = setTimeout(() => { setSearchQuery(v); setStudentPage(1); }, 400); }} style={{ height: 40, padding: '0 14px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 14, flex: 1, minWidth: 200 }} />
-              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ height: 40, padding: '0 12px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 13 }}>
+              <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setStudentPage(1) }} style={{ height: 40, padding: '0 12px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 13, minWidth: 130 }}>
                 <option value="">All Status</option>
                 <option value="SUBMITTED">Submitted</option>
                 <option value="APPROVED">Approved</option>
@@ -2655,31 +2737,101 @@ export default function SchoolDetailPage() {
                 <option value="PRINTED">Printed</option>
                 <option value="PENDING">Pending</option>
               </select>
-              <select value={classFilter} onChange={e => setClassFilter(e.target.value)} style={{ height: 40, padding: '0 12px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 13 }}>
-                <option value="">All Sections</option>
-                {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
             </div>
 
-            {classes.some((c) => (c.studentBreakdown?.byClass.length || 0) > 0) && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-                {classes.flatMap((section) =>
-                  (section.studentBreakdown?.byClass || []).map(({ label, count }) => (
-                    <span
-                      key={`${section.id}-${label}`}
-                      className="status-badge status-submitted"
-                      style={{ fontSize: 12 }}
-                    >
-                      {section.name} · {label}: {count}
-                    </span>
-                  ))
-                )}
+            <div style={{ display: 'flex', gap: 12, marginBottom: showStudentAddSection ? 8 : 20, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 180 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 }}>1. Section</label>
+                <select
+                  value={classFilter}
+                  onChange={(e) => { setClassFilter(e.target.value); setStudentPage(1) }}
+                  style={{ height: 40, padding: '0 12px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 13, minWidth: 180 }}
+                >
+                  <option value="">All Sections</option>
+                  {classes.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
               </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 180 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 }}>2. Class</label>
+                <select
+                  value={gradeClassFilter}
+                  onChange={(e) => { setGradeClassFilter(e.target.value); setStudentPage(1) }}
+                  disabled={!classFilter}
+                  style={{
+                    height: 40,
+                    padding: '0 12px',
+                    border: '1.5px solid #e2e8f0',
+                    borderRadius: 10,
+                    fontSize: 13,
+                    minWidth: 180,
+                    opacity: classFilter ? 1 : 0.55,
+                    cursor: classFilter ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  <option value="">{classFilter ? "All Classes in Section" : "Select section first"}</option>
+                  {sectionClassPickerOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, justifyContent: 'flex-end' }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'transparent' }}>.</label>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => setShowStudentAddSection((v) => !v)}
+                  style={{ height: 40, padding: '0 14px', fontSize: 13, whiteSpace: 'nowrap' }}
+                >
+                  + Add Section
+                </button>
+              </div>
+            </div>
+
+            {showStudentAddSection && (
+              <form
+                onSubmit={handleAddSectionFromStudentsTab}
+                style={{
+                  display: 'flex',
+                  gap: 8,
+                  marginBottom: 20,
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  padding: 12,
+                  background: '#f8fafc',
+                  borderRadius: 10,
+                  border: '1px solid #e2e8f0',
+                }}
+              >
+                <input
+                  placeholder="New section name (e.g. Pre Primary, Other)"
+                  value={studentTabNewSectionName}
+                  onChange={(e) => setStudentTabNewSectionName(e.target.value)}
+                  style={{ height: 38, padding: '0 12px', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: 13, flex: 1, minWidth: 200 }}
+                />
+                <button type="submit" className="btn btn-primary" disabled={addingClass || !studentTabNewSectionName.trim()} style={{ height: 38, padding: '0 16px', fontSize: 13 }}>
+                  {addingClass ? "Adding…" : "Create Section"}
+                </button>
+                <button type="button" className="btn btn-outline" onClick={() => setShowStudentAddSection(false)} style={{ height: 38, padding: '0 12px', fontSize: 13 }}>
+                  Cancel
+                </button>
+              </form>
             )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div style={{ fontSize: 13, color: '#64748b' }}>
                 {studentTotal} students found
+                {classFilter && selectedStudentSection && (
+                  <span style={{ marginLeft: 8, color: '#3b82f6' }}>
+                    · {selectedStudentSection.name}
+                    {gradeClassFilter && sectionClassPickerOptions.find((o) => o.value === gradeClassFilter)
+                      ? ` · ${sectionClassPickerOptions.find((o) => o.value === gradeClassFilter)?.label}`
+                      : ""}
+                  </span>
+                )}
                 {(() => { const missing = students.filter(s => !s.photoUrl).length; return missing > 0 ? (
                   <span style={{ marginLeft: 12, fontSize: 12, fontWeight: 600, color: '#ef4444', background: '#fef2f2', padding: '3px 10px', borderRadius: 6 }}>
                     📷 {missing} missing photos

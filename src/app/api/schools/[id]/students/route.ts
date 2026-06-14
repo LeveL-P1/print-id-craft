@@ -25,21 +25,50 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
     const limit = Math.min(parseInt(url.searchParams.get("limit") || "50"), 200)
     const status = url.searchParams.get("status")
     const classId = url.searchParams.get("classId")
+    const classGrade = url.searchParams.get("classGrade")?.trim()
+    const division = url.searchParams.get("division")?.trim()
     const search = url.searchParams.get("search")
 
     const where: any = { schoolId: params.id }
     if (status) where.status = status
     if (classId) where.classId = classId
 
+    const andFilters: any[] = []
+
+    if (classGrade) {
+      andFilters.push({
+        OR: [
+          { formData: { path: ["classGrade"], equals: classGrade } },
+          { formData: { path: ["CLASSGRADE"], equals: classGrade } },
+        ],
+      })
+    }
+
+    if (division) {
+      andFilters.push({
+        OR: [
+          { formData: { path: ["division"], equals: division } },
+          { formData: { path: ["division"], equals: division.toLowerCase() } },
+          { formData: { path: ["DIVISION"], equals: division } },
+        ],
+      })
+    }
+
     // Search by serial number or form data name fields (check all common name keys)
     if (search && search.trim()) {
       const q = search.trim()
       const nq = normalizeFormValue(q)
-      where.OR = [
-        { serialNumber: { contains: q, mode: "insensitive" } },
-        { fullName: { contains: q, mode: "insensitive" } },
-        ...(nq ? [{ normalizedSearchText: { contains: nq } }] : []),
-      ]
+      andFilters.push({
+        OR: [
+          { serialNumber: { contains: q, mode: "insensitive" } },
+          { fullName: { contains: q, mode: "insensitive" } },
+          ...(nq ? [{ normalizedSearchText: { contains: nq } }] : []),
+        ],
+      })
+    }
+
+    if (andFilters.length > 0) {
+      where.AND = andFilters
     }
 
     const [students, total] = await Promise.all([
@@ -85,7 +114,7 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
       thresholdMs: 1_500,
       schoolId: params.id,
       userId: session.user?.id,
-      metadata: { page, limit, status, classId, hasSearch: Boolean(search?.trim()), total },
+      metadata: { page, limit, status, classId, classGrade, division, hasSearch: Boolean(search?.trim()), total },
     })
     return response
   } catch (error) {
