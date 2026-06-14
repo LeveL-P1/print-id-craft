@@ -32,6 +32,25 @@ type OpsSummary = {
   alerts: Array<{ level: string; message: string }>
 }
 
+type SubmissionLog = {
+  id: string
+  createdAt: string
+  stage: "ATTEMPT" | "SAVED" | "DUPLICATE" | "FAILED" | string
+  severity: string
+  message: string
+  schoolId: string | null
+  schoolName: string
+  classValue: string | null
+  classGrade: string | null
+  division: string | null
+  sectionName: string | null
+  studentName: string | null
+  serialNumber: string | null
+  hasPhoto: boolean | null
+  durationMs: number | null
+  error: string | null
+}
+
 export default function ManufacturerDashboard() {
   const router = useRouter()
   const [data, setData] = useState<DashboardData | null>(null)
@@ -40,6 +59,7 @@ export default function ManufacturerDashboard() {
   const [health, setHealth] = useState<{ status: string; db: string; storage: string } | null>(null)
   const [jobs, setJobs] = useState<OpsJob[]>([])
   const [jobSummary, setJobSummary] = useState<OpsSummary | null>(null)
+  const [submissionLogs, setSubmissionLogs] = useState<SubmissionLog[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -120,11 +140,13 @@ export default function ManufacturerDashboard() {
       fetch("/api/health", { cache: "no-store" }).then((res) => res.json()).catch(() => null),
       fetch("/api/admin/jobs?limit=5", { cache: "no-store" }).then((res) => res.ok ? res.json() : null).catch(() => null),
       fetch("/api/admin/jobs?summary=1&minutes=60", { cache: "no-store" }).then((res) => res.ok ? res.json() : null).catch(() => null),
-    ]).then(([healthJson, jobsJson, jobsSummaryJson]) => {
+      fetch("/api/dashboard/submissions?limit=12", { cache: "no-store" }).then((res) => res.ok ? res.json() : null).catch(() => null),
+    ]).then(([healthJson, jobsJson, jobsSummaryJson, submissionsJson]) => {
       if (cancelled) return
       if (healthJson) setHealth({ status: healthJson.status, db: healthJson.db, storage: healthJson.storage })
       if (jobsJson?.success) setJobs(jobsJson.data || [])
       if (jobsSummaryJson?.success) setJobSummary(jobsSummaryJson.data || null)
+      if (submissionsJson?.success) setSubmissionLogs(submissionsJson.data || [])
     })
 
     return () => { cancelled = true }
@@ -242,6 +264,18 @@ export default function ManufacturerDashboard() {
     if (seconds < 60) return `${seconds}s`
     if (seconds < 3600) return `${Math.round(seconds / 60)}m`
     return `${Math.round(seconds / 3600)}h`
+  }
+  const formatClassLabel = (log: SubmissionLog) => {
+    if (log.classValue) return log.classValue
+    if (log.classGrade && log.division) return `${log.classGrade} - ${log.division}`
+    return log.classGrade || log.sectionName || "-"
+  }
+  const submissionStageStyle = (stage: string) => {
+    if (stage === "SAVED") return { background: "#dcfce7", color: "#15803d", label: "Saved" }
+    if (stage === "ATTEMPT") return { background: "#dbeafe", color: "#1d4ed8", label: "Attempt" }
+    if (stage === "DUPLICATE") return { background: "#fef3c7", color: "#b45309", label: "Duplicate" }
+    if (stage === "FAILED") return { background: "#fee2e2", color: "#dc2626", label: "Failed" }
+    return { background: "#f1f5f9", color: "#475569", label: stage || "Unknown" }
   }
 
   return (
@@ -365,6 +399,79 @@ export default function ManufacturerDashboard() {
                 <div style={{ fontSize: 13, color: "#64748b" }}>No jobs recorded yet.</div>
               )}
             </div>
+          </div>
+        </div>
+
+        {/* Public submission log */}
+        <div className="dashboard-section">
+          <div className="dashboard-section-header">
+            <h2>Recent Form Submissions</h2>
+            <span style={{ fontSize: 13, color: "#64748b" }}>Audit log</span>
+          </div>
+
+          <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 14, overflow: "hidden" }}>
+            {submissionLogs.length > 0 ? (
+              <div className="data-table-wrapper">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Status</th>
+                      <th>Student</th>
+                      <th>School</th>
+                      <th>Class</th>
+                      <th>Photo</th>
+                      <th style={{ textAlign: "right" }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {submissionLogs.map((log) => {
+                      const stageStyle = submissionStageStyle(log.stage)
+                      return (
+                        <tr key={log.id}>
+                          <td style={{ whiteSpace: "nowrap", color: "#64748b", fontSize: 13 }}>
+                            {formatTime(log.createdAt)}
+                          </td>
+                          <td>
+                            <span className="status-badge" style={{ background: stageStyle.background, color: stageStyle.color }}>
+                              {stageStyle.label}
+                            </span>
+                          </td>
+                          <td>
+                            <div style={{ fontWeight: 700, color: "#0f172a" }}>{log.studentName || "Name not captured"}</div>
+                            <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>{log.serialNumber || log.message}</div>
+                          </td>
+                          <td style={{ color: "#334155" }}>{log.schoolName}</td>
+                          <td style={{ color: "#334155" }}>{formatClassLabel(log)}</td>
+                          <td>
+                            <span className="status-badge" style={{ background: log.hasPhoto ? "#ecfdf5" : "#f8fafc", color: log.hasPhoto ? "#047857" : "#64748b" }}>
+                              {log.hasPhoto ? "Received" : "No photo"}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            {log.schoolId ? (
+                              <button
+                                className="btn btn-outline"
+                                style={{ fontSize: 12, padding: "6px 14px" }}
+                                onClick={() => router.push(`/schools/${log.schoolId}`)}
+                              >
+                                Open school
+                              </button>
+                            ) : (
+                              <span style={{ fontSize: 12, color: "#94a3b8" }}>No school</span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div style={{ padding: 22, color: "#64748b", fontSize: 14 }}>
+                No public form submissions logged yet. New parent attempts will appear here after deployment.
+              </div>
+            )}
           </div>
         </div>
 

@@ -10,6 +10,7 @@ import { reportError, reportSlowOperation } from "@/lib/observability"
 import { checkDuplicateSubmission, resolveSubmitPhotoFields } from "@/lib/submit-fields"
 import { buildStudentIndexData } from "@/lib/student-index"
 import { validateAndBuildClassFields } from "@/lib/section-class"
+import { recordPublicSubmissionAudit } from "@/lib/submission-audit"
 
 const photoUrlRefine = (url: string) => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
@@ -90,8 +91,42 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
       return NextResponse.json({ error: classFields.error }, { status: 400 })
     }
 
+    await recordPublicSubmissionAudit({
+      stage: "ATTEMPT",
+      source: "school-link",
+      token: params.token,
+      schoolId: school.id,
+      schoolName: school.name,
+      classId: cls.id,
+      sectionName: cls.name,
+      classValue: classFields.class,
+      classGrade: classFields.classGrade,
+      division: classFields.division,
+      studentName: formData.name || formData.studentName || formData.fullName,
+      hasPhoto: Boolean(validated.photoUrl || validated.photoPath || validated.photoDataUrl),
+      photoBgStatus: validated.photoBgStatus,
+      durationMs: Date.now() - startedAt,
+    })
+
     const duplicate = await checkDuplicateSubmission(cls.id, formData)
     if (duplicate.isDuplicate) {
+      await recordPublicSubmissionAudit({
+        stage: "DUPLICATE",
+        source: "school-link",
+        token: params.token,
+        schoolId: school.id,
+        schoolName: school.name,
+        classId: cls.id,
+        sectionName: cls.name,
+        classValue: classFields.class,
+        classGrade: classFields.classGrade,
+        division: classFields.division,
+        studentName: duplicate.existing.studentName || formData.name || formData.studentName || formData.fullName,
+        serialNumber: duplicate.existing.serialNumber,
+        hasPhoto: Boolean(validated.photoUrl || validated.photoPath || validated.photoDataUrl),
+        photoBgStatus: validated.photoBgStatus,
+        durationMs: Date.now() - startedAt,
+      })
       return NextResponse.json({
         error: duplicate.error,
         message: duplicate.message,
@@ -144,6 +179,25 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
         throw err
       }
     }
+
+    await recordPublicSubmissionAudit({
+      stage: "SAVED",
+      source: "school-link",
+      token: params.token,
+      schoolId: school.id,
+      schoolName: school.name,
+      classId: cls.id,
+      sectionName: cls.name,
+      classValue: classFields.class,
+      classGrade: classFields.classGrade,
+      division: classFields.division,
+      studentName: indexData.fullName || formData.name || formData.studentName || formData.fullName,
+      studentId: student.id,
+      serialNumber: student.serialNumber,
+      hasPhoto: Boolean(validated.photoUrl || validated.photoPath || validated.photoDataUrl),
+      photoBgStatus: validated.photoBgStatus || "SKIPPED",
+      durationMs: Date.now() - startedAt,
+    })
 
     try {
       const photoFields = await resolveSubmitPhotoFields({
