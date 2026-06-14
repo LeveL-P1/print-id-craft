@@ -490,6 +490,31 @@ export default function SubmitPage() {
 
   // Note: PhotoVerifier now returns stable data URLs directly
 
+  const getPreviewBlockReason = () => {
+    if (!config) return "Form is not ready yet. Please try again."
+    if (config.usesClassPicker) {
+      if (!formData.classGrade?.trim()) return "Please select a class."
+      if (!formData.division?.trim()) return "Please select a division."
+    }
+    for (const f of config.fieldConfig) {
+      if (f.key === "class") continue
+      const value = (formData[f.key] || "").trim()
+      const role = fieldRole(f)
+      if (f.required && !value) return `Please fill in ${getCleanLabel(f.label)}.`
+      if (role === "address" && f.required && wordCount(value) < ADDRESS_MIN_WORDS) {
+        return `Please write the full address - at least ${ADDRESS_MIN_WORDS} words (house no, street, area, city, pincode).`
+      }
+      if (role === "mobile" && f.required && stripIndianPrefix(value).length !== 10) {
+        return "Mobile number must be exactly 10 digits (after +91)."
+      }
+      if (role === "branch" && f.required && value.length < 2) return "Please enter the branch name."
+    }
+    if (!photoFile || !photoPreview || !photoVerified) {
+      return "Please upload a clear student photo before preview."
+    }
+    return ""
+  }
+
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -537,7 +562,7 @@ export default function SubmitPage() {
     }
     setAlertMsg("")
 
-    if (!photoFile) {
+    if (!photoFile || !photoPreview || !photoVerified) {
       setStep("photo")
       return
     }
@@ -545,16 +570,25 @@ export default function SubmitPage() {
   }
 
   const handleReview = async () => {
+    const blockReason = getPreviewBlockReason()
+    if (blockReason) {
+      setAlertMsg(blockReason)
+      setStep(blockReason.includes("photo") ? "photo" : "form")
+      return
+    }
     if (photoPreview && !croppedPhoto) {
       setCroppedPhoto(photoPreview)
     }
+    setAlertMsg("")
     setStep("review")
   }
 
   const handleSubmit = async () => {
     if (!config) return
-    if (!croppedPhoto) {
-      setAlertMsg("Please upload a student photo before submitting.")
+    const blockReason = getPreviewBlockReason()
+    if (blockReason || !croppedPhoto) {
+      setAlertMsg(blockReason || "Please upload a student photo before submitting.")
+      setStep(blockReason?.includes("photo") || !croppedPhoto ? "photo" : "form")
       return
     }
     setSubmitting(true)
@@ -1652,11 +1686,18 @@ export default function SubmitPage() {
                 onCropped={(croppedDataUrl) => {
                   setPhotoPreview(croppedDataUrl)
                   setCroppedPhoto(croppedDataUrl)
+                  const blockReason = getPreviewBlockReason()
+                  if (blockReason) {
+                    setAlertMsg(blockReason)
+                    setStep(blockReason.includes("photo") ? "photo" : "form")
+                    return
+                  }
+                  setAlertMsg("")
                   setStep("review")
                 }}
                 onCancel={() => {
                   setCroppedPhoto(photoPreview)
-                  setStep("review")
+                  handleReview()
                 }}
               />
 

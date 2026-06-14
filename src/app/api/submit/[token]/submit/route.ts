@@ -4,13 +4,19 @@ import { z } from "zod"
 import { durableRateLimit, getClientIp } from "@/lib/rate-limit"
 import { storageUpload, storagePublicUrl } from "@/lib/storage"
 import QRCode from "qrcode"
-import { computeAutoAssignedFields } from "@/lib/submit-fields"
+import {
+  computeAutoAssignedFields,
+  getPublicSubmissionFields,
+  requireValidSubmitPhotoFields,
+  validatePublicSubmissionDetails,
+} from "@/lib/submit-fields"
 import { getNextStudentSerial } from "@/lib/student-serial"
 import { reportError, reportSlowOperation } from "@/lib/observability"
-import { checkDuplicateSubmission, resolveSubmitPhotoFields } from "@/lib/submit-fields"
+import { checkDuplicateSubmission } from "@/lib/submit-fields"
 import { buildStudentIndexData } from "@/lib/student-index"
 import { validateAndBuildClassFields } from "@/lib/section-class"
 import { recordPublicSubmissionAudit } from "@/lib/submission-audit"
+import { getTemplateForClass } from "@/lib/template-resolver"
 
 const photoUrlRefine = (url: string) => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
@@ -67,6 +73,8 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
     const body = await req.json()
     const validated = publicSubmitSchema.parse(body)
     const formData = validated.formData as Record<string, string>
+    const template = await getTemplateForClass(cls.id)
+    const requiredFields = await getPublicSubmissionFields(cls.school.id, template)
 
     const classFields = validateAndBuildClassFields(
       formData,
@@ -76,6 +84,11 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
     )
     if (!classFields.ok) {
       return NextResponse.json({ error: classFields.error }, { status: 400 })
+    }
+
+    const detailValidation = validatePublicSubmissionDetails(formData, requiredFields)
+    if (!detailValidation.ok) {
+      return NextResponse.json({ error: detailValidation.error }, { status: 400 })
     }
 
     await recordPublicSubmissionAudit({
@@ -140,6 +153,12 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
       ...(classFields.division ? { division: classFields.division } : {}),
     }
     const indexData = buildStudentIndexData(finalFormData, cls.id)
+    const photoFields = await requireValidSubmitPhotoFields({
+      photoUrl: validated.photoUrl,
+      photoPath: validated.photoPath,
+      photoDataUrl: validated.photoDataUrl,
+      schoolId: cls.school.id,
+    })
 
     // Create student with retry for serial number collisions under high concurrency
     let student: any = null
@@ -155,9 +174,9 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
               serialNumber,
               ...indexData,
               formData: finalFormData,
-              photoUrl: "",
-              photoPath: "",
-              photoBgStatus: validated.photoBgStatus || "SKIPPED",
+              photoUrl: photoFields.photoUrl,
+              photoPath: photoFields.photoPath,
+              photoBgStatus: photoFields.photoBgStatus || validated.photoBgStatus || "",
               status: "SUBMITTED",
             },
           })
@@ -189,31 +208,10 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
       studentName: indexData.fullName || formData.name || formData.studentName || formData.fullName,
       studentId: student.id,
       serialNumber: student.serialNumber,
-      hasPhoto: Boolean(validated.photoUrl || validated.photoPath || validated.photoDataUrl),
-      photoBgStatus: validated.photoBgStatus || "SKIPPED",
+      hasPhoto: true,
+      photoBgStatus: photoFields.photoBgStatus || validated.photoBgStatus || "",
       durationMs: Date.now() - startedAt,
     })
-
-    try {
-      const photoFields = await resolveSubmitPhotoFields({
-        photoUrl: validated.photoUrl,
-        photoPath: validated.photoPath,
-        photoDataUrl: validated.photoDataUrl,
-        schoolId: cls.school.id,
-      })
-      if (photoFields.photoUrl || photoFields.photoPath || photoFields.photoBgStatus) {
-        await prisma.student.update({
-          where: { id: student.id },
-          data: {
-            photoUrl: photoFields.photoUrl,
-            photoPath: photoFields.photoPath,
-            photoBgStatus: photoFields.photoBgStatus || validated.photoBgStatus || "",
-          },
-        })
-      }
-    } catch (photoError) {
-      console.error("Photo resolution failed after student create (non-fatal):", photoError)
-    }
 
     try {
       const qrContent = JSON.stringify({
@@ -256,6 +254,9 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
     })
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.issues }, { status: 400 })
+    }
+    if (error?.message === "A valid student photo is required. Please upload the photo again.") {
+      return NextResponse.json({ error: error.message }, { status: 400 })
     }
     // Return specific prisma error message if available
     const message = error?.message || (typeof error === 'string' ? error : "Internal Server Error")
