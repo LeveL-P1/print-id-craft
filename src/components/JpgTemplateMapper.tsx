@@ -153,7 +153,7 @@ const SAMPLE_DATA: Record<string, string> = {
   bloodGroup: "B+",
   address: "Flat No. 503, A-Wing, Sai Shilp Society, Pune",
   addressWithLabel: "Address: Flat No. 503, A-Wing, Sai Shilp Society, Pune",
-  addWithLabel: "ADD: Flat No. 503, A-Wing, Sai Shilp Society, Pune",
+  addWithLabel: "Add: Flat No. 503, A-Wing, Sai Shilp Society, Pune",
   admissionNo: "ADM-2025-001",
   photoId: "BB25035",
   serialNumber: "PLAY-B1-0001",
@@ -1903,7 +1903,7 @@ export default function JpgTemplateMapper({
                 </button>
               </div>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 10, opacity: cardSizeLocked ? 0.6 : 1, pointerEvents: cardSizeLocked ? "none" : "auto" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, opacity: cardSizeLocked ? 0.6 : 1 }}>
                 {/* Card Size Preset */}
                 <div>
                   <label style={{ fontSize: 11, fontWeight: 600, color: "#3b82f6", marginBottom: 4, display: "block" }}>
@@ -2016,6 +2016,8 @@ export default function JpgTemplateMapper({
                     {(["landscape", "portrait"] as const).map((orient) => (
                       <button
                         key={orient}
+                        type="button"
+                        disabled={cardSizeLocked}
                         onClick={() => handleOrientationChange(orient)}
                         style={{
                           flex: 1,
@@ -2026,7 +2028,7 @@ export default function JpgTemplateMapper({
                           color: cardOrientation === orient ? "#1e40af" : "#6b7280",
                           fontSize: 11,
                           fontWeight: 600,
-                          cursor: "pointer",
+                          cursor: cardSizeLocked ? "not-allowed" : "pointer",
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
@@ -2045,7 +2047,9 @@ export default function JpgTemplateMapper({
                     ))}
                   </div>
                 </div>
+              </div>
 
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
                 {/* Print Sides */}
                 <div>
                   <label style={{ fontSize: 11, fontWeight: 600, color: "#3b82f6", marginBottom: 4, display: "block" }}>
@@ -3406,7 +3410,7 @@ export default function JpgTemplateMapper({
                 { key: "phone", label: "Phone" },
                 { key: "address", label: "Address" },
                 { key: "addressWithLabel", label: "Address:", prefix: true },
-                { key: "addWithLabel", label: "ADD:", prefix: true },
+                { key: "addWithLabel", label: "Add:", prefix: true },
                 { key: "dateOfBirth", label: "Date of Birth" },
                 { key: "bloodGroup", label: "Blood Group" },
                 { key: "admissionNo", label: "Admission No." },

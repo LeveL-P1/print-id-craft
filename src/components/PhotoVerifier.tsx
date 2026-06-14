@@ -353,12 +353,6 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         // soft JPEGs. We only surface a friendly warning when the score is low.
         const blurScore = detectBlur(ctx, img.width, img.height)
         const isBlurry = blurScore <= 8
-        // Threshold lowered (15 → 8) because the previous value rejected
-        // many in-focus phone-camera shots — phone JPEGs are heavily
-        // denoised, which suppresses the high-frequency content the
-        // Laplacian variance measures. We still flag genuinely smeared
-        // images but no longer reject normal phone selfies.
-        const blurScore = detectBlur(ctx, analysisW, analysisH)
         checks.push({
           passed: !isBlurry,
           severity: "warning",
@@ -557,9 +551,6 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
         // Warnings are advisory — only true critical failures block upload.
         const valid = criticalFails.length === 0
         const canOverride = criticalFails.length === 0
-        const warningFails = checks.filter(c => !c.passed && c.severity === "warning")
-        const valid = criticalFails.length === 0 && warningFails.length === 0
-        const canOverride = true
 
         resolve({ valid, canOverride, checks })
       }

@@ -94,6 +94,5 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
 }
 
 export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
-  const params = await props.params;
-  return GET(req, { params })
+  return GET(req, props)
 }

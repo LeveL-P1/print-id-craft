@@ -208,11 +208,11 @@ describe("resolveFieldValue", () => {
       )).toBe("Address: Flat 503, Pune")
     })
 
-    it("prints an ADD prefix while resolving imported Address columns", () => {
+    it("prints an Add prefix while resolving imported Address columns", () => {
       expect(resolveDisplayFieldValue(
         { Address: "Sai Shilp Society" },
         "addWithLabel"
-      )).toBe("ADD: Sai Shilp Society")
+      )).toBe("Add: Sai Shilp Society")
     })
 
     it("keeps raw address resolution unprefixed", () => {

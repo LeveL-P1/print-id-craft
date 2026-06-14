@@ -281,10 +281,10 @@ const PREFIXED_ADDRESS_FIELDS: Record<string, string> = {
   addresslabel: "Address:",
   addressprefix: "Address:",
   prefixedaddress: "Address:",
-  addwithlabel: "ADD:",
-  addlabel: "ADD:",
-  addprefix: "ADD:",
-  prefixedadd: "ADD:",
+  addwithlabel: "Add:",
+  addlabel: "Add:",
+  addprefix: "Add:",
+  prefixedadd: "Add:",
 }
 
 export function isPrefixedAddressField(fieldKey: string): boolean {

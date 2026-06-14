@@ -12,8 +12,7 @@ import { reportSlowOperation } from "@/lib/observability"
 export const maxDuration = 10
 
 export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
-  const params = await props.params;
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+  const params = await props.params
   const startedAt = Date.now()
   try {
     const session = await getServerSession(authOptions)
