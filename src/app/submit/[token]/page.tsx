@@ -4,6 +4,7 @@ import { useParams } from "next/navigation"
 import PhotoVerifier from "@/components/PhotoVerifier"
 import JpgCardPreview from "@/components/JpgCardPreview"
 import PhotoCropper from "@/components/PhotoCropper"
+import PhotoBgProcessor from "@/components/PhotoBgProcessor"
 import {
   getFieldRole,
   resolveFieldValue,
@@ -11,6 +12,8 @@ import {
 } from "@/lib/field-resolver"
 import { formatClassSection } from "@/lib/section-class"
 import { uploadStudentPhotoResilient } from "@/lib/client-photo-upload"
+import { preloadBgRemovalModel } from "@/lib/photo-background"
+import { PHOTO_BG_STATUS, type PhotoBgStatus } from "@/lib/photo-bg-status"
 
 const SUPPORT_PHONE_DISPLAY = "+91 98818 77607"
 const SUPPORT_PHONE_E164 = "+919881877607"
@@ -425,7 +428,7 @@ export default function SubmitPage() {
   const params = useParams()
   const token = params.token as string
 
-  const [step, setStep] = useState<"loading" | "error" | "form" | "photo" | "crop" | "review" | "success">("loading")
+  const [step, setStep] = useState<"loading" | "error" | "form" | "photo" | "crop" | "bg" | "review" | "success">("loading")
   const [errorMsg, setErrorMsg] = useState("")
   const [config, setConfig] = useState<FormConfig | null>(null)
   const [formData, setFormData] = useState<Record<string, string>>({})
@@ -455,6 +458,7 @@ export default function SubmitPage() {
   } | null>(null)
   const [photoVerified, setPhotoVerified] = useState(false)
   const [photoUploadWarning, setPhotoUploadWarning] = useState("")
+  const [photoBgStatus, setPhotoBgStatus] = useState<PhotoBgStatus>("")
 
   // Visible 10-digit text for each mobile-intent field, kept separate from
   // formData so we never round-trip the "+91 " prefix through the input value
@@ -555,6 +559,19 @@ export default function SubmitPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData, photoVerified, step, draftRestored])
+
+  // Preload the ISNet background-removal model while the parent is on photo/crop
+  // so AI processing after crop feels faster on first use.
+  useEffect(() => {
+    if (step === "photo" || step === "crop") {
+      preloadBgRemovalModel().catch(() => {})
+    }
+  }, [step])
+
+  const goToBgProcessing = useCallback(() => {
+    setPhotoBgStatus("")
+    setStep("bg")
+  }, [])
 
   const clearDraft = () => {
     if (typeof window === "undefined") return
@@ -769,7 +786,7 @@ export default function SubmitPage() {
     }
     setAlertMsg("")
     setMissingFieldKey("")
-    setStep("review")
+    goToBgProcessing()
   }
 
   const handleSubmit = async () => {
@@ -811,7 +828,7 @@ export default function SubmitPage() {
             photoUrl: photoResult.photoUrl,
             photoPath: photoResult.photoPath,
             photoDataUrl: photoResult.photoDataUrl,
-            photoBgStatus: "",
+            photoBgStatus: photoBgStatus || "",
           }),
         })
       } catch (networkErr) {
@@ -969,7 +986,7 @@ export default function SubmitPage() {
             </button>
           )}
           <p style={{ fontSize: 12, color: '#64748b', lineHeight: 1.55, maxWidth: 420, margin: '0 auto' }}>
-            Your uploaded photo will be processed by the manufacturer. The background will be made plain and the photo will be improved for the final ID card.
+            Your photo background has been prepared automatically for the ID card preview.
           </p>
         </div>
       </div>
@@ -1194,11 +1211,17 @@ export default function SubmitPage() {
                 fontSize: 12, color: '#92400e', lineHeight: 1.55,
               }}>
                 <strong style={{ display: 'block', marginBottom: 4 }}>Preview only — for reference</strong>
-                This shows how your ID card may look. We have not changed your photo yet.
-                {config?.photoBgColor ? (
-                  <> The manufacturer will make the background plain ({config.photoBgColor}) and prepare your photo for printing.</>
+                {photoBgStatus === PHOTO_BG_STATUS.PROCESSED || photoBgStatus === PHOTO_BG_STATUS.PLAIN ? (
+                  <>Your photo background has been prepared{config?.photoBgColor ? <> ({config.photoBgColor})</> : null} for the ID card preview below.</>
                 ) : (
-                  <> The manufacturer will make the background plain and prepare your photo for printing.</>
+                  <>
+                    This shows how your ID card may look.
+                    {config?.photoBgColor ? (
+                      <> The background will be made plain ({config.photoBgColor}) for printing.</>
+                    ) : (
+                      <> The background will be made plain for printing.</>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -1333,7 +1356,7 @@ export default function SubmitPage() {
             const currentStep = step as string
             const visualIdx =
               currentStep === "form" ? 0
-              : currentStep === "photo" || currentStep === "crop" ? 1
+              : currentStep === "photo" || currentStep === "crop" || currentStep === "bg" ? 1
               : currentStep === "review" ? 2
               : 0
             const currentIdx = visualIdx
@@ -1385,6 +1408,7 @@ export default function SubmitPage() {
                       setPhotoPreview("")
                       setCroppedPhoto("")
                       setPhotoVerified(false)
+                      setPhotoBgStatus("")
                       setDraftBanner(false)
                     }}
                     style={{
@@ -1849,7 +1873,7 @@ export default function SubmitPage() {
                           background: config.photoBgColor,
                           border: '1px solid rgba(0,0,0,0.12)',
                         }} />
-                        <span>Your ID card will use a plain background. The school will prepare your photo for printing.</span>
+                        <span>We automatically remove the background and apply this colour to your ID photo.</span>
                       </div>
                     )}
                   </div>
@@ -1863,6 +1887,7 @@ export default function SubmitPage() {
                     setPhotoPreview(previewUrl)
                     setCroppedPhoto("")
                     setPhotoVerified(true)
+                    setPhotoBgStatus("")
                     setAlertMsg("")
                     setStep("crop")
                   }}
@@ -1882,7 +1907,7 @@ export default function SubmitPage() {
                   <div style={{ borderRadius: 10, overflow: 'hidden', border: '2px solid #22c55e', maxWidth: 200, margin: '0 auto' }}>
                     <img src={photoPreview} alt="Preview" style={{ width: '100%', display: 'block' }} />
                   </div>
-                  <button onClick={() => { setPhotoPreview(""); setPhotoFile(null); setCroppedPhoto(""); setPhotoVerified(false) }} className="btn btn-outline" style={{ width: '100%', marginTop: 12, fontSize: 12 }}>
+                  <button onClick={() => { setPhotoPreview(""); setPhotoFile(null); setCroppedPhoto(""); setPhotoVerified(false); setPhotoBgStatus("") }} className="btn btn-outline" style={{ width: '100%', marginTop: 12, fontSize: 12 }}>
                     Choose Different Photo
                   </button>
                 </div>
@@ -1940,7 +1965,7 @@ export default function SubmitPage() {
                     return
                   }
                   setAlertMsg("")
-                  setStep("review")
+                  goToBgProcessing()
                 }}
                 onCancel={() => {
                   setCroppedPhoto(photoPreview)
@@ -1958,12 +1983,35 @@ export default function SubmitPage() {
                     setPhotoFile(null)
                     setCroppedPhoto("")
                     setPhotoVerified(false)
+                    setPhotoBgStatus("")
                     setStep("photo")
                   }}
                 >
                   Choose a different photo
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* BACKGROUND REMOVAL STEP — runs ISNet locally, same model as manufacturer */}
+          {step === "bg" && croppedPhoto && (
+            <div>
+              <PhotoBgProcessor
+                photoUrl={croppedPhoto}
+                defaultBgColor={config?.photoBgColor || "#FFFFFF"}
+                autoConfirm
+                autoSkipAfterMs={0}
+                onProcessed={(processedDataUrl, status) => {
+                  setCroppedPhoto(processedDataUrl)
+                  setPhotoBgStatus(status)
+                  setStep("review")
+                }}
+                onSkip={(status) => {
+                  setPhotoBgStatus(status)
+                  setStep("review")
+                }}
+                onStatus={setPhotoBgStatus}
+              />
             </div>
           )}
         </div>

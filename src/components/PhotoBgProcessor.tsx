@@ -9,6 +9,8 @@ type Props = {
   onProcessed: (processedDataUrl: string, status: PhotoBgStatus) => void
   onSkip: (status: PhotoBgStatus) => void
   autoConfirm?: boolean
+  /** Milliseconds before auto-skip when autoConfirm is true; 0 disables auto-skip. */
+  autoSkipAfterMs?: number
   onStatus?: (status: PhotoBgStatus) => void
 }
 
@@ -21,6 +23,7 @@ export default function PhotoBgProcessor({
   onProcessed,
   onSkip,
   autoConfirm = false,
+  autoSkipAfterMs = 8000,
   onStatus,
 }: Props) {
   const [processing, setProcessing] = useState(false)
@@ -121,16 +124,16 @@ export default function PhotoBgProcessor({
   }, [autoConfirm, processedUrl, processing, onProcessed])
 
   useEffect(() => {
-    if (!autoConfirm || !processing || autoSkippedRef.current) return
+    if (!autoConfirm || !processing || autoSkippedRef.current || autoSkipAfterMs <= 0) return
     const timer = window.setTimeout(() => {
       if (autoSkippedRef.current || autoConfirmedRef.current) return
       autoSkippedRef.current = true
       setProcessing(false)
       setBgStatus(PHOTO_BG_STATUS.SKIPPED)
       onSkip(PHOTO_BG_STATUS.SKIPPED)
-    }, 8000)
+    }, autoSkipAfterMs)
     return () => window.clearTimeout(timer)
-  }, [autoConfirm, processing, onSkip, setBgStatus])
+  }, [autoConfirm, autoSkipAfterMs, processing, onSkip, setBgStatus])
 
   const displayUrl = photoDataUrl || photoUrl
 
