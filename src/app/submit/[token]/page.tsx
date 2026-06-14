@@ -169,7 +169,7 @@ function parseDobParts(value: string) {
   const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/)
   if (iso) return { month: iso[2], day: iso[3], year: iso[1] }
 
-  const slash = trimmed.match(/^(\d{1,2}|MM)\/(\d{1,2}|DD)\/(\d{2,4}|YY|YYYY)$/)
+  const slash = trimmed.match(/^(\d{1,2}|DD)\/(\d{1,2}|MM)\/(\d{2,4}|YY|YYYY)$/)
   if (slash) {
     return {
       day: slash[1] === "DD" ? "" : slash[1].padStart(2, "0"),
