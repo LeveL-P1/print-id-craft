@@ -3,6 +3,7 @@ import { useRef, useEffect, useState, useCallback, memo } from "react"
 import {
   resolveDisplayFieldValue as resolveDisplayFieldValueShared,
   resolveFieldValue as resolveFieldValueShared,
+  getCardTextWrapMode,
   formatDateValue,
 } from "@/lib/field-resolver"
 
@@ -412,7 +413,7 @@ export default function JpgCardPreview({
             const fStyle = field.fontStyle || "normal"
             const { lines, fontSize, lineHeight: baseLineHeight } = fitTextToBox(
               ctx, String(value), fw, fh, fontFamily, fontWeight, scale,
-              w, field.fontSize, field.textWrap || "wrap", fStyle,
+              w, field.fontSize, getCardTextWrapMode(field.fieldKey, field.textWrap), fStyle,
               cardWidthMm || 85.6,
             )
             // Honour the user's lineHeight multiplier if set.
@@ -600,7 +601,7 @@ export async function generateJpgCard(
         const fontWeight = field.fontWeight || "normal"
         const { lines, fontSize, lineHeight } = fitTextToBox(
           ctx, String(value), fw, fh, fontFamily, fontWeight, outputScale,
-          w, field.fontSize, field.textWrap || "wrap",
+          w, field.fontSize, getCardTextWrapMode(field.fieldKey, field.textWrap),
           "normal",
           cardWidthMm || 85.6,
         )

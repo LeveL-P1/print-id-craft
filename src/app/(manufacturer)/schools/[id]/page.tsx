@@ -1,5 +1,5 @@
 "use client"
-import { useState, useEffect, useCallback, useMemo, useRef } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react"
 import { useParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
@@ -7,6 +7,7 @@ import dynamic from "next/dynamic"
 import {
   DEFAULT_CLASS_OPTIONS,
   SECTION_TYPE_LABELS,
+  resolveEffectiveClassOptions,
   type SectionType,
 } from "@/lib/section-class"
 
@@ -72,8 +73,25 @@ type ClassData = {
   classOptions: string[]
   template: { id: string; name: string; templateImageUrl: string | null } | null
   _count: { students: number }
+  studentBreakdown?: {
+    byClass: Array<{ label: string; count: number }>
+    byGrade: Array<{ grade: string; count: number }>
+  }
   teachers: { id: string; name: string; email: string; isMainTeacher: boolean }[]
   createdAt: string
+}
+
+const SCHOOL_TAB_LABELS: Record<
+  "overview" | "classes" | "students" | "template" | "generate" | "batches" | "export",
+  string
+> = {
+  overview: "Overview",
+  classes: "Section",
+  students: "Students",
+  template: "Template",
+  generate: "Generate",
+  batches: "Batches",
+  export: "Export",
 }
 
 type SchoolTemplateSummary = {
@@ -161,6 +179,7 @@ export default function SchoolDetailPage() {
   const [searchInput, setSearchInput] = useState("")
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [tabLoading, setTabLoading] = useState(false)
+  const [expandedSectionIds, setExpandedSectionIds] = useState<Set<string>>(new Set())
 
   // Add section (stored as Class row — one link per section)
   const [newClassName, setNewClassName] = useState("")
@@ -433,13 +452,20 @@ export default function SchoolDetailPage() {
       setTabLoading(true)
       Promise.all([
         fetchStudents(),
+        fetchClasses(false),
         templateLoadedRef.current ? Promise.resolve() : fetchTemplate(),
         schoolTemplatesLoadedRef.current ? Promise.resolve() : fetchSchoolTemplates(),
         flagsLoadedRef.current ? Promise.resolve() : fetchFlags(),
       ]).finally(() => setTabLoading(false))
     }
-    if (tab === "classes" && !loading && !schoolTemplatesLoadedRef.current) {
-      fetchSchoolTemplates()
+    if (tab === "students" && students.length > 0 && !loading) {
+      fetchClasses(false)
+    }
+    if (tab === "classes" && !loading) {
+      fetchClasses(false)
+      if (!schoolTemplatesLoadedRef.current) {
+        fetchSchoolTemplates()
+      }
     }
     if (tab === "template" && !loading) {
       if (!templateLoadedRef.current) fetchTemplate()
@@ -1720,6 +1746,56 @@ export default function SchoolDetailPage() {
   )
   if (!school) return <div style={{ padding: 32 }}>School not found.</div>
 
+  const toggleSectionExpanded = (sectionId: string) => {
+    setExpandedSectionIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(sectionId)) next.delete(sectionId)
+      else next.add(sectionId)
+      return next
+    })
+  }
+
+  const getSectionGradeRows = (cls: ClassData) => {
+    const effectiveOptions = resolveEffectiveClassOptions(cls.classOptions, cls.sectionType, cls.name)
+    const gradeCounts = new Map(
+      (cls.studentBreakdown?.byGrade || []).map((entry) => [entry.grade, entry.count])
+    )
+    if (effectiveOptions.length > 0) {
+      return effectiveOptions.map((grade) => ({ grade, count: gradeCounts.get(grade) || 0 }))
+    }
+    if (gradeCounts.size > 0) {
+      return Array.from(gradeCounts.entries())
+        .map(([grade, count]) => ({ grade, count }))
+        .sort((a, b) => a.grade.localeCompare(b.grade, undefined, { numeric: true }))
+    }
+    return []
+  }
+
+  const renderSectionStudentCounts = (cls: ClassData) => {
+    const breakdown = cls.studentBreakdown?.byClass || []
+    if (breakdown.length === 0) {
+      return <span className="status-badge status-submitted">{cls._count.students}</span>
+    }
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>
+          {cls._count.students} total
+        </span>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {breakdown.map(({ label, count }) => (
+            <span
+              key={label}
+              className="status-badge status-submitted"
+              style={{ fontSize: 11, whiteSpace: "nowrap" }}
+            >
+              {label}: {count}
+            </span>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   const tabs = ["overview", "classes", "students", "template", "generate", "batches", "export"] as const
 
   return (
@@ -1754,7 +1830,7 @@ export default function SchoolDetailPage() {
         </div>
 
         <div className="school-tabs-scroll" style={{ display: 'flex', borderBottom: '1px solid var(--gray-200)', marginBottom: 24, paddingBottom: 0 }}>
-          {["overview", "classes", "students", "template", "generate", "batches", "export"].map(t => (
+          {(["overview", "classes", "students", "template", "generate", "batches", "export"] as const).map(t => (
             <button
               key={t}
               onClick={() => setTab(t as any)}
@@ -1771,7 +1847,7 @@ export default function SchoolDetailPage() {
                 cursor: 'pointer'
               }}
             >
-              {t}
+              {SCHOOL_TAB_LABELS[t]}
             </button>
           ))}
         </div>
@@ -2100,9 +2176,37 @@ export default function SchoolDetailPage() {
                 <tbody>
                   {classes.map(cls => {
                     const classTeacher = cls.teachers?.find(t => !t.isMainTeacher)
+                    const isExpanded = expandedSectionIds.has(cls.id)
+                    const gradeRows = getSectionGradeRows(cls)
+                    const canExpand = gradeRows.length > 0
                     return (
-                    <tr key={cls.id}>
-                      <td style={{ fontWeight: 600 }}>{cls.name}</td>
+                    <Fragment key={cls.id}>
+                    <tr>
+                      <td style={{ fontWeight: 600 }}>
+                        <button
+                          type="button"
+                          onClick={() => toggleSectionExpanded(cls.id)}
+                          disabled={!canExpand}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 8,
+                            background: "none",
+                            border: "none",
+                            padding: 0,
+                            font: "inherit",
+                            fontWeight: 600,
+                            color: canExpand ? "#0f172a" : "#64748b",
+                            cursor: canExpand ? "pointer" : "default",
+                          }}
+                          title={canExpand ? "Click to show classes under this section" : "Configure classes or add students to expand"}
+                        >
+                          <span style={{ fontSize: 10, color: "#94a3b8", width: 12, display: "inline-block" }}>
+                            {canExpand ? (isExpanded ? "▼" : "▶") : "•"}
+                          </span>
+                          {cls.name}
+                        </button>
+                      </td>
                       <td style={{ minWidth: 160, fontSize: 12, color: '#475569' }}>
                         {(cls.classOptions?.length ?? 0) > 0 ? (
                           <div>
@@ -2174,7 +2278,7 @@ export default function SchoolDetailPage() {
                           <span style={{ fontSize: 12, color: '#94a3b8' }}>—</span>
                         )}
                       </td>
-                      <td><span className="status-badge status-submitted">{cls._count.students}</span></td>
+                      <td>{renderSectionStudentCounts(cls)}</td>
                       <td>
                         <span className={`status-badge ${cls.isActive ? 'status-approved' : 'status-pending'}`}>
                           {cls.isActive ? "Active" : "Inactive"}
@@ -2308,10 +2412,28 @@ export default function SchoolDetailPage() {
                         )}
                       </td>
                     </tr>
-                  )})
-                  }
+                    {isExpanded && gradeRows.map(({ grade, count }) => (
+                      <tr key={`${cls.id}-grade-${grade}`} style={{ background: "#f8fafc" }}>
+                        <td style={{ paddingLeft: 28, fontSize: 13, color: "#475569", fontWeight: 500 }}>
+                          ↳ Class {grade}
+                        </td>
+                        <td style={{ fontSize: 12, color: "#94a3b8" }}>—</td>
+                        <td colSpan={2} style={{ fontSize: 12, color: "#94a3b8" }}>—</td>
+                        <td>
+                          <span
+                            className={`status-badge ${count > 0 ? "status-submitted" : ""}`}
+                            style={count === 0 ? { background: "#f1f5f9", color: "#94a3b8" } : undefined}
+                          >
+                            {count} {count === 1 ? "student" : "students"}
+                          </span>
+                        </td>
+                        <td colSpan={3} style={{ fontSize: 12, color: "#94a3b8" }}>—</td>
+                      </tr>
+                    ))}
+                    </Fragment>
+                  )})}
                   {classes.length === 0 && (
-                    <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>
+                    <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>
                       {classesLoadError ? (
                         <>
                           Could not load classes (they may still exist in the database).{' '}
@@ -2534,10 +2656,26 @@ export default function SchoolDetailPage() {
                 <option value="PENDING">Pending</option>
               </select>
               <select value={classFilter} onChange={e => setClassFilter(e.target.value)} style={{ height: 40, padding: '0 12px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 13 }}>
-                <option value="">All Classes</option>
+                <option value="">All Sections</option>
                 {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
+
+            {classes.some((c) => (c.studentBreakdown?.byClass.length || 0) > 0) && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+                {classes.flatMap((section) =>
+                  (section.studentBreakdown?.byClass || []).map(({ label, count }) => (
+                    <span
+                      key={`${section.id}-${label}`}
+                      className="status-badge status-submitted"
+                      style={{ fontSize: 12 }}
+                    >
+                      {section.name} · {label}: {count}
+                    </span>
+                  ))
+                )}
+              </div>
+            )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div style={{ fontSize: 13, color: '#64748b' }}>

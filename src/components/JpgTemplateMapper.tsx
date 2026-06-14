@@ -136,7 +136,7 @@ const SAMPLE_DATA: Record<string, string> = {
   name: "Avneesh Abhishek Awachat",
   fullName: "Avneesh Abhishek Awachat",
   Student_Name: "Avneesh Abhishek Awachat",
-  class: "VII-A",
+  class: "V -A",
   division: "A",
   branch: "Bibwewadi",
   father: "9650319700",

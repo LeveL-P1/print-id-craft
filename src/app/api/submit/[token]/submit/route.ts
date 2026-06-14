@@ -9,7 +9,7 @@ import { getNextStudentSerial } from "@/lib/student-serial"
 import { reportError, reportSlowOperation } from "@/lib/observability"
 import { checkDuplicateSubmission } from "@/lib/submit-fields"
 import { buildStudentIndexData } from "@/lib/student-index"
-import { validateAndBuildClassFields, parseClassOptions } from "@/lib/section-class"
+import { validateAndBuildClassFields } from "@/lib/section-class"
 
 const photoUrlRefine = (url: string) => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
@@ -69,7 +69,8 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
     const classFields = validateAndBuildClassFields(
       formData,
       cls.name,
-      parseClassOptions(cls.classOptions)
+      cls.classOptions,
+      cls.sectionType
     )
     if (!classFields.ok) {
       return NextResponse.json({ error: classFields.error }, { status: 400 })

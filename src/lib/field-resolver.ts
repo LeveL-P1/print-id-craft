@@ -5,6 +5,10 @@
  */
 
 import { createHash } from "crypto"
+import {
+  resolveClassDisplayValue,
+  resolveDivisionDisplayValue,
+} from "@/lib/section-class"
 
 /**
  * Normalizes a field key by lowercasing and stripping non-alphanumeric chars.
@@ -298,11 +302,32 @@ export function isPrefixedAddressField(fieldKey: string): boolean {
  * while still pulling the underlying student data from the canonical field.
  */
 export function resolveDisplayFieldValue(fd: Record<string, string>, fieldKey: string): string {
-  const prefix = PREFIXED_ADDRESS_FIELDS[normalizeKey(fieldKey)]
+  const nk = normalizeKey(fieldKey)
+  if (nk === "class" || nk === "classsection") {
+    return resolveClassDisplayValue(fd)
+  }
+  if (nk === "division" || nk === "div") {
+    return resolveDivisionDisplayValue(fd)
+  }
+
+  const prefix = PREFIXED_ADDRESS_FIELDS[nk]
   if (!prefix) return resolveFieldValue(fd, fieldKey)
 
   const address = resolveFieldValue(fd, "address")
   return address ? `${prefix} ${address}` : ""
+}
+
+/** Class fields auto-shrink to fit; never truncate with ellipsis on ID cards. */
+export function getCardTextWrapMode(
+  fieldKey: string,
+  configured?: string
+): "nowrap" | "wrap" | "multiline" {
+  const nk = normalizeKey(fieldKey)
+  if (nk === "class" || nk === "classsection" || nk === "division") return "wrap"
+  if (configured === "nowrap" || configured === "wrap" || configured === "multiline") {
+    return configured
+  }
+  return "wrap"
 }
 
 /**

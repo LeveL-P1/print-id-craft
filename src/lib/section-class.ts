@@ -1,4 +1,4 @@
-/** Section-based registration: Class (Roman) + Division dropdowns; card shows e.g. VII-A. */
+/** Section-based registration: Class (Roman) + Division dropdowns; card shows e.g. V -A. */
 
 export const DIVISIONS = [
   "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
@@ -20,13 +20,92 @@ export const DEFAULT_CLASS_OPTIONS: Record<SectionType, string[]> = {
   SECONDARY: ["VI", "VII", "VIII", "IX", "X"],
 }
 
-/** Combine grade + division for the Class placeholder (e.g. VI + A → VI-A). */
+/** Combine grade + division for the Class placeholder (e.g. V + A -> V -A). */
 export function formatClassSection(classGrade: string, division: string): string {
   const grade = String(classGrade || "").trim()
   const div = String(division || "").trim().toUpperCase()
   if (!grade) return div
   if (!div) return grade
-  return `${grade}-${div}`
+  return `${grade} -${div}`
+}
+
+
+export function inferSectionTypeFromName(name: string): SectionType | null {
+  const n = String(name || "").toLowerCase()
+  if (/pre\s*[- ]?\s*primary|preprimary/.test(n)) return "PRE_PRIMARY"
+  if (/secondary/.test(n)) return "SECONDARY"
+  if (/primary/.test(n)) return "PRIMARY"
+  return null
+}
+
+export function resolveEffectiveClassOptions(
+  classOptions: unknown,
+  sectionType: SectionType | null | undefined,
+  sectionName?: string
+): string[] {
+  const parsed = parseClassOptions(classOptions)
+  if (parsed.length > 0) return parsed
+  const type = sectionType || (sectionName ? inferSectionTypeFromName(sectionName) : null)
+  if (type) return [...DEFAULT_CLASS_OPTIONS[type]]
+  return []
+}
+
+export function resolveClassDisplayValue(fd: Record<string, string>): string {
+  const stored = String(fd.class || fd.classSection || "").trim()
+  const grade = String(fd.classGrade || "").trim()
+  const division = String(fd.division || "").trim().toUpperCase()
+  if (grade && division) return formatClassSection(grade, division)
+  if (stored) {
+    const legacy = stored.match(/^(.+?)\s*-\s*([A-M])$/i)
+    if (legacy) return formatClassSection(legacy[1], legacy[2])
+    return stored
+  }
+  return grade || division
+}
+
+export function resolveDivisionDisplayValue(fd: Record<string, string>): string {
+  const classVal = resolveClassDisplayValue(fd)
+  if (classVal && /\s-\s*[A-M]$| -[A-M]$|-[A-M]$/i.test(classVal)) return ""
+  return String(fd.division || "").trim().toUpperCase()
+}
+
+export type ClassStudentCount = { label: string; count: number }
+export type GradeStudentCount = { grade: string; count: number }
+
+/** Per-section student counts grouped by full class label (e.g. VI-A) and by grade (e.g. VI). */
+export function aggregateSectionStudentCounts(
+  students: Array<{ classId: string; formData: unknown }>,
+  classId: string
+): { byClass: ClassStudentCount[]; byGrade: GradeStudentCount[] } {
+  const byClass = new Map<string, number>()
+  const byGrade = new Map<string, number>()
+
+  for (const student of students) {
+    if (student.classId !== classId) continue
+    const fd = (student.formData || {}) as Record<string, string>
+    const label = resolveClassDisplayValue(fd) || "Unassigned"
+    const grade = String(fd.classGrade || "").trim()
+      || label.replace(/\s*-[A-M]$/i, "").trim()
+      || "Unassigned"
+
+    byClass.set(label, (byClass.get(label) || 0) + 1)
+    byGrade.set(grade, (byGrade.get(grade) || 0) + 1)
+  }
+
+  const sortByLabel = <T extends { label?: string; grade?: string }>(a: T, b: T) => {
+    const av = a.label || a.grade || ""
+    const bv = b.label || b.grade || ""
+    return av.localeCompare(bv, undefined, { numeric: true })
+  }
+
+  return {
+    byClass: Array.from(byClass.entries())
+      .map(([label, count]) => ({ label, count }))
+      .sort(sortByLabel),
+    byGrade: Array.from(byGrade.entries())
+      .map(([grade, count]) => ({ grade, count }))
+      .sort(sortByLabel),
+  }
 }
 
 export function parseClassOptions(raw: unknown): string[] {
@@ -53,9 +132,10 @@ export type ClassFormValidation =
 export function validateAndBuildClassFields(
   formData: Record<string, string>,
   sectionName: string,
-  classOptions: unknown
+  classOptions: unknown,
+  sectionType?: SectionType | null
 ): ClassFormValidation {
-  const options = parseClassOptions(classOptions)
+  const options = resolveEffectiveClassOptions(classOptions, sectionType, sectionName)
   if (options.length === 0) {
     return { ok: true, class: sectionName.trim(), classGrade: "", division: "" }
   }

@@ -6,6 +6,7 @@ import { z } from "zod"
 import crypto from "crypto"
 import {
   DEFAULT_CLASS_OPTIONS,
+  aggregateSectionStudentCounts,
   parseClassOptions,
   type SectionType,
 } from "@/lib/section-class"
@@ -65,7 +66,7 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
     const classIds = baseClasses.map((entry) => entry.id)
     const templateIds = Array.from(new Set(baseClasses.map((entry) => entry.templateId).filter(Boolean))) as string[]
 
-    const [templatesResult, teachersResult, totalResult] = await Promise.allSettled([
+    const [templatesResult, teachersResult, totalResult, studentsResult] = await Promise.allSettled([
       templateIds.length
         ? prisma.template.findMany({
             where: { id: { in: templateIds }, schoolId: params.id },
@@ -79,6 +80,12 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
           })
         : Promise.resolve([]),
       prisma.class.count({ where: { schoolId: params.id } }),
+      classIds.length
+        ? prisma.student.findMany({
+            where: { schoolId: params.id, classId: { in: classIds } },
+            select: { classId: true, formData: true },
+          })
+        : Promise.resolve([]),
     ])
 
     const templatesById = new Map(
@@ -101,11 +108,15 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
       }
     }
 
+    const sectionStudents =
+      studentsResult.status === "fulfilled" ? studentsResult.value : []
+
     const classes = baseClasses.map((entry) => ({
       ...entry,
       classOptions: parseClassOptions(entry.classOptions),
       template: entry.templateId ? templatesById.get(entry.templateId) || null : null,
       teachers: teachersByClassId.get(entry.id) || [],
+      studentBreakdown: aggregateSectionStudentCounts(sectionStudents, entry.id),
     }))
 
     const response = NextResponse.json({

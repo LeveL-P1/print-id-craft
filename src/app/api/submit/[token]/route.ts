@@ -6,8 +6,7 @@ import { getFieldRole, inferFieldRole, resolveFieldValue, sortFieldsByRole } fro
 import { getTemplateForClass } from "@/lib/template-resolver"
 import {
   DIVISIONS,
-  parseClassOptions,
-  sectionUsesClassPicker,
+  resolveEffectiveClassOptions,
 } from "@/lib/section-class"
 
 export async function GET(req: Request, props: { params: Promise<{ token: string }> }) {
@@ -188,8 +187,12 @@ export async function GET(req: Request, props: { params: Promise<{ token: string
     }
     const flagColors = Array.from(flagColorSet).sort((a, b) => a.localeCompare(b))
 
-    const classOptions = parseClassOptions(cls.classOptions)
-    const usesClassPicker = sectionUsesClassPicker(classOptions)
+    const classOptions = resolveEffectiveClassOptions(
+      cls.classOptions,
+      cls.sectionType,
+      cls.name
+    )
+    const usesClassPicker = classOptions.length > 0
 
     return NextResponse.json({
       success: true,

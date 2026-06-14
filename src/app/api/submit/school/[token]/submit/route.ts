@@ -9,7 +9,7 @@ import { getNextStudentSerial } from "@/lib/student-serial"
 import { reportError, reportSlowOperation } from "@/lib/observability"
 import { checkDuplicateSubmission } from "@/lib/submit-fields"
 import { buildStudentIndexData } from "@/lib/student-index"
-import { validateAndBuildClassFields, parseClassOptions } from "@/lib/section-class"
+import { validateAndBuildClassFields } from "@/lib/section-class"
 
 const photoUrlRefine = (url: string) => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
@@ -67,7 +67,7 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
     // Verify the class belongs to this school and is still open.
     const cls = await prisma.class.findFirst({
       where: { id: validated.classId, schoolId: school.id, isActive: true },
-      select: { id: true, name: true, expiresAt: true, classOptions: true },
+      select: { id: true, name: true, expiresAt: true, classOptions: true, sectionType: true },
     })
     if (!cls) {
       return NextResponse.json({ error: "Selected class is not available." }, { status: 400 })
@@ -82,7 +82,8 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
     const classFields = validateAndBuildClassFields(
       formData,
       cls.name,
-      parseClassOptions(cls.classOptions)
+      cls.classOptions,
+      cls.sectionType
     )
     if (!classFields.ok) {
       return NextResponse.json({ error: classFields.error }, { status: 400 })
