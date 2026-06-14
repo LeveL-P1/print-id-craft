@@ -8,6 +8,7 @@ import {
   resolveFieldValue,
   type FieldRole,
 } from "@/lib/field-resolver"
+import { formatClassSection } from "@/lib/section-class"
 import { PHOTO_BG_STATUS, type PhotoBgStatus } from "@/lib/photo-bg-status"
 import { prepareStudentPhotoForUpload } from "@/lib/client-photo-upload"
 
@@ -25,8 +26,12 @@ type FormConfig = {
   schoolName: string
   schoolLogo: string | null
   className: string
+  sectionName?: string
   schoolId: string
   classId: string
+  usesClassPicker?: boolean
+  classOptions?: string[]
+  divisions?: string[]
   fieldConfig: FieldConfig[]
   frontLayout: TemplateElement[]
   backLayout: TemplateElement[]
@@ -46,6 +51,9 @@ type FormConfig = {
 
 const fieldRole = (field: FieldConfig): FieldRole =>
   getFieldRole(field.key, field.label, field.role)
+
+const getDisplayClass = (cfg: FormConfig | null, fd: Record<string, string>) =>
+  cfg?.usesClassPicker ? (fd.class || "—") : (cfg?.className || "")
 
 const formatSubmittedDate = (iso: string) => {
   try {
@@ -271,7 +279,7 @@ const IDCardPreview = ({
     Object.entries(formData).forEach(([key, value]) => {
       resolved = resolved.replace(new RegExp(`{{${key}}}`, 'g'), value || "")
     })
-    resolved = resolved.replace(/{{class}}/g, config?.className || "")
+    resolved = resolved.replace(/{{class}}/g, formData.class || config?.className || "")
     resolved = resolved.replace(/{{serialNumber}}/g, "Pending...")
     return resolved
   }
@@ -457,8 +465,8 @@ export default function SubmitPage() {
       .then(data => {
         if (data.success) {
           setConfig(data.data)
-          // Auto-populate class in formData so template preview always has it
-          if (data.data.className) {
+          // Legacy fixed-class links auto-fill class; section links use dropdowns.
+          if (data.data.className && !data.data.usesClassPicker) {
             setFormData(prev => ({ ...prev, class: data.data.className }))
           }
           // Auto-populate fixed branch if configured
@@ -503,6 +511,16 @@ export default function SubmitPage() {
     // submits with garbage data (a sub-5-word address, an incomplete mobile
     // number, etc.).
     if (config) {
+      if (config.usesClassPicker) {
+        if (!formData.classGrade?.trim()) {
+          setAlertMsg("Please select a class.")
+          return
+        }
+        if (!formData.division?.trim()) {
+          setAlertMsg("Please select a division.")
+          return
+        }
+      }
       for (const f of config.fieldConfig) {
         if (f.key === "class") continue
         const value = (formData[f.key] || "").trim()
@@ -932,7 +950,7 @@ export default function SubmitPage() {
                     <img src={croppedPhoto} alt="Photo" style={{ width: 48, height: 60, borderRadius: 6, objectFit: 'cover', border: '2px solid #e2e8f0' }} />
                     <div>
                       <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{resolveFieldValue(formData, "name") || '—'}</div>
-                      <div style={{ fontSize: 12, color: '#64748b' }}>{config?.className}</div>
+                      <div style={{ fontSize: 12, color: '#64748b' }}>{getDisplayClass(config, formData)}</div>
                     </div>
                   </div>
                 )}
@@ -961,7 +979,7 @@ export default function SubmitPage() {
                     {/* Class (auto-filled) */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '10px 0' }}>
                       <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 500 }}>Class</span>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{config?.className}</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{getDisplayClass(config, formData)}</span>
                     </div>
                   </div>
                 </div>
@@ -1034,7 +1052,9 @@ export default function SubmitPage() {
             {config?.schoolName.charAt(0)}
           </div>
           <h1 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>{config?.schoolName}</h1>
-          <p style={{ fontSize: 13, color: '#3b82f6', fontWeight: 600 }}>ID Registration — {config?.className}</p>
+          <p style={{ fontSize: 13, color: '#3b82f6', fontWeight: 600 }}>
+            ID Registration — {config?.usesClassPicker ? (config.sectionName || config.className) : config?.className}
+          </p>
         </div>
 
         {/* Step Indicators — background AI runs inside the Photo step */}
@@ -1107,8 +1127,89 @@ export default function SubmitPage() {
                 </div>
               )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                {/* Auto-filled Class field - read only */}
-                {config?.className && (
+                {config?.usesClassPicker ? (
+                  <>
+                    <div className="form-group">
+                      <label>Section</label>
+                      <input
+                        type="text"
+                        value={config.sectionName || config.className}
+                        readOnly
+                        disabled
+                        style={{ background: '#f1f5f9', color: '#475569', fontWeight: 600, cursor: 'not-allowed', border: '1px solid #e2e8f0' }}
+                      />
+                      <span style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, display: 'block' }}>
+                        Assigned from your registration link
+                      </span>
+                    </div>
+                    <div className="form-group">
+                      <label>
+                        Class <span style={{ color: '#ef4444' }}>*</span>
+                      </label>
+                      <select
+                        required
+                        value={formData.classGrade || ""}
+                        onChange={(e) => {
+                          const classGrade = e.target.value
+                          setFormData((prev) => ({
+                            ...prev,
+                            classGrade,
+                            class: formatClassSection(classGrade, prev.division || ""),
+                          }))
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '11px 12px',
+                          fontSize: 14,
+                          border: '1.5px solid #cbd5e1',
+                          borderRadius: 10,
+                          background: 'white',
+                        }}
+                      >
+                        <option value="">— Choose class —</option>
+                        {(config.classOptions || []).map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label>
+                        Division <span style={{ color: '#ef4444' }}>*</span>
+                      </label>
+                      <select
+                        required
+                        value={formData.division || ""}
+                        onChange={(e) => {
+                          const division = e.target.value
+                          setFormData((prev) => ({
+                            ...prev,
+                            division,
+                            class: formatClassSection(prev.classGrade || "", division),
+                          }))
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '11px 12px',
+                          fontSize: 14,
+                          border: '1.5px solid #cbd5e1',
+                          borderRadius: 10,
+                          background: 'white',
+                        }}
+                      >
+                        <option value="">— Choose division —</option>
+                        {(config.divisions || []).map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                      {formData.class && (
+                        <span style={{ fontSize: 11, color: '#64748b', marginTop: 4, display: 'block' }}>
+                          Will appear on ID card as: <strong>{formData.class}</strong>
+                        </span>
+                      )}
+                    </div>
+                  </>
+                ) : config?.className ? (
+                  /* Legacy fixed-class link — read only */
                   <div className="form-group">
                     <label>Class</label>
                     <input
@@ -1120,7 +1221,7 @@ export default function SubmitPage() {
                     />
                     <span style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, display: 'block' }}>Auto-assigned based on your form link</span>
                   </div>
-                )}
+                ) : null}
                 {config?.fieldConfig.filter(f => f.key !== "class").map(field => {
                   const role = fieldRole(field)
                   const value = formData[field.key] || ""

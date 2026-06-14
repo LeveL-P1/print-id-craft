@@ -3,12 +3,21 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { z } from "zod"
+import {
+  DEFAULT_CLASS_OPTIONS,
+  parseClassOptions,
+  type SectionType,
+} from "@/lib/section-class"
+
+const sectionTypeSchema = z.enum(["PRE_PRIMARY", "PRIMARY", "SECONDARY"])
 
 const updateClassSchema = z.object({
   isActive: z.boolean().optional(),
   expiresAt: z.string().optional().nullable(),
   name: z.string().min(1).optional(),
   templateId: z.string().nullable().optional(),
+  sectionType: sectionTypeSchema.optional().nullable(),
+  classOptions: z.array(z.string()).optional(),
 })
 
 export async function PUT(req: Request, props: { params: Promise<{ id: string; cid: string }> }) {
@@ -31,15 +40,30 @@ export async function PUT(req: Request, props: { params: Promise<{ id: string; c
       }
     }
 
+    const updateData: Record<string, unknown> = {
+      isActive: validated.isActive,
+      name: validated.name,
+      templateId: validated.templateId,
+      sectionType: validated.sectionType,
+    }
+    if (validated.expiresAt !== undefined) {
+      updateData.expiresAt = validated.expiresAt ? new Date(validated.expiresAt) : null
+    }
+    if (validated.classOptions !== undefined) {
+      updateData.classOptions = validated.classOptions
+    } else if (validated.sectionType) {
+      updateData.classOptions = DEFAULT_CLASS_OPTIONS[validated.sectionType as SectionType]
+    }
+
     const cls = await prisma.class.update({
       where: { id: params.cid, schoolId: params.id },
-      data: {
-        ...validated,
-        expiresAt: validated.expiresAt ? new Date(validated.expiresAt) : validated.expiresAt === null ? null : undefined,
-      },
+      data: updateData,
     })
 
-    return NextResponse.json({ success: true, data: cls })
+    return NextResponse.json({
+      success: true,
+      data: { ...cls, classOptions: parseClassOptions(cls.classOptions) },
+    })
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.issues }, { status: 400 })

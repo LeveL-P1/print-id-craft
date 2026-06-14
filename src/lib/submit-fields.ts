@@ -33,6 +33,8 @@ export type FormField = {
 const AUTO_KEYS_NORM = new Set<string>([
   "class",
   "classsection",
+  "classgrade",
+  "division",
   "photourl",
   "qrcodeurl",
   "srno",          // sr.no.

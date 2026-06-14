@@ -24,6 +24,7 @@ export const FIELD_GROUPS: Record<string, string[]> = {
   phone: ["phone", "mobile", "contact", "fatherphone", "mobfather", "contact no", "mobile no", "mob", "ph", "phno", "phoneno"],
   mobile: ["mobile", "phone", "contact", "fatherphone", "mobfather", "mob_father", "mob", "ph", "phno", "phoneno", "mobile no", "contact no", "telephone", "motherphone"],
   class: ["class", "classsection", "class_section", "standard", "grade"],
+  division: ["division", "div", "section"],
   branch: ["branch", "campus", "location"],
   rollno: ["rollno", "roll", "srno", "no", "admissionno", "roll number"],
   address: ["address", "addr", "location"],

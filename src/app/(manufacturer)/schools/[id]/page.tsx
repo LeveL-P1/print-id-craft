@@ -4,6 +4,11 @@ import { useParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
 import dynamic from "next/dynamic"
+import {
+  DEFAULT_CLASS_OPTIONS,
+  SECTION_TYPE_LABELS,
+  type SectionType,
+} from "@/lib/section-class"
 
 // Lazy-load heavy components — only loaded when their tab is active
 const IDCardPreview = dynamic(() => import("@/components/IDCardPreview"), { ssr: false })
@@ -63,6 +68,8 @@ type ClassData = {
   isActive: boolean
   expiresAt: string | null
   templateId: string | null
+  sectionType: SectionType | null
+  classOptions: string[]
   template: { id: string; name: string; templateImageUrl: string | null } | null
   _count: { students: number }
   teachers: { id: string; name: string; email: string; isMainTeacher: boolean }[]
@@ -155,10 +162,17 @@ export default function SchoolDetailPage() {
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [tabLoading, setTabLoading] = useState(false)
 
-  // Add class
+  // Add section (stored as Class row — one link per section)
   const [newClassName, setNewClassName] = useState("")
+  const [newSectionType, setNewSectionType] = useState<SectionType | "">("")
   const [newExpiry, setNewExpiry] = useState("")
   const [addingClass, setAddingClass] = useState(false)
+
+  // Inline class-options editor (Roman numerals per section)
+  const [editingClassOptionsFor, setEditingClassOptionsFor] = useState<string | null>(null)
+  const [editingClassOptionsDraft, setEditingClassOptionsDraft] = useState("")
+  const [editingSectionTypeDraft, setEditingSectionTypeDraft] = useState<SectionType | "">("")
+  const [savingClassOptions, setSavingClassOptions] = useState(false)
 
   // Inline expiry editor (per-row): which class is being edited + its draft value
   const [editingExpiryFor, setEditingExpiryFor] = useState<string | null>(null)
@@ -466,20 +480,70 @@ export default function SchoolDetailPage() {
       const res = await fetch(`/api/schools/${schoolId}/classes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newClassName, expiresAt: newExpiry || null }),
+        body: JSON.stringify({
+          name: newClassName,
+          expiresAt: newExpiry || null,
+          sectionType: newSectionType || null,
+        }),
       })
       const data = await res.json()
       if (data.success) {
-        toast.success("Class created!")
+        toast.success("Section created!")
         setNewClassName("")
+        setNewSectionType("")
         setNewExpiry("")
         fetchClasses()
         fetchSchool()
+      } else {
+        toast.error(data.error || "Failed to create section")
       }
     } catch (err) {
-      toast.error("Failed to create class")
+      toast.error("Failed to create section")
     } finally {
       setAddingClass(false)
+    }
+  }
+
+  const startEditClassOptions = (cls: ClassData) => {
+    setEditingClassOptionsFor(cls.id)
+    setEditingClassOptionsDraft((cls.classOptions || []).join(", "))
+    setEditingSectionTypeDraft(cls.sectionType || "")
+  }
+
+  const cancelEditClassOptions = () => {
+    setEditingClassOptionsFor(null)
+    setEditingClassOptionsDraft("")
+    setEditingSectionTypeDraft("")
+  }
+
+  const saveEditClassOptions = async (cid: string) => {
+    const classOptions = editingClassOptionsDraft
+      .split(/[,;\n]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+    if (classOptions.length === 0) {
+      toast.error("Add at least one class (Roman numerals, comma-separated).")
+      return
+    }
+    setSavingClassOptions(true)
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/classes/${cid}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          classOptions,
+          sectionType: editingSectionTypeDraft || null,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) throw new Error(data.error || "Failed")
+      toast.success("Section classes updated.")
+      cancelEditClassOptions()
+      fetchClasses()
+    } catch (e: any) {
+      toast.error(e?.message || "Could not save class options.")
+    } finally {
+      setSavingClassOptions(false)
     }
   }
 
@@ -767,14 +831,14 @@ export default function SchoolDetailPage() {
 
   const shareWhatsApp = (token: string, className: string) => {
     const url = `${window.location.origin}/submit/${token}`
-    const msg = encodeURIComponent(`📋 ID Card Registration Form\n\nSchool: ${school?.name}\nClass: ${className}\n\nPlease fill your details:\n${url}`)
+    const msg = encodeURIComponent(`📋 ID Card Registration Form\n\nSchool: ${school?.name}\nSection: ${className}\n\nOpen the link, select your child's class and division, then fill the form:\n${url}`)
     window.open(`https://wa.me/?text=${msg}`, "_blank")
   }
 
   const shareEmail = (token: string, className: string) => {
     const url = `${window.location.origin}/submit/${token}`
     const subject = encodeURIComponent(`ID Card Registration - ${school?.name} - ${className}`)
-    const body = encodeURIComponent(`Dear Parent/Student,\n\nPlease fill the ID card registration form for ${className}:\n\n${url}\n\nRegards,\n${school?.name}`)
+    const body = encodeURIComponent(`Dear Parent/Student,\n\nPlease open the link below, select your child's class and division, and fill the ID card registration form for ${className}:\n\n${url}\n\nRegards,\n${school?.name}`)
     window.open(`mailto:?subject=${subject}&body=${body}`)
   }
 
@@ -1912,10 +1976,10 @@ export default function SchoolDetailPage() {
                   }}>🔗</div>
                   <div style={{ flex: 1, minWidth: 200 }}>
                     <div style={{ fontSize: 14, fontWeight: 700, color: '#1e293b' }}>
-                      School-Wide Registration Link
+                      Section Registration Links
                     </div>
                     <div style={{ fontSize: 11, color: '#475569', lineHeight: 1.45 }}>
-                      One URL for the whole school. Parents pick their child&apos;s class from a dropdown.
+                      Optional fallback: one URL for the whole school. Prefer sharing each section link below.
                     </div>
                   </div>
                   <span style={{
@@ -1984,23 +2048,47 @@ export default function SchoolDetailPage() {
               </div>
             )}
 
-            <form onSubmit={handleAddClass} style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
-              <div className="form-group" style={{ flex: 1, minWidth: 200 }}>
-                <input placeholder="New class name (e.g. Grade 10-A)" value={newClassName} onChange={e => setNewClassName(e.target.value)} required />
+            <form onSubmit={handleAddClass} style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div className="form-group" style={{ flex: 1, minWidth: 180 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4, display: 'block' }}>Section name</label>
+                <input placeholder="e.g. Secondary, Pre Primary" value={newClassName} onChange={e => setNewClassName(e.target.value)} required />
+              </div>
+              <div className="form-group" style={{ width: 180 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4, display: 'block' }}>Section type</label>
+                <select
+                  value={newSectionType}
+                  onChange={(e) => {
+                    const v = e.target.value as SectionType | ""
+                    setNewSectionType(v)
+                  }}
+                  style={{ width: '100%', height: 44, padding: '0 10px', borderRadius: 8, border: '1px solid #cbd5e1' }}
+                >
+                  <option value="">Custom classes</option>
+                  {(Object.keys(SECTION_TYPE_LABELS) as SectionType[]).map((key) => (
+                    <option key={key} value={key}>{SECTION_TYPE_LABELS[key]}</option>
+                  ))}
+                </select>
               </div>
               <div className="form-group" style={{ width: 200 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4, display: 'block' }}>Link expiry</label>
                 <input type="datetime-local" value={newExpiry} onChange={e => setNewExpiry(e.target.value)} placeholder="Expiry (optional)" />
               </div>
               <button type="submit" className="btn btn-primary" style={{ height: 44 }} disabled={addingClass}>
-                {addingClass ? "Adding..." : "Add Class"}
+                {addingClass ? "Adding..." : "Add Section"}
               </button>
             </form>
+            {newSectionType && (
+              <div style={{ fontSize: 11, color: '#64748b', marginTop: -16, marginBottom: 20 }}>
+                Default classes: {DEFAULT_CLASS_OPTIONS[newSectionType].join(", ")} · Divisions A–M on the form
+              </div>
+            )}
 
             <div className="data-table-wrapper">
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Class Name</th>
+                    <th>Section</th>
+                    <th>Classes (Roman)</th>
                     <th>Template</th>
                     <th>Approval Teacher</th>
                     <th>Students</th>
@@ -2015,6 +2103,16 @@ export default function SchoolDetailPage() {
                     return (
                     <tr key={cls.id}>
                       <td style={{ fontWeight: 600 }}>{cls.name}</td>
+                      <td style={{ minWidth: 160, fontSize: 12, color: '#475569' }}>
+                        {(cls.classOptions?.length ?? 0) > 0 ? (
+                          <div>
+                            <div style={{ lineHeight: 1.5 }}>{cls.classOptions.join(", ")}</div>
+                            <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>+ Division A–M on form</div>
+                          </div>
+                        ) : (
+                          <span style={{ color: '#94a3b8' }}>Not configured</span>
+                        )}
+                      </td>
                       <td style={{ minWidth: 220 }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                           <select
@@ -2090,6 +2188,14 @@ export default function SchoolDetailPage() {
                       <td style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 12 }}>...{cls.linkToken.slice(-8)}</td>
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                          <button
+                            className="btn btn-outline"
+                            onClick={() => startEditClassOptions(cls)}
+                            style={{ fontSize: 11, padding: '5px 10px' }}
+                            title="Configure Roman class list for this section"
+                          >
+                            📚 Edit Classes
+                          </button>
                           <button className="btn btn-outline" onClick={() => copyLink(cls.linkToken)} style={{ fontSize: 11, padding: '5px 10px' }}>📋 Copy</button>
                           <button className="btn btn-outline" onClick={() => shareWhatsApp(cls.linkToken, cls.name)} style={{ fontSize: 11, padding: '5px 10px', color: '#22c55e', borderColor: '#22c55e' }}>💬 WhatsApp</button>
                           <button className="btn btn-outline" onClick={() => shareEmail(cls.linkToken, cls.name)} style={{ fontSize: 11, padding: '5px 10px' }}>📧 Email</button>
@@ -2108,6 +2214,51 @@ export default function SchoolDetailPage() {
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/></svg>
                           </button>
                         </div>
+                        {editingClassOptionsFor === cls.id && (
+                          <div
+                            style={{
+                              marginTop: 8,
+                              padding: 10,
+                              background: '#f0f9ff',
+                              border: '1px solid #bae6fd',
+                              borderRadius: 8,
+                              textAlign: 'left',
+                            }}
+                          >
+                            <div style={{ fontSize: 11, fontWeight: 700, color: '#0369a1', marginBottom: 8 }}>
+                              Roman classes for {cls.name}
+                            </div>
+                            <select
+                              value={editingSectionTypeDraft}
+                              onChange={(e) => {
+                                const v = e.target.value as SectionType | ""
+                                setEditingSectionTypeDraft(v)
+                                if (v) setEditingClassOptionsDraft(DEFAULT_CLASS_OPTIONS[v].join(", "))
+                              }}
+                              style={{ width: '100%', marginBottom: 8, padding: '6px 8px', fontSize: 12, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                            >
+                              <option value="">Custom list</option>
+                              {(Object.keys(SECTION_TYPE_LABELS) as SectionType[]).map((key) => (
+                                <option key={key} value={key}>{SECTION_TYPE_LABELS[key]} defaults</option>
+                              ))}
+                            </select>
+                            <input
+                              value={editingClassOptionsDraft}
+                              onChange={(e) => setEditingClassOptionsDraft(e.target.value)}
+                              placeholder="e.g. VI, VII, VIII, IX, X"
+                              style={{ width: '100%', padding: '8px 10px', fontSize: 12, borderRadius: 6, border: '1px solid #cbd5e1', marginBottom: 8 }}
+                            />
+                            <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8 }}>
+                              Comma-separated. Parents also pick Division A–M; card shows e.g. VII-A.
+                            </div>
+                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                              <button type="button" className="btn btn-outline" onClick={cancelEditClassOptions} style={{ fontSize: 11, padding: '4px 10px' }}>Cancel</button>
+                              <button type="button" className="btn btn-primary" disabled={savingClassOptions} onClick={() => saveEditClassOptions(cls.id)} style={{ fontSize: 11, padding: '4px 10px' }}>
+                                {savingClassOptions ? "Saving…" : "Save"}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                         {/* Inline expiry editor — appears under the action buttons for the row being edited */}
                         {editingExpiryFor === cls.id && (
                           <div

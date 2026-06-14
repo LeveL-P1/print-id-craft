@@ -136,7 +136,8 @@ const SAMPLE_DATA: Record<string, string> = {
   name: "Avneesh Abhishek Awachat",
   fullName: "Avneesh Abhishek Awachat",
   Student_Name: "Avneesh Abhishek Awachat",
-  class: "Playgroup-Sparkling Starfish(B1)",
+  class: "VII-A",
+  division: "A",
   branch: "Bibwewadi",
   father: "9650319700",
   mother: "8850257336",
@@ -3400,6 +3401,7 @@ export default function JpgTemplateMapper({
               {[
                 { key: "name", label: "Student Name" },
                 { key: "class", label: "Class-Section" },
+                { key: "division", label: "Division" },
                 { key: "branch", label: "Branch" },
                 { key: "rollNo", label: "Roll No. / NO" },
                 { key: "father", label: "Father's Mobile No." },

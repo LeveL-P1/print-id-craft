@@ -4,13 +4,22 @@ import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { z } from "zod"
 import crypto from "crypto"
+import {
+  DEFAULT_CLASS_OPTIONS,
+  parseClassOptions,
+  type SectionType,
+} from "@/lib/section-class"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 30
 
+const sectionTypeSchema = z.enum(["PRE_PRIMARY", "PRIMARY", "SECONDARY"])
+
 const classSchema = z.object({
-  name: z.string().min(1, "Class name is required"),
+  name: z.string().min(1, "Section name is required"),
   expiresAt: z.string().optional().nullable(),
+  sectionType: sectionTypeSchema.optional().nullable(),
+  classOptions: z.array(z.string()).optional(),
 })
 
 function parsePagination(req: Request) {
@@ -43,6 +52,8 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
         isActive: true,
         expiresAt: true,
         templateId: true,
+        sectionType: true,
+        classOptions: true,
         createdAt: true,
         _count: { select: { students: true } },
       },
@@ -92,6 +103,7 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
 
     const classes = baseClasses.map((entry) => ({
       ...entry,
+      classOptions: parseClassOptions(entry.classOptions),
       template: entry.templateId ? templatesById.get(entry.templateId) || null : null,
       teachers: teachersByClassId.get(entry.id) || [],
     }))
@@ -142,16 +154,27 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       }
     }
 
+    const sectionType = validated.sectionType as SectionType | null | undefined
+    let classOptions = validated.classOptions
+    if (classOptions === undefined && sectionType) {
+      classOptions = DEFAULT_CLASS_OPTIONS[sectionType]
+    }
+
     const newClass = await prisma.class.create({
       data: {
         name: validated.name,
         schoolId: params.id,
         linkToken: crypto.randomUUID(),
         expiresAt,
+        sectionType: sectionType || null,
+        classOptions: classOptions ?? [],
       },
     })
 
-    return NextResponse.json({ success: true, data: newClass }, { status: 201 })
+    return NextResponse.json({
+      success: true,
+      data: { ...newClass, classOptions: parseClassOptions(newClass.classOptions) },
+    }, { status: 201 })
   } catch (error) {
     console.error(`POST /api/schools/${params.id}/classes error:`, error)
     if (error instanceof z.ZodError) {

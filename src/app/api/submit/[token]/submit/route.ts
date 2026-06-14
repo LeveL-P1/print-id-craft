@@ -9,6 +9,7 @@ import { getNextStudentSerial } from "@/lib/student-serial"
 import { reportError, reportSlowOperation } from "@/lib/observability"
 import { checkDuplicateSubmission } from "@/lib/submit-fields"
 import { buildStudentIndexData } from "@/lib/student-index"
+import { validateAndBuildClassFields, parseClassOptions } from "@/lib/section-class"
 
 const photoUrlRefine = (url: string) => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
@@ -65,6 +66,15 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
     const validated = publicSubmitSchema.parse(body)
     const formData = validated.formData as Record<string, string>
 
+    const classFields = validateAndBuildClassFields(
+      formData,
+      cls.name,
+      parseClassOptions(cls.classOptions)
+    )
+    if (!classFields.ok) {
+      return NextResponse.json({ error: classFields.error }, { status: 400 })
+    }
+
     const duplicate = await checkDuplicateSubmission(cls.id, formData)
     if (duplicate.isDuplicate) {
       return NextResponse.json({
@@ -97,7 +107,9 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
           const finalFormData = {
             ...validated.formData,
             ...autoFields,
-            class: cls.name,
+            class: classFields.class,
+            ...(classFields.classGrade ? { classGrade: classFields.classGrade } : {}),
+            ...(classFields.division ? { division: classFields.division } : {}),
           }
           const indexData = buildStudentIndexData(finalFormData, cls.id)
           return tx.student.create({

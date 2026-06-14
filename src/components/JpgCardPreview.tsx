@@ -129,6 +129,7 @@ const FIELD_GROUPS: Record<string, string[]> = {
   mob_father: ["mobfather", "mob_father", "fatherphone", "father", "fathername", "phone"],
   phone: ["phone", "mobile", "contact", "fatherphone", "mobfather"],
   class: ["class", "classsection", "class_section"],
+  division: ["division", "div", "section"],
   branch: ["branch"],
   rollno: ["rollno", "roll", "srno", "no", "admissionno"],
   address: ["address", "addr"],

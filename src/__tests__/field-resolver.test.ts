@@ -11,6 +11,12 @@ import {
   isPrefixedAddressField,
 } from "@/lib/field-resolver"
 import { extractIdentityFields } from "@/lib/submit-fields"
+import {
+  DEFAULT_CLASS_OPTIONS,
+  DIVISIONS,
+  formatClassSection,
+  validateAndBuildClassFields,
+} from "@/lib/section-class"
 
 /* ══════════════════════════════════════════════════════════════
  * normalizeKey — key normalization
@@ -319,6 +325,31 @@ describe("resolveFieldValue", () => {
       for (let i = 0; i < 100; i++) fd[`field_${i}`] = `value_${i}`
       fd["name"] = "Found"
       expect(resolveFieldValue(fd, "name")).toBe("Found")
+    })
+  })
+
+  describe("section class + division", () => {
+    it("formats VII-A for card placeholder", () => {
+      expect(formatClassSection("VII", "A")).toBe("VII-A")
+    })
+
+    it("resolves division field from form data", () => {
+      expect(resolveFieldValue({ division: "B" }, "division")).toBe("B")
+    })
+
+    it("builds combined class on submit", () => {
+      const result = validateAndBuildClassFields(
+        { classGrade: "VII", division: "A" },
+        "Secondary",
+        DEFAULT_CLASS_OPTIONS.SECONDARY
+      )
+      expect(result.ok).toBe(true)
+      if (result.ok) expect(result.class).toBe("VII-A")
+    })
+
+    it("includes divisions A through M", () => {
+      expect(DIVISIONS).toHaveLength(13)
+      expect(DIVISIONS[0]).toBe("A")
     })
   })
 })

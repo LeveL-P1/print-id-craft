@@ -9,6 +9,7 @@ import { getNextStudentSerial } from "@/lib/student-serial"
 import { reportError, reportSlowOperation } from "@/lib/observability"
 import { checkDuplicateSubmission } from "@/lib/submit-fields"
 import { buildStudentIndexData } from "@/lib/student-index"
+import { validateAndBuildClassFields, parseClassOptions } from "@/lib/section-class"
 
 const photoUrlRefine = (url: string) => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
@@ -66,7 +67,7 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
     // Verify the class belongs to this school and is still open.
     const cls = await prisma.class.findFirst({
       where: { id: validated.classId, schoolId: school.id, isActive: true },
-      select: { id: true, name: true, expiresAt: true },
+      select: { id: true, name: true, expiresAt: true, classOptions: true },
     })
     if (!cls) {
       return NextResponse.json({ error: "Selected class is not available." }, { status: 400 })
@@ -77,6 +78,16 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
     }
 
     const formData = validated.formData as Record<string, string>
+
+    const classFields = validateAndBuildClassFields(
+      formData,
+      cls.name,
+      parseClassOptions(cls.classOptions)
+    )
+    if (!classFields.ok) {
+      return NextResponse.json({ error: classFields.error }, { status: 400 })
+    }
+
     const duplicate = await checkDuplicateSubmission(cls.id, formData)
     if (duplicate.isDuplicate) {
       return NextResponse.json({
@@ -103,7 +114,13 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
           const photoPath = validated.photoPath?.startsWith(`students/${school.id}/`)
             ? validated.photoPath
             : ""
-          const finalFormData = { ...validated.formData, ...autoFields, class: cls.name }
+          const finalFormData = {
+            ...validated.formData,
+            ...autoFields,
+            class: classFields.class,
+            ...(classFields.classGrade ? { classGrade: classFields.classGrade } : {}),
+            ...(classFields.division ? { division: classFields.division } : {}),
+          }
           const indexData = buildStudentIndexData(finalFormData, cls.id)
           return tx.student.create({
             data: {

@@ -65,6 +65,9 @@ model Class {
   linkToken  String    @unique @default(cuid())
   isActive   Boolean   @default(true)
   expiresAt  DateTime?
+  // Section workflow: Roman class list shown on the public form (e.g. VI, VII).
+  sectionType  SectionType?
+  classOptions Json      @default("[]")
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
   students   Student[]
@@ -107,6 +110,12 @@ model Template {
 enum Orientation {
   PORTRAIT
   LANDSCAPE
+}
+
+enum SectionType {
+  PRE_PRIMARY
+  PRIMARY
+  SECONDARY
 }
 
 model Student {
