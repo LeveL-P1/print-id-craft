@@ -63,9 +63,23 @@ const nextConfig = {
         ],
       },
       // Enable Cross-Origin Isolation for WASM SharedArrayBuffer (ONNX runtime)
-      // Only on submit pages where background removal is used
+      // On submit pages and manufacturer dashboard where AI background removal runs
       {
         source: '/submit/:path*',
+        headers: [
+          { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+          { key: 'Cross-Origin-Embedder-Policy', value: 'credentialless' },
+        ],
+      },
+      {
+        source: '/schools/:path*',
+        headers: [
+          { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+          { key: 'Cross-Origin-Embedder-Policy', value: 'credentialless' },
+        ],
+      },
+      {
+        source: '/dashboard/:path*',
         headers: [
           { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
           { key: 'Cross-Origin-Embedder-Policy', value: 'credentialless' },

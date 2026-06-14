@@ -114,7 +114,7 @@ const DATE_FORMATS = [
 const FONT_FAMILIES = [
   // Sans-Serif
   "Arial", "Arial Narrow", "Helvetica", "Verdana", "Tahoma", "Trebuchet MS",
-  "Calibri", "Segoe UI", "Lucida Sans", "Franklin Gothic Medium",
+  "Calibri", "Segoe UI", "Lucida Sans", "Franklin Gothic Medium", "Century Gothic",
   // Condensed / Narrow — used when columns are tight (parents' addresses,
   // long names). Combine with fontWeight=bold to get "Narrow Bold".
   "Roboto Condensed", "Oswald", "Open Sans Condensed", "Barlow Condensed",
@@ -3798,14 +3798,14 @@ export default function JpgTemplateMapper({
         <FontDialog
           initial={{
             fontFamily: selectedMapping.fontFamily || "Arial",
-            fontStyle: selectedMapping.fontStyle === "italic" ? (selectedMapping.fontWeight === "bold" ? "Bold Italic" : "Italic") : (selectedMapping.fontWeight === "bold" ? (/(narrow|condensed)/i.test(selectedMapping.fontFamily || "") ? "Narrow Bold" : "Bold") : "Regular"),
+            fontStyle: selectedMapping.fontStyle === "italic" ? (selectedMapping.fontWeight === "bold" ? "Bold Italic" : "Italic") : (selectedMapping.fontWeight === "bold" ? (/(narrow|condensed|century gothic)/i.test(selectedMapping.fontFamily || "") ? "Narrow Bold" : "Bold") : "Regular"),
             fontSize: selectedMapping.fontSize,
             strikeout: selectedMapping.textDecoration === "line-through",
             underline: selectedMapping.textDecoration === "underline",
           }}
           onChange={(cfg: FontConfig) => {
             const isNarrowBold = cfg.fontStyle.toLowerCase().includes("narrow")
-            const nextFontFamily = isNarrowBold && !/(narrow|condensed)/i.test(cfg.fontFamily) ? "Arial Narrow" : cfg.fontFamily
+            const nextFontFamily = isNarrowBold && !/(narrow|condensed|century gothic)/i.test(cfg.fontFamily) ? "Arial Narrow" : cfg.fontFamily
             updateMapping(selectedMapping.id, {
               fontFamily: nextFontFamily,
               fontWeight: cfg.fontStyle.toLowerCase().includes("bold") ? "bold" : "normal",

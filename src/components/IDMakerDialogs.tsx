@@ -409,12 +409,14 @@ export function IdSizeDialog({
 // ─────────────────────────────────────────────────────────────
 // 2. FONT DIALOG  (exact screenshot match)
 // ─────────────────────────────────────────────────────────────
+const NARROW_STYLE_FONTS = /(narrow|condensed|century gothic)/i
+
 const FONT_LIST = [
   "Microsoft Sans Serif", "Arial", "Arial Narrow", "Helvetica", "Tahoma", "Verdana",
   "Times New Roman", "Georgia", "Courier New", "Impact", "Mohol",
   "Modern No. 20", "Monotype Corsiva", "Montserrat",
   "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Poppins", "Raleway",
-  "Oswald", "PT Sans Narrow",
+  "Oswald", "PT Sans Narrow", "Century Gothic",
   "Noto Sans Devanagari", "Noto Sans",
 ]
 const FONT_STYLES = ["Regular", "Italic", "Bold", "Bold Italic", "Narrow Bold"]
@@ -454,7 +456,7 @@ export function FontDialog({
   }, [fontFamily, fontStyle, fontSize, strikeout, underline, onChange])
 
   const previewStyle: React.CSSProperties = {
-    fontFamily: fontStyle.toLowerCase().includes("narrow") && !/(narrow|condensed)/i.test(fontFamily) ? "Arial Narrow" : fontFamily,
+    fontFamily: fontStyle.toLowerCase().includes("narrow") && !NARROW_STYLE_FONTS.test(fontFamily) ? "Arial Narrow" : fontFamily,
     fontSize: Math.min(fontSize, 24),
     fontWeight: fontStyle.toLowerCase().includes("bold") ? "bold" : "normal",
     fontStyle: fontStyle.toLowerCase().includes("italic") ? "italic" : "normal",

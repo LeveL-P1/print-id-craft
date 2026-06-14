@@ -1698,8 +1698,6 @@ export default function SubmitPage() {
               <PhotoBgProcessor
                 photoUrl={photoPreview}
                 defaultBgColor={config?.photoBgColor || "#FFFFFF"}
-                submitToken={token}
-                schoolId={config?.schoolId}
                 autoConfirm
                 onStatus={setPhotoBgStatus}
                 onProcessed={(processedUrl, status) => {

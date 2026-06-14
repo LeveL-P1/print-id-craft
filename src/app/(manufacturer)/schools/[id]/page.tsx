@@ -4,6 +4,7 @@ import { useParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
 import dynamic from "next/dynamic"
+import { prepareStudentPhotoForUpload } from "@/lib/client-photo-upload"
 import {
   DEFAULT_CLASS_OPTIONS,
   DIVISIONS,
@@ -18,6 +19,9 @@ const IDCardPreview = dynamic(() => import("@/components/IDCardPreview"), { ssr:
 const JpgTemplateMapper = dynamic(() => import("@/components/JpgTemplateMapper"), { ssr: false })
 const JpgCardPreview = dynamic(() => import("@/components/JpgCardPreview"), { ssr: false })
 const BatchGenerator = dynamic(() => import("@/components/BatchGenerator"), { ssr: false })
+const ManufacturerPhotoBgEditor = dynamic(() => import("@/components/ManufacturerPhotoBgEditor"), { ssr: false })
+const ManufacturerBgBatchProcessor = dynamic(() => import("@/components/ManufacturerBgBatchProcessor"), { ssr: false })
+const PhotoCropper = dynamic(() => import("@/components/PhotoCropper"), { ssr: false })
 
 /**
  * Resolve a student's flag-image URL by trying every column the import
@@ -130,6 +134,18 @@ type StudentData = {
   submittedAt: string
   classId: string
   class: { id: string; name: string }
+}
+
+function getStudentPhotoUrl(s: Pick<StudentData, "id" | "photoUrl" | "photoPath" | "formData">): string {
+  if (s.photoPath) return `/api/media/student-photo/${s.id}`
+  if (s.photoUrl) return s.photoUrl
+  const fd = s.formData as Record<string, string> | undefined
+  const fromForm = fd?.photoUrl || fd?.["Photo URL"] || fd?.["photo url"]
+  return typeof fromForm === "string" ? fromForm : ""
+}
+
+function studentHasPhoto(s: Pick<StudentData, "id" | "photoUrl" | "photoPath" | "formData">): boolean {
+  return getStudentPhotoUrl(s).length > 0
 }
 
 type SchoolDetail = {
@@ -264,17 +280,26 @@ export default function SchoolDetailPage() {
   const [manualSearchQuery, setManualSearchQuery] = useState('')
   const [allStudentsList, setAllStudentsList] = useState<any[]>([])
 
-  // Batch reprocess skipped photo backgrounds
+  // Batch AI background (local, runs in browser on manufacturer PC)
   const [reprocessOpen, setReprocessOpen] = useState(false)
-  const [reprocessMode, setReprocessMode] = useState<"skipped" | "unprocessed" | "all">("skipped")
   const [reprocessBgColor, setReprocessBgColor] = useState("#FFFFFF")
   const [reprocessLoading, setReprocessLoading] = useState(false)
-  const [reprocessStarting, setReprocessStarting] = useState(false)
   const [reprocessInfo, setReprocessInfo] = useState<{
     skippedCount: number
     bgColor?: string
-    rembgAvailable: boolean
-    activeJob: any | null
+    clientAiAvailable: boolean
+    students: Array<{ id: string; serialNumber: string; photoUrl: string; name?: string }>
+  } | null>(null)
+  const [bgEditorStudent, setBgEditorStudent] = useState<{
+    id: string
+    name: string
+    photoUrl: string
+    defaultBgColor: string
+  } | null>(null)
+  const [photoCrop, setPhotoCrop] = useState<{
+    url: string
+    target: "edit" | "detail"
+    studentId?: string
   } | null>(null)
 
   // Memoized blob-URL map for unmatched photo thumbnails. Previously, the
@@ -1135,8 +1160,59 @@ export default function SchoolDetailPage() {
     setEditFormFields({ ...(s.formData as Record<string, string>) })
     setEditClassId(s.classId || s.class?.id || "")
     setEditPhotoFile(null)
-    setEditPhotoPreview(s.photoUrl || "")
+    setEditPhotoPreview(getStudentPhotoUrl(s) || "")
     setEditStudentOpen(true)
+  }
+
+  const closePhotoCrop = () => {
+    if (photoCrop?.url.startsWith("blob:")) URL.revokeObjectURL(photoCrop.url)
+    setPhotoCrop(null)
+  }
+
+  const pickPhotoForCrop = (file: File, target: "edit" | "detail", studentId?: string) => {
+    setPhotoCrop((prev) => {
+      if (prev?.url.startsWith("blob:")) URL.revokeObjectURL(prev.url)
+      return { url: URL.createObjectURL(file), target, studentId }
+    })
+  }
+
+  const handlePhotoCropped = async (croppedDataUrl: string) => {
+    if (!photoCrop) return
+    const { target, studentId } = photoCrop
+    try {
+      if (target === "edit") {
+        setEditPhotoPreview(croppedDataUrl)
+        const file = await prepareStudentPhotoForUpload(croppedDataUrl, {
+          fileName: `photo-${Date.now()}.jpg`,
+        })
+        setEditPhotoFile(file)
+        closePhotoCrop()
+        toast.success("Photo cropped — save the student to upload.")
+        return
+      }
+      if (target === "detail" && studentId) {
+        const file = await prepareStudentPhotoForUpload(croppedDataUrl, {
+          fileName: `${studentId}.jpg`,
+        })
+        const fd = new FormData()
+        fd.append("photo", file)
+        fd.append("studentId", studentId)
+        const res = await fetch(`/api/schools/${schoolId}/students/assign-photo`, { method: "POST", body: fd })
+        const data = await res.json()
+        closePhotoCrop()
+        if (data.success) {
+          toast.success("Photo updated!")
+          if (selectedStudent?.id === studentId) {
+            setSelectedStudent({ ...selectedStudent, photoUrl: data.data.photoUrl })
+          }
+          fetchStudents(studentPage)
+        } else {
+          toast.error(data.error || "Upload failed")
+        }
+      }
+    } catch {
+      toast.error("Could not save cropped photo")
+    }
   }
 
   const handleSaveStudent = async () => {
@@ -1502,12 +1578,12 @@ export default function SchoolDetailPage() {
     setAllStudentsList([])
   }
 
-  const fetchReprocessInfo = async (mode: "skipped" | "unprocessed" | "all" = reprocessMode) => {
+  const fetchReprocessInfo = async () => {
     setReprocessLoading(true)
     try {
       const params = new URLSearchParams()
       if (classFilter) params.set("classId", classFilter)
-      params.set("mode", mode)
+      params.set("mode", "all")
       const res = await fetch(`/api/schools/${schoolId}/students/reprocess-photos?${params.toString()}`)
       const data = await res.json()
       if (data.success) {
@@ -1523,50 +1599,32 @@ export default function SchoolDetailPage() {
     }
   }
 
-  const openReprocessModal = async (mode: "skipped" | "unprocessed" | "all") => {
-    setReprocessMode(mode)
-    setReprocessOpen(true)
-    await fetchReprocessInfo(mode)
-  }
-
-  const startReprocessJob = async (studentIds?: string[]) => {
-    if (!/^#[0-9a-fA-F]{6}$/.test(reprocessBgColor)) {
-      toast.error("Enter a valid background color like #FFFFFF")
+  const openBgEditorForStudent = (s: StudentData) => {
+    const fd = s.formData as Record<string, string>
+    const photoUrl = getStudentPhotoUrl(s)
+    if (!photoUrl) {
+      toast.error("No photo on file for this student. Ask them to re-submit via the form link, or upload a photo manually.")
       return
     }
-    setReprocessStarting(true)
-    try {
-      const res = await fetch(`/api/schools/${schoolId}/students/reprocess-photos`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          classId: classFilter || null,
-          studentIds,
-          maxStudents: studentIds?.length || 5000,
-          mode: reprocessMode,
-          bgColor: reprocessBgColor,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        toast.error(data.error || "Failed to start reprocess job")
-        return
-      }
-      toast.success(
-        studentIds?.length
-          ? "Single photo background processing started."
-          : reprocessMode === "all"
-            ? "Background processing started for the entire selected scope."
-            : reprocessMode === "unprocessed"
-              ? "Background processing started for unprocessed photos."
-              : "Background reprocess started for skipped photos."
-      )
-      await fetchReprocessInfo(reprocessMode)
-    } catch {
-      toast.error("Failed to start reprocess job")
-    } finally {
-      setReprocessStarting(false)
-    }
+    const studentClass = classes.find((c) => c.id === s.classId)
+    const tpl = resolveStudentTemplate(studentClass, s, templateData)
+    setBgEditorStudent({
+      id: s.id,
+      name: fd?.fullName || fd?.["Full Name"] || fd?.["Student Name"] || s.serialNumber,
+      photoUrl,
+      defaultBgColor: (tpl as { photoBgColor?: string })?.photoBgColor || reprocessBgColor || "#FFFFFF",
+    })
+  }
+
+  const openReprocessModal = async () => {
+    setReprocessOpen(true)
+    await fetchReprocessInfo()
+  }
+
+  const handleBatchBgComplete = (stats: { processed: number; failed: number }) => {
+    toast.success(`Background processing complete: ${stats.processed} saved, ${stats.failed} failed.`)
+    fetchStudents(studentPage)
+    fetchReprocessInfo()
   }
 
   // Flag management handlers
@@ -2670,17 +2728,9 @@ export default function SchoolDetailPage() {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
                 Bulk Upload Photos
               </button>
-              <button className="btn btn-outline" onClick={() => openReprocessModal("skipped")} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#6366f1', color: '#4f46e5' }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
-                Reprocess Skipped Photos
-              </button>
-              <button className="btn btn-outline" onClick={() => openReprocessModal("unprocessed")} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#0ea5e9', color: '#0284c7' }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 3v3"/><path d="M18.36 5.64l-2.12 2.12"/><path d="M21 12h-3"/><path d="M18.36 18.36l-2.12-2.12"/><path d="M12 21v-3"/><path d="M5.64 18.36l2.12-2.12"/><path d="M3 12h3"/><path d="M5.64 5.64l2.12 2.12"/></svg>
-                Process Unprocessed
-              </button>
-              <button className="btn btn-outline" onClick={() => openReprocessModal("all")} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#d946ef', color: '#c026d3' }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="m5 3 1 2.5L8.5 6 6 7 5 9.5 4 7 1.5 6 4 5.5Z"/><path d="m19 17 1 2.5 2.5.5-2.5 1-1 2.5-1-2.5-2.5-1 2.5-1Z"/></svg>
-                Process Entire Scope
+              <button className="btn btn-outline" onClick={() => openReprocessModal()} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#8b5cf6', color: '#7c3aed' }} title="Run local AI background removal on all photos in the current filter">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+                Process All Photos (AI Background)
               </button>
               <button className="btn btn-outline" onClick={openAddStudent} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderColor: '#22c55e', color: '#16a34a' }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
@@ -2832,7 +2882,7 @@ export default function SchoolDetailPage() {
                       : ""}
                   </span>
                 )}
-                {(() => { const missing = students.filter(s => !s.photoUrl).length; return missing > 0 ? (
+                {(() => { const missing = students.filter(s => !studentHasPhoto(s)).length; return missing > 0 ? (
                   <span style={{ marginLeft: 12, fontSize: 12, fontWeight: 600, color: '#ef4444', background: '#fef2f2', padding: '3px 10px', borderRadius: 6 }}>
                     📷 {missing} missing photos
                   </span>
@@ -2909,7 +2959,7 @@ export default function SchoolDetailPage() {
                 <table className="data-table" style={{ minWidth: hasDynamicColumns ? Math.max(800, dataColumns.length * 120) : 800 }}>
                   <thead>
                     <tr>
-                      <th style={{ position: 'sticky', left: 0, background: '#f8fafc', zIndex: 2 }}>Photo</th>
+                      <th style={{ position: 'sticky', left: 0, background: '#f8fafc', zIndex: 2, minWidth: 72 }}>Photo</th>
                       {hasDynamicColumns ? (
                         dataColumns.map(k => <th key={k}>{keyToLabel[k] || k}</th>)
                       ) : (
@@ -2961,19 +3011,38 @@ export default function SchoolDetailPage() {
                         return ""
                       }
                       const studentName = (fd?.fullName || fd?.name || fd?.["Full Name"] || fd?.["Student Name"] || "—") as string
-                      const hasPhoto = !!s.photoUrl
+                      const displayPhotoUrl = getStudentPhotoUrl(s)
+                      const hasPhoto = studentHasPhoto(s)
+                      const isNameColumn = (k: string) => ["fullName", "name", "studentName"].includes(k)
 
                       return (
                         <tr key={s.id}>
-                          <td style={{ position: 'sticky', left: 0, background: '#fff', zIndex: 1 }}>
-                            {s.photoUrl ? (
-                              <div style={{ width: 36, height: 36, borderRadius: '50%', overflow: 'hidden', border: '2px solid #e2e8f0' }}>
-                                <img src={s.photoUrl} alt="" loading="lazy" decoding="async" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                              </div>
+                          <td style={{ position: 'sticky', left: 0, background: '#fff', zIndex: 1, padding: '8px 10px' }}>
+                            {displayPhotoUrl ? (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedStudent(s)}
+                                title="View student photo"
+                                style={{
+                                  width: 52, height: 68, borderRadius: 8, overflow: 'hidden',
+                                  border: '2px solid #e2e8f0', padding: 0, cursor: 'pointer', background: '#f8fafc', display: 'block',
+                                }}
+                              >
+                                <img
+                                  src={displayPhotoUrl}
+                                  alt={studentName}
+                                  loading="lazy"
+                                  decoding="async"
+                                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                  onError={(e) => {
+                                    (e.currentTarget as HTMLImageElement).style.display = 'none'
+                                  }}
+                                />
+                              </button>
                             ) : (
-                              <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#fef2f2', border: '2px dashed #fca5a5', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                                <div style={{ position: 'absolute', top: -2, right: -2, width: 10, height: 10, borderRadius: '50%', background: '#ef4444', border: '1.5px solid white' }} title="Photo missing" />
+                              <div style={{ width: 52, height: 68, borderRadius: 8, background: '#fef2f2', border: '2px dashed #fca5a5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 2, color: '#ef4444', fontSize: 9, fontWeight: 600, textAlign: 'center', padding: 4 }}>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                                No photo
                               </div>
                             )}
                           </td>
@@ -2988,16 +3057,35 @@ export default function SchoolDetailPage() {
                                   fontFamily: isPhotoIdCol || isNumCol ? 'monospace' : 'inherit',
                                   fontWeight: (k === "fullName" || k === "name" || k === "studentName") ? 500 : 'normal',
                                   color: !val ? '#cbd5e1' : isPhotoIdCol ? '#6366f1' : '#334155',
-                                  maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                  maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: isNameColumn(k) ? 'normal' : 'nowrap',
                                 }}>
-                                  {val || "—"}
+                                  {isNameColumn(k) ? (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                                      {displayPhotoUrl && (
+                                        <img
+                                          src={displayPhotoUrl}
+                                          alt=""
+                                          loading="lazy"
+                                          style={{ width: 32, height: 42, borderRadius: 6, objectFit: 'cover', border: '1px solid #e2e8f0', flexShrink: 0 }}
+                                        />
+                                      )}
+                                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{val || "—"}</span>
+                                    </div>
+                                  ) : (val || "—")}
                                 </td>
                               )
                             })
                           ) : (
                             <>
                               <td style={{ fontWeight: 600, fontFamily: 'monospace', fontSize: 13 }}>{s.serialNumber}</td>
-                              <td style={{ fontWeight: 500 }}>{studentName}</td>
+                              <td style={{ fontWeight: 500 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  {displayPhotoUrl && (
+                                    <img src={displayPhotoUrl} alt="" loading="lazy" style={{ width: 32, height: 42, borderRadius: 6, objectFit: 'cover', border: '1px solid #e2e8f0' }} />
+                                  )}
+                                  {studentName}
+                                </div>
+                              </td>
                             </>
                           )}
                           <td>{s.class?.name || "—"}</td>
@@ -3009,12 +3097,24 @@ export default function SchoolDetailPage() {
                               s.status === 'SUBMITTED' ? 'status-submitted' :
                               'status-pending'
                             }`}>{s.status}</span>
-                            {!hasPhoto && <div style={{ fontSize: 10, color: '#ef4444', marginTop: 3, fontWeight: 600 }}>⚠ Photo</div>}
+                            {!hasPhoto && <div style={{ fontSize: 10, color: '#ef4444', marginTop: 3, fontWeight: 600 }}>⚠ Photo missing</div>}
+                            {hasPhoto && s.photoBgStatus !== "PROCESSED" && s.photoBgStatus !== "REPROCESSED" && s.photoBgStatus !== "PLAIN" && (
+                              <div style={{ fontSize: 10, color: '#7c3aed', marginTop: 3, fontWeight: 600 }}>AI not run</div>
+                            )}
                             {s.flagNote && <div style={{ fontSize: 11, color: '#ef4444', marginTop: 4 }}>📌 {s.flagNote}</div>}
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
-                              <button className="btn btn-outline" style={{ fontSize: 11, padding: '4px 8px', borderColor: '#6366f1', color: '#4f46e5' }} onClick={() => setSelectedStudent(s)}>👁</button>
+                              <button className="btn btn-outline" style={{ fontSize: 11, padding: '4px 8px', borderColor: '#6366f1', color: '#4f46e5' }} onClick={() => setSelectedStudent(s)} title="View & edit">👁</button>
+                              <button
+                                className="btn btn-outline"
+                                style={{ fontSize: 10, padding: '4px 7px', borderColor: '#8b5cf6', color: '#7c3aed', fontWeight: 700, minWidth: 32 }}
+                                onClick={() => openBgEditorForStudent(s)}
+                                disabled={!hasPhoto}
+                                title={hasPhoto ? "AI plain background" : "No photo uploaded yet"}
+                              >
+                                AI
+                              </button>
                               <button className="btn btn-outline" style={{ fontSize: 11, padding: '4px 8px', borderColor: '#3b82f6', color: '#2563eb' }} onClick={() => openEditStudent(s)} title="Edit student">✏️</button>
                               <button className="btn btn-outline" style={{ fontSize: 11, padding: '4px 8px', borderColor: '#22c55e', color: '#16a34a' }} onClick={() => handleStatusUpdate(s.id, "APPROVED")}>✓</button>
                               {s.status === "FLAGGED" ? (
@@ -3092,8 +3192,8 @@ export default function SchoolDetailPage() {
                           <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} onChange={e => {
                             const f = e.target.files?.[0]
                             if (!f) return
-                            setEditPhotoFile(f)
-                            setEditPhotoPreview(URL.createObjectURL(f))
+                            pickPhotoForCrop(f, "edit")
+                            e.target.value = ""
                           }} />
                         </label>
                         {editPhotoFile && <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>{editPhotoFile.name}</div>}
@@ -3743,19 +3843,15 @@ export default function SchoolDetailPage() {
 
           {/* REPROCESS SKIPPED PHOTOS MODAL */}
           {reprocessOpen && (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 24 }} onClick={() => { if (!reprocessStarting) setReprocessOpen(false) }}>
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 24 }} onClick={() => setReprocessOpen(false)}>
               <div style={{ background: 'white', borderRadius: 20, maxWidth: 560, width: '100%', boxShadow: '0 25px 50px rgba(0,0,0,0.25)' }} onClick={e => e.stopPropagation()}>
                 <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>
-                      {reprocessMode === "all" ? "AI Background: Entire Scope" : reprocessMode === "unprocessed" ? "AI Background: Unprocessed Photos" : "Reprocess Skipped Photos"}
+                      Process All Photos — AI Background
                     </h2>
                     <p style={{ fontSize: 13, color: '#64748b' }}>
-                      {reprocessMode === "all"
-                        ? "Run background removal on every photo in the current scope, including photos processed before."
-                        : reprocessMode === "unprocessed"
-                          ? "Run background removal on photos that have not been AI-processed yet."
-                        : "Re-run background removal on photos where parents skipped AI cleanup."}
+                      Remove backgrounds and apply a plain colour to every photo in the current filter. Runs locally on this PC.
                     </p>
                   </div>
                   <button onClick={() => setReprocessOpen(false)} style={{ width: 32, height: 32, borderRadius: 8, border: 'none', background: '#f1f5f9', cursor: 'pointer', fontSize: 16 }}>✕</button>
@@ -3769,64 +3865,24 @@ export default function SchoolDetailPage() {
                         <div style={{ padding: 16, background: '#eef2ff', borderRadius: 12, textAlign: 'center' }}>
                           <div style={{ fontSize: 28, fontWeight: 700, color: '#4f46e5' }}>{reprocessInfo.skippedCount}</div>
                           <div style={{ fontSize: 12, color: '#6366f1' }}>
-                            {reprocessMode === "all" ? "Total photos" : reprocessMode === "unprocessed" ? "Unprocessed photos" : "Skipped photos"}
-                            {classFilter ? ' (filtered class)' : ''}
+                            Total photos{classFilter ? ' (filtered class)' : ''}
                           </div>
                         </div>
-                        <div style={{ padding: 16, background: reprocessInfo.rembgAvailable ? '#f0fdf4' : '#fef2f2', borderRadius: 12, textAlign: 'center' }}>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: reprocessInfo.rembgAvailable ? '#16a34a' : '#dc2626' }}>
-                            {reprocessInfo.rembgAvailable ? 'Server ready' : 'Server not configured'}
+                        <div style={{ padding: 16, background: '#f0fdf4', borderRadius: 12, textAlign: 'center' }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: '#16a34a' }}>
+                            Local AI ready
                           </div>
-                          <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>REMBG_SERVICE_URL</div>
+                          <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>Runs on this PC · ISNet model</div>
                         </div>
                       </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 12, alignItems: 'center', padding: 12, background: '#f8fafc', borderRadius: 10, border: '1px solid #e2e8f0', marginBottom: 16 }}>
-                        <input
-                          type="color"
-                          value={reprocessBgColor}
-                          onChange={(e) => setReprocessBgColor(e.target.value.toUpperCase())}
-                          style={{ width: 44, height: 36, border: '1px solid #cbd5e1', borderRadius: 8, background: 'white', padding: 2 }}
-                        />
-                        <div>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>Background color after removal</div>
-                          <input
-                            value={reprocessBgColor}
-                            onChange={(e) => setReprocessBgColor(e.target.value.toUpperCase())}
-                            placeholder="#FFFFFF"
-                            maxLength={7}
-                            style={{ marginTop: 6, width: 110, padding: '7px 9px', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: 12, fontWeight: 600, color: '#0f172a' }}
-                          />
-                        </div>
-                      </div>
-                      {!reprocessInfo.rembgAvailable && (
-                        <div style={{ padding: 12, background: '#fff7ed', borderRadius: 10, border: '1px solid #fed7aa', fontSize: 12, color: '#9a3412', marginBottom: 16, lineHeight: 1.6 }}>
-                          Start the self-hosted rembg container (`docker/rembg`) and set <code>REMBG_SERVICE_URL</code> in your environment.
-                        </div>
-                      )}
-                      {reprocessInfo.activeJob && (
-                        <div style={{ padding: 12, background: '#f0f9ff', borderRadius: 10, border: '1px solid #bae6fd', fontSize: 12, color: '#0369a1', marginBottom: 16 }}>
-                          Job <strong>{reprocessInfo.activeJob.status}</strong>
-                          {reprocessInfo.activeJob.result?.processed != null && (
-                            <> — {reprocessInfo.activeJob.result.processed} processed, {reprocessInfo.activeJob.result.failed || 0} failed</>
-                          )}
-                        </div>
-                      )}
-                      <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-                        <button className="btn btn-outline" onClick={() => fetchReprocessInfo(reprocessMode)} disabled={reprocessLoading}>Refresh</button>
-                        <button
-                          className="btn btn-primary"
-                          onClick={() => startReprocessJob()}
-                          disabled={
-                            reprocessStarting ||
-                            !reprocessInfo.rembgAvailable ||
-                            reprocessInfo.skippedCount === 0 ||
-                            !!reprocessInfo.activeJob
-                          }
-                          style={{ background: 'linear-gradient(135deg, #6366f1, #4f46e5)' }}
-                        >
-                          {reprocessStarting ? 'Starting…' : reprocessMode === "skipped" ? `Reprocess ${reprocessInfo.skippedCount} Photos` : `Process ${reprocessInfo.skippedCount} Photos`}
-                        </button>
-                      </div>
+                      <ManufacturerBgBatchProcessor
+                        schoolId={schoolId}
+                        students={reprocessInfo.students}
+                        bgColor={reprocessBgColor}
+                        onBgColorChange={setReprocessBgColor}
+                        onComplete={handleBatchBgComplete}
+                        onClose={() => setReprocessOpen(false)}
+                      />
                     </>
                   ) : (
                     <div style={{ textAlign: 'center', padding: 24, color: '#94a3b8' }}>Could not load reprocess info.</div>
@@ -4249,9 +4305,11 @@ export default function SchoolDetailPage() {
         const studentClass = classes.find(c => c.id === selectedStudent.classId)
         const studentTemplate = resolveStudentTemplate(studentClass, selectedStudent, templateData)
 
+        const detailPhotoUrl = getStudentPhotoUrl(selectedStudent)
+
         // Determine critical missing fields
         const missingItems: string[] = []
-        if (!selectedStudent.photoUrl) missingItems.push("Photo")
+        if (!studentHasPhoto(selectedStudent)) missingItems.push("Photo")
         if (!studentName) missingItems.push("Student Name")
 
         return (
@@ -4279,34 +4337,21 @@ export default function SchoolDetailPage() {
                 {/* Photo — clickable to upload */}
                 <div style={{ position: 'relative' }}>
                   <div
-                    style={{ width: 100, height: 130, borderRadius: 12, overflow: 'hidden', border: selectedStudent.photoUrl ? '2px solid #e2e8f0' : '2px dashed #fca5a5', background: selectedStudent.photoUrl ? '#f8fafc' : '#fef2f2', cursor: 'pointer' }}
+                    style={{ width: 120, height: 156, borderRadius: 12, overflow: 'hidden', border: detailPhotoUrl ? '2px solid #e2e8f0' : '2px dashed #fca5a5', background: detailPhotoUrl ? '#f8fafc' : '#fef2f2', cursor: 'pointer' }}
                     onClick={() => {
                       const input = document.createElement('input')
                       input.type = 'file'
                       input.accept = 'image/*'
-                      input.onchange = async (e: any) => {
+                      input.onchange = (e: any) => {
                         const file = e.target.files?.[0]
                         if (!file) return
-                        const fd = new FormData()
-                        fd.append("photo", file)
-                        fd.append("studentId", selectedStudent.id)
-                        try {
-                          const res = await fetch(`/api/schools/${schoolId}/students/assign-photo`, { method: "POST", body: fd })
-                          const data = await res.json()
-                          if (data.success) {
-                            toast.success("Photo updated!")
-                            setSelectedStudent({ ...selectedStudent, photoUrl: data.data.photoUrl })
-                            fetchStudents(studentPage)
-                          } else {
-                            toast.error(data.error || "Upload failed")
-                          }
-                        } catch { toast.error("Upload failed") }
+                        pickPhotoForCrop(file, "detail", selectedStudent.id)
                       }
                       input.click()
                     }}
                   >
-                    {selectedStudent.photoUrl ? (
-                      <img src={selectedStudent.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    {detailPhotoUrl ? (
+                      <img src={detailPhotoUrl} alt={studentName || "Student photo"} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     ) : (
                       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 4, color: '#ef4444' }}>
                         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -4377,7 +4422,7 @@ export default function SchoolDetailPage() {
                         templateImageUrl={studentTemplate.templateImageUrl}
                         fieldMappings={studentTemplate.fieldMappings as any[]}
                         formData={selectedStudent.formData as Record<string, string>}
-                        studentPhoto={selectedStudent.photoUrl}
+                        studentPhoto={detailPhotoUrl}
                         flagImageUrl={resolveFlagImageUrl(selectedStudent.formData as Record<string, string>, flagImages)}
                         scale={1}
                         watermark="PREVIEW"
@@ -4392,7 +4437,7 @@ export default function SchoolDetailPage() {
                           templateImageUrl={studentTemplate.backTemplateImageUrl}
                           fieldMappings={studentTemplate.backFieldMappings as any[] || []}
                           formData={selectedStudent.formData as Record<string, string>}
-                          studentPhoto={selectedStudent.photoUrl}
+                          studentPhoto={detailPhotoUrl}
                           flagImageUrl={resolveFlagImageUrl(selectedStudent.formData as Record<string, string>, flagImages)}
                           scale={1}
                           watermark="PREVIEW"
@@ -4417,7 +4462,7 @@ export default function SchoolDetailPage() {
                         widthMm={studentTemplate.cardWidthMm || 85.6}
                         heightMm={studentTemplate.cardHeightMm || 54.0}
                         formData={selectedStudent.formData as Record<string, string>}
-                        studentPhoto={selectedStudent.photoUrl}
+                        studentPhoto={detailPhotoUrl}
                         schoolLogo={school?.logoUrl || undefined}
                         serialNumber={selectedStudent.serialNumber}
                         scale={3.5}
@@ -4446,11 +4491,8 @@ export default function SchoolDetailPage() {
                   <button
                     className="btn btn-outline"
                     style={{ fontSize: 13, borderColor: '#8b5cf6', color: '#7c3aed' }}
-                    disabled={reprocessStarting || !selectedStudent.photoPath}
-                    onClick={async () => {
-                      setReprocessMode("all")
-                      await startReprocessJob([selectedStudent.id])
-                    }}
+                    disabled={!studentHasPhoto(selectedStudent)}
+                    onClick={() => openBgEditorForStudent(selectedStudent)}
                   >
                     AI Background
                   </button>
@@ -4492,6 +4534,40 @@ export default function SchoolDetailPage() {
         </div>
         )
       })()}
+
+      {photoCrop && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200, padding: 16 }} onClick={closePhotoCrop}>
+          <div style={{ background: 'white', borderRadius: 16, maxWidth: 560, width: '100%', maxHeight: '92vh', overflow: 'auto', padding: 20, boxShadow: '0 25px 50px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>Crop Photo</h3>
+            <p style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>Full photo is shown below — zoom/pan, then crop for the ID card.</p>
+            <PhotoCropper
+              photoUrl={photoCrop.url}
+              aspectRatio={3 / 4}
+              onCropped={handlePhotoCropped}
+              onCancel={closePhotoCrop}
+            />
+          </div>
+        </div>
+      )}
+
+      {bgEditorStudent && (
+        <ManufacturerPhotoBgEditor
+          schoolId={schoolId}
+          studentId={bgEditorStudent.id}
+          studentName={bgEditorStudent.name}
+          photoUrl={bgEditorStudent.photoUrl}
+          defaultBgColor={bgEditorStudent.defaultBgColor}
+          onSaved={(newPhotoUrl) => {
+            toast.success("Photo background updated!")
+            if (selectedStudent?.id === bgEditorStudent.id) {
+              setSelectedStudent({ ...selectedStudent, photoUrl: newPhotoUrl })
+            }
+            setBgEditorStudent(null)
+            fetchStudents(studentPage)
+          }}
+          onClose={() => setBgEditorStudent(null)}
+        />
+      )}
     </>
   )
 }

@@ -272,38 +272,6 @@ export async function removeBackgroundWithBestModel(
     }
   })
 }
-
-export async function removeBackgroundViaServer(
-  blob: Blob,
-  options: {
-    bgColor: string
-    submitToken?: string
-    schoolId?: string
-    onProgress?: (msg: string, pct: number) => void
-  }
-): Promise<Blob> {
-  options.onProgress?.("Trying server background removal…", 10)
-
-  const fd = new FormData()
-  fd.append("file", blob, "photo.jpg")
-  fd.append("bgColor", options.bgColor)
-  fd.append("format", "transparent")
-  if (options.submitToken) fd.append("submitToken", options.submitToken)
-  if (options.schoolId) fd.append("schoolId", options.schoolId)
-
-  const res = await fetch("/api/photo/remove-background", { method: "POST", body: fd })
-  if (!res.ok) {
-    const contentType = res.headers.get("content-type") || ""
-    const message = contentType.includes("application/json")
-      ? (await res.json().catch(() => ({})))?.error
-      : ""
-    throw new Error(message || `Server removal failed (${res.status})`)
-  }
-
-  options.onProgress?.("Server cleanup complete", 90)
-  return await res.blob()
-}
-
 export async function downscaleBlob(blob: Blob, maxDim = 768): Promise<Blob> {
   return new Promise((resolve) => {
     const img = new Image()

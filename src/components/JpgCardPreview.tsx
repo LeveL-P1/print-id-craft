@@ -106,7 +106,8 @@ async function loadImage(url: string): Promise<HTMLImageElement> {
     return cached
   }
   const img = new Image()
-  img.crossOrigin = "anonymous"
+  const isSameOrigin = url.startsWith("/") || url.startsWith(window.location.origin)
+  if (!isSameOrigin) img.crossOrigin = "anonymous"
   await new Promise<void>((resolve, reject) => {
     img.onload = () => resolve()
     img.onerror = () => reject(new Error("Failed to load: " + url))
