@@ -1,8 +1,9 @@
 "use client"
 import { useState, useEffect, useCallback } from "react"
 import { useParams } from "next/navigation"
-import dynamic from "next/dynamic"
 import PhotoVerifier from "@/components/PhotoVerifier"
+import JpgCardPreview from "@/components/JpgCardPreview"
+import PhotoCropper from "@/components/PhotoCropper"
 import {
   getFieldRole,
   resolveFieldValue,
@@ -43,9 +44,6 @@ function buildSupportWhatsAppMessage(parts: {
     " Please help."
   )
 }
-
-const JpgCardPreview = dynamic(() => import("@/components/JpgCardPreview"), { ssr: false })
-const PhotoCropper = dynamic(() => import("@/components/PhotoCropper"), { ssr: false })
 
 type FieldConfig = { key: string; label: string; type: string; required: boolean; role?: string }
 type TemplateElement = { 
@@ -140,6 +138,80 @@ const wordCount = (s: string): number =>
   (s || "").trim().split(/\s+/).filter(Boolean).length
 
 const ADDRESS_MIN_WORDS = 5
+
+const DOB_MONTHS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"))
+const DOB_DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0"))
+const DOB_YEARS = Array.from({ length: 90 }, (_, i) => String(new Date().getFullYear() - i).slice(-2))
+
+function parseDobParts(value: string) {
+  const trimmed = (value || "").trim()
+  const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (iso) return { month: iso[2], day: iso[3], year: iso[1].slice(-2) }
+
+  const slash = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/)
+  if (slash) {
+    return {
+      month: slash[1].padStart(2, "0"),
+      day: slash[2].padStart(2, "0"),
+      year: slash[3].slice(-2),
+    }
+  }
+
+  return { month: "", day: "", year: "" }
+}
+
+function buildDobValue(month: string, day: string, year: string) {
+  if (!month && !day && !year) return ""
+  return `${month || "MM"}/${day || "DD"}/${year || "YY"}`
+}
+
+function DobSelectInput({
+  value,
+  required,
+  onChange,
+}: {
+  value: string
+  required: boolean
+  onChange: (value: string) => void
+}) {
+  const parts = parseDobParts(value)
+  const update = (next: Partial<typeof parts>) => {
+    const merged = { ...parts, ...next }
+    onChange(buildDobValue(merged.month, merged.day, merged.year))
+  }
+
+  const selectStyle: React.CSSProperties = {
+    flex: 1,
+    minWidth: 0,
+    padding: "11px 10px",
+    fontSize: 14,
+    border: "1.5px solid #cbd5e1",
+    borderRadius: 10,
+    background: "white",
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <select required={required} aria-label="Month" value={parts.month} onChange={(e) => update({ month: e.target.value })} style={selectStyle}>
+          <option value="">MM</option>
+          {DOB_MONTHS.map((month) => <option key={month} value={month}>{month}</option>)}
+        </select>
+        <select required={required} aria-label="Day" value={parts.day} onChange={(e) => update({ day: e.target.value })} style={selectStyle}>
+          <option value="">DD</option>
+          {DOB_DAYS.map((day) => <option key={day} value={day}>{day}</option>)}
+        </select>
+        <select required={required} aria-label="Year" value={parts.year} onChange={(e) => update({ year: e.target.value })} style={selectStyle}>
+          <option value="">YY</option>
+          {DOB_YEARS.map((year) => <option key={year} value={year}>{year}</option>)}
+        </select>
+      </div>
+      <span style={{ fontSize: 11, color: "#94a3b8", marginTop: 4, display: "block" }}>
+        Format: MM/DD/YY
+      </span>
+    </div>
+  )
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SampleReferencePhoto — shows a clear illustration of "what a good ID photo
@@ -295,7 +367,7 @@ const IDCardPreview = ({
           }}
         >
           {el.type === 'photo' ? (
-            <img src={croppedPhoto || "https://via.placeholder.com/150?text=Photo"} alt="Student" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <img src={croppedPhoto || "https://via.placeholder.com/150?text=Photo"} alt="Student" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           ) : el.type === 'logo' ? (
             <img src={config?.schoolLogo || "https://via.placeholder.com/150?text=Logo"} alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           ) : el.type === 'qr' ? (
@@ -506,6 +578,9 @@ export default function SubmitPage() {
       if (role === "mobile" && f.required && stripIndianPrefix(value).length !== 10) {
         return "Mobile number must be exactly 10 digits (after +91)."
       }
+      if (role === "dob" && f.required && !/^\d{2}\/\d{2}\/\d{2}$/.test(value)) {
+        return "Please select date of birth in MM/DD/YY format."
+      }
       if (role === "branch" && f.required && value.length < 2) return "Please enter the branch name."
     }
     if (!photoFile || !photoPreview || !photoVerified) {
@@ -552,6 +627,10 @@ export default function SubmitPage() {
             setAlertMsg("Mobile number must be exactly 10 digits (after +91).")
             return
           }
+        }
+        if (role === "dob" && f.required && !/^\d{2}\/\d{2}\/\d{2}$/.test(value)) {
+          setAlertMsg("Please select date of birth in MM/DD/YY format.")
+          return
         }
         if (role === "branch" && f.required && value.length < 2) {
           setAlertMsg("Please enter the branch name.")
@@ -981,7 +1060,7 @@ export default function SubmitPage() {
                 {/* Student Photo Thumbnail */}
                 {croppedPhoto && (
                   <div style={{ padding: '16px 16px 0', display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <img src={croppedPhoto} alt="Photo" style={{ width: 48, height: 60, borderRadius: 6, objectFit: 'cover', border: '2px solid #e2e8f0' }} />
+                    <img src={croppedPhoto} alt="Photo" style={{ width: 48, height: 60, borderRadius: 6, objectFit: 'contain', border: '2px solid #e2e8f0', background: '#f8fafc' }} />
                     <div>
                       <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{resolveFieldValue(formData, "name") || '—'}</div>
                       <div style={{ fontSize: 12, color: '#64748b' }}>{getDisplayClass(config, formData)}</div>
@@ -1396,11 +1475,10 @@ export default function SubmitPage() {
                           {getCleanLabel(field.label)}
                           {field.required && <span style={{ color: '#ef4444' }}> *</span>}
                         </label>
-                        <input
-                          type="date"
+                        <DobSelectInput
                           required={field.required}
                           value={value}
-                          onChange={e => handleFieldChange(field.key, e.target.value)}
+                          onChange={(nextValue) => handleFieldChange(field.key, nextValue)}
                         />
                       </div>
                     )
@@ -1619,7 +1697,9 @@ export default function SubmitPage() {
                   onPhotoAccepted={(file, previewUrl) => {
                     setPhotoFile(file)
                     setPhotoPreview(previewUrl)
+                    setCroppedPhoto("")
                     setPhotoVerified(true)
+                    setAlertMsg("")
                     setStep("crop")
                   }}
                   schoolBgColor={config?.photoBgColor}
@@ -1633,7 +1713,7 @@ export default function SubmitPage() {
                     color: '#16a34a',
                     fontWeight: 600, marginBottom: 12, textAlign: 'center',
                   }}>
-                    ✅ Photo passed all checks — tap Continue to crop and review
+                    Photo passed all checks - tap Continue to crop
                   </div>
                   <div style={{ borderRadius: 10, overflow: 'hidden', border: '2px solid #22c55e', maxWidth: 200, margin: '0 auto' }}>
                     <img src={photoPreview} alt="Preview" style={{ width: '100%', display: 'block' }} />
@@ -1658,9 +1738,11 @@ export default function SubmitPage() {
                     type="button"
                     className="btn btn-primary btn-fluid"
                     style={{ flex: 1, justifyContent: 'center' }}
-                    onClick={() => setStep("crop")}
+                    onClick={() => {
+                      setStep("crop")
+                    }}
                   >
-                    Crop & Continue
+                    Continue to Crop
                   </button>
                 </div>
               )}
@@ -1686,7 +1768,6 @@ export default function SubmitPage() {
                 photoUrl={photoPreview}
                 aspectRatio={3 / 4}
                 onCropped={(croppedDataUrl) => {
-                  setPhotoPreview(croppedDataUrl)
                   setCroppedPhoto(croppedDataUrl)
                   const blockReason = getPreviewBlockReason()
                   if (blockReason) {
@@ -1716,7 +1797,7 @@ export default function SubmitPage() {
                     setStep("photo")
                   }}
                 >
-                  ← Choose a different photo
+                  Choose a different photo
                 </button>
               </div>
             </div>

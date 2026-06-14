@@ -315,7 +315,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
           severity: "warning",
           label: "Aspect Ratio",
           detail: `${ratio.toFixed(2)} (target: 0.75)`,
-          tip: "Use a portrait (vertical) photo — it will be auto-cropped to 3:4"
+          tip: "Use a portrait (vertical) photo, or crop it on the next screen"
         })
 
         // ── 5. Orientation Check (portrait preferred) ──
@@ -323,7 +323,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
           passed: img.height >= img.width,
           severity: "info",
           label: "Orientation",
-          detail: img.height >= img.width ? "Portrait ✓" : "Landscape — will be cropped",
+          detail: img.height >= img.width ? "Portrait ✓" : "Landscape — crop on next screen",
           tip: "Hold your phone vertically for best results"
         })
 
@@ -1182,19 +1182,18 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
       setCameraError("")
       setResult(null)
 
-      const adjustedFile = await performAutoAdjust(file)
-      lastAdjustedFileRef.current = adjustedFile
+      lastAdjustedFileRef.current = file
 
-      const previewUrl = await fileToDataUrl(adjustedFile)
+      const previewUrl = await fileToDataUrl(file)
       setPreview(previewUrl)
 
-      const verificationResult = await analyzePhoto(adjustedFile)
+      const verificationResult = await analyzePhoto(file)
       setResult(verificationResult)
       setVerifying(false)
 
       const criticalFails = verificationResult.checks.filter(c => !c.passed && c.severity === "critical")
       if (criticalFails.length === 0) {
-        onPhotoAccepted(adjustedFile, previewUrl, true)
+        onPhotoAccepted(file, previewUrl, true)
       }
     } catch (error) {
       console.error("Photo verification error:", error)
@@ -1343,10 +1342,10 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
               margin: '0 auto 8px'
             }} />
             <div style={{ fontSize: 13, color: '#3b82f6', fontWeight: 600 }}>
-              Auto-adjusting & analyzing photo...
+              Analyzing photo...
             </div>
             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
-              Cropping to face, fixing lighting, running quality checks
+              Keeping the original photo and running quality checks
             </div>
           </div>
         ) : preview ? (
@@ -1361,7 +1360,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
               flexShrink: 0
             }}>
               <img src={preview} alt="Photo preview" style={{
-                width: '100%', height: '100%', objectFit: 'cover'
+                width: '100%', height: '100%', objectFit: 'contain', background: '#f8fafc'
               }} />
             </div>
 
@@ -1380,7 +1379,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
                         : "✅ All Checks Passed!"
                       : criticalFails.length > 0
                         ? `❌ ${criticalFails.length} Critical Issue${criticalFails.length > 1 ? "s" : ""}`
-                        : `⚠️ ${failedChecks.length} Warning${failedChecks.length > 1 ? "s" : ""} — auto-adjusted`
+                        : `⚠️ ${failedChecks.length} Warning${failedChecks.length > 1 ? "s" : ""}`
                     }
                   </div>
 
