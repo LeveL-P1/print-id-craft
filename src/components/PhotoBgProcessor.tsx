@@ -34,6 +34,17 @@ function getActiveStepIndex(message: string, progress: number): number {
   return 0
 }
 
+function formatProcessingError(err: unknown) {
+  const detail = err instanceof Error ? err.message.trim() : ""
+  if (detail.includes("manual review") || detail.includes("quality")) {
+    return "AI couldn't prepare your photo to the required quality. You can continue with your original upload or retry."
+  }
+  if (detail.includes("detect the student")) {
+    return "AI couldn't detect you clearly in the photo. You can continue with your original upload or try a clearer photo."
+  }
+  return "AI photo preparation didn't work this time. You can continue with your original upload or retry."
+}
+
 export default function PhotoBgProcessor({
   photoUrl,
   defaultBgColor,
@@ -175,17 +186,6 @@ export default function PhotoBgProcessor({
     setProgressMsg("")
     void removeBackground()
   }, [removeBackground])
-
-  const formatProcessingError = (err: unknown) => {
-    const detail = err instanceof Error ? err.message.trim() : ""
-    if (detail.includes("manual review") || detail.includes("quality")) {
-      return "AI couldn't prepare your photo to the required quality. You can continue with your original upload or retry."
-    }
-    if (detail.includes("detect the student")) {
-      return "AI couldn't detect you clearly in the photo. You can continue with your original upload or try a clearer photo."
-    }
-    return "AI photo preparation didn't work this time. You can continue with your original upload or retry."
-  }
 
   useEffect(() => {
     if (photoLoaded && photoDataUrl) removeBackground()
@@ -352,10 +352,19 @@ export default function PhotoBgProcessor({
 
       {error && (
         <div style={{ background: '#fef2f2', borderRadius: 12, padding: 16, border: '1px solid #fecaca', marginBottom: 16 }}>
-          <div style={{ fontSize: 13, color: '#dc2626', fontWeight: 600, marginBottom: 8 }}>{error}</div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => { removalStartedRef.current = false; removeBackground() }} style={{ fontSize: 12, padding: '8px 16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>Retry</button>
-            <button onClick={handleUseOriginal} style={{ fontSize: 12, padding: '8px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>Keep My Original Photo</button>
+          <div style={{ fontSize: 13, color: '#dc2626', fontWeight: 700, marginBottom: 6 }}>AI preparation failed</div>
+          <div style={{ fontSize: 13, color: '#b91c1c', marginBottom: 12, lineHeight: 1.5 }}>{error}</div>
+          {displayUrl && (
+            <div style={{ textAlign: 'center', marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6 }}>Your original upload</div>
+              <div style={{ maxWidth: 140, margin: '0 auto', borderRadius: 10, overflow: 'hidden', border: '2px solid #e2e8f0', aspectRatio: '3/4' }}>
+                <img src={displayUrl} alt="Original upload" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              </div>
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" onClick={handleRetry} style={{ flex: '1 1 140px', fontSize: 12, padding: '10px 16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>Retry AI</button>
+            <button type="button" onClick={handleUseOriginal} style={{ flex: '1 1 180px', fontSize: 12, padding: '10px 16px', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>Continue with Original Photo</button>
           </div>
         </div>
       )}
