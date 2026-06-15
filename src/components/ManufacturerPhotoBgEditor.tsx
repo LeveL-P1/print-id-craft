@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { processPhotoBackgroundLocal } from "@/lib/photo-bg-composite-client"
+import { processPhotoBackgroundLocal, type BgModelChoice } from "@/lib/photo-bg-composite-client"
 import { prepareStudentPhotoForUpload } from "@/lib/client-photo-upload"
 import { preloadBgRemovalModel } from "@/lib/photo-background"
 import { cacheBustPhotoUrl } from "@/lib/student-photo-url"
@@ -16,6 +16,19 @@ type Props = {
   onSaved: (photoUrl: string, photoPath?: string, bgColor?: string, updatedAt?: string) => void
   onClose: () => void
 }
+
+const MODEL_OPTIONS: { value: BgModelChoice; label: string; desc: string }[] = [
+  {
+    value: "gemini",
+    label: "☁️ Google AI",
+    desc: "Best quality — handles hair perfectly. Requires internet.",
+  },
+  {
+    value: "isnet",
+    label: "💻 Local ISNet",
+    desc: "Runs on this PC. First use downloads ~170MB. Works offline.",
+  },
+]
 
 export default function ManufacturerPhotoBgEditor({
   schoolId,
@@ -37,6 +50,7 @@ export default function ManufacturerPhotoBgEditor({
   const [error, setError] = useState("")
   const [modelReady, setModelReady] = useState(false)
   const [colorSaved, setColorSaved] = useState(true)
+  const [selectedModel, setSelectedModel] = useState<BgModelChoice>("gemini")
 
   useEffect(() => {
     preloadBgRemovalModel()
@@ -91,7 +105,8 @@ export default function ManufacturerPhotoBgEditor({
         (msg, pct) => {
           setProgressMsg(msg)
           setProgress(pct)
-        }
+        },
+        selectedModel
       )
       setProcessedUrl(dataUrl)
       if (autoSave) {
@@ -103,7 +118,7 @@ export default function ManufacturerPhotoBgEditor({
     } finally {
       setProcessing(false)
     }
-  }, [photoUrl, bgColor, saveProcessedPhoto])
+  }, [photoUrl, bgColor, saveProcessedPhoto, selectedModel])
 
   const handleColorChange = (color: string) => {
     setBgColor(color.toUpperCase())
@@ -139,6 +154,8 @@ export default function ManufacturerPhotoBgEditor({
     await saveProcessedPhoto(processedUrl)
   }
 
+  const modelInfo = MODEL_OPTIONS.find((m) => m.value === selectedModel)
+
   return (
     <div
       style={{
@@ -160,13 +177,47 @@ export default function ManufacturerPhotoBgEditor({
             AI Background - {studentName}
           </h2>
           <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>
-            Runs locally on this PC using the full ISNet model (best quality for hair and edges). First use downloads about 170MB (cached afterward).
-            {modelReady ? " Model ready." : " Preparing model..."}
+            {modelInfo?.desc || "Select a model below."}
+            {selectedModel === "isnet" && (modelReady ? " Model ready." : " Preparing model...")}
             {" "}Processed photos are saved automatically.
           </p>
         </div>
 
         <div style={{ padding: 24 }}>
+          {/* ─── Model selector ─────────────────────────────────────────── */}
+          <div style={{
+            display: "flex", gap: 8, marginBottom: 16,
+          }}>
+            {MODEL_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => { setSelectedModel(opt.value); setProcessedUrl(null); setError("") }}
+                disabled={processing || saving}
+                style={{
+                  flex: 1,
+                  padding: "10px 12px",
+                  border: `2px solid ${selectedModel === opt.value ? "#8b5cf6" : "#e2e8f0"}`,
+                  borderRadius: 12,
+                  background: selectedModel === opt.value ? "#f5f3ff" : "#fafafa",
+                  cursor: processing || saving ? "not-allowed" : "pointer",
+                  textAlign: "left",
+                  transition: "all 0.2s",
+                }}
+              >
+                <div style={{
+                  fontSize: 13, fontWeight: 700,
+                  color: selectedModel === opt.value ? "#7c3aed" : "#475569",
+                }}>
+                  {opt.label}
+                </div>
+                <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
+                  {opt.desc}
+                </div>
+              </button>
+            ))}
+          </div>
+
+          {/* ─── Background colour picker ─────────────────────────────── */}
           <div style={{
             display: "grid", gridTemplateColumns: "auto 1fr", gap: 12, alignItems: "center",
             padding: 12, background: "#faf5ff", borderRadius: 10, border: "1px solid #e9d5ff", marginBottom: 20,
@@ -196,6 +247,7 @@ export default function ManufacturerPhotoBgEditor({
             </div>
           </div>
 
+          {/* ─── Photo comparison ─────────────────────────────────────── */}
           <div style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap", marginBottom: 20 }}>
             <div style={{ textAlign: "center", flex: "1 1 140px", maxWidth: 180 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: "#94a3b8", marginBottom: 8 }}>UPLOADED</div>
@@ -213,7 +265,7 @@ export default function ManufacturerPhotoBgEditor({
               </div>
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", fontSize: 24, color: "#94a3b8" }}>{"->"}</div>
+            <div style={{ display: "flex", alignItems: "center", fontSize: 24, color: "#94a3b8" }}>{"→"}</div>
 
             <div style={{ textAlign: "center", flex: "1 1 140px", maxWidth: 180 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: "#7c3aed", marginBottom: 8 }}>PROCESSED</div>

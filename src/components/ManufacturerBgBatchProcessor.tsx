@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { processPhotoBackgroundLocal } from "@/lib/photo-bg-composite-client"
+import { processPhotoBackgroundLocal, type BgModelChoice } from "@/lib/photo-bg-composite-client"
 import { prepareStudentPhotoForUpload } from "@/lib/client-photo-upload"
 import { preloadBgRemovalModel } from "@/lib/photo-background"
 import { cacheBustPhotoUrl } from "@/lib/student-photo-url"
@@ -24,6 +24,19 @@ type Props = {
   onClose: () => void
 }
 
+const MODEL_OPTIONS: { value: BgModelChoice; label: string; desc: string }[] = [
+  {
+    value: "gemini",
+    label: "☁️ Google AI",
+    desc: "Best quality — handles hair perfectly",
+  },
+  {
+    value: "isnet",
+    label: "💻 Local ISNet",
+    desc: "Runs on this PC, works offline",
+  },
+]
+
 export default function ManufacturerBgBatchProcessor({
   schoolId,
   students,
@@ -43,6 +56,7 @@ export default function ManufacturerBgBatchProcessor({
   const [failed, setFailed] = useState(0)
   const [errors, setErrors] = useState<Array<{ serialNumber: string; error: string }>>([])
   const [modelReady, setModelReady] = useState(false)
+  const [selectedModel, setSelectedModel] = useState<BgModelChoice>("gemini")
   const abortRef = useRef(false)
   const pausedRef = useRef(false)
 
@@ -60,7 +74,8 @@ export default function ManufacturerBgBatchProcessor({
         (msg, pct) => {
           setProgressMsg(msg)
           setItemProgress(pct)
-        }
+        },
+        selectedModel
       )
       const file = await prepareStudentPhotoForUpload(dataUrl, {
         fileName: `${student.id}.jpg`,
@@ -84,7 +99,7 @@ export default function ManufacturerBgBatchProcessor({
       setErrors((prev) => [...prev.slice(-49), { serialNumber: student.serialNumber, error: message }])
       return false
     }
-  }, [schoolId, bgColor, onPhotoSaved])
+  }, [schoolId, bgColor, onPhotoSaved, selectedModel])
 
   const runBatch = useCallback(async () => {
     if (students.length === 0) return
@@ -142,14 +157,51 @@ export default function ManufacturerBgBatchProcessor({
 
   return (
     <div style={{ padding: "8px 0" }}>
+      {/* ─── Model selector ─────────────────────────────────────────── */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        {MODEL_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => setSelectedModel(opt.value)}
+            disabled={running}
+            style={{
+              flex: 1,
+              padding: "8px 10px",
+              border: `2px solid ${selectedModel === opt.value ? "#8b5cf6" : "#e2e8f0"}`,
+              borderRadius: 10,
+              background: selectedModel === opt.value ? "#f5f3ff" : "#fafafa",
+              cursor: running ? "not-allowed" : "pointer",
+              textAlign: "left",
+              transition: "all 0.2s",
+            }}
+          >
+            <div style={{
+              fontSize: 12, fontWeight: 700,
+              color: selectedModel === opt.value ? "#7c3aed" : "#475569",
+            }}>
+              {opt.label}
+            </div>
+            <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 1 }}>
+              {opt.desc}
+            </div>
+          </button>
+        ))}
+      </div>
+
       <div style={{
-        padding: 14, background: modelReady ? "#f0fdf4" : "#fffbeb",
-        borderRadius: 10, border: `1px solid ${modelReady ? "#bbf7d0" : "#fde68a"}`,
-        fontSize: 12, color: modelReady ? "#166534" : "#92400e", marginBottom: 16, lineHeight: 1.5,
+        padding: 14,
+        background: selectedModel === "gemini" ? "#eff6ff" : (modelReady ? "#f0fdf4" : "#fffbeb"),
+        borderRadius: 10,
+        border: `1px solid ${selectedModel === "gemini" ? "#bfdbfe" : (modelReady ? "#bbf7d0" : "#fde68a")}`,
+        fontSize: 12,
+        color: selectedModel === "gemini" ? "#1e40af" : (modelReady ? "#166534" : "#92400e"),
+        marginBottom: 16, lineHeight: 1.5,
       }}>
-        {modelReady
-          ? "Local AI model ready on this PC. Processing runs entirely in your browser."
-                            : "Downloading AI model on first use (~170MB, best quality). Cached for future runs."}
+        {selectedModel === "gemini"
+          ? "Using Google AI for best quality. Photos are sent to Google's server for processing."
+          : modelReady
+            ? "Local AI model ready on this PC. Processing runs entirely in your browser."
+            : "Downloading AI model on first use (~170MB, best quality). Cached for future runs."}
         {" "}Each processed photo is saved automatically.
       </div>
 

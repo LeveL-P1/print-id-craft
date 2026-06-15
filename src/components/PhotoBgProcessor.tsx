@@ -19,9 +19,9 @@ const BG_WORK_MAX_DIM = 768
 
 const LIVE_STEPS = [
   { id: "prepare", label: "Preparing photo", match: /prepar/i },
-  { id: "model", label: "Loading AI", match: /model|download/i },
-  { id: "clean", label: "Removing background", match: /remov|clean|inference/i },
-  { id: "color", label: "Applying colour", match: /colour|color|apply|background updated|done/i },
+  { id: "model", label: "Loading AI", match: /model|download|google|gemini/i },
+  { id: "clean", label: "Removing background", match: /remov|clean|inference|processing/i },
+  { id: "color", label: "Applying colour", match: /colour|color|apply|background updated|done|complete/i },
 ] as const
 
 function getActiveStepIndex(message: string, progress: number): number {
@@ -127,7 +127,8 @@ export default function PhotoBgProcessor({
         (msg, pct) => {
           setProgressMsg(msg)
           setProgress(pct)
-        }
+        },
+        "gemini"
       )
       setBgStatus(usedAi ? PHOTO_BG_STATUS.PROCESSED : PHOTO_BG_STATUS.PLAIN)
       setProcessedUrl(dataUrl)
@@ -143,7 +144,7 @@ export default function PhotoBgProcessor({
     } finally {
       setProcessing(false)
     }
-  }, [photoUrl, photoDataUrl, schoolBgColor, setBgStatus])
+  }, [photoUrl, photoDataUrl, schoolBgColor, setBgStatus, autoConfirm, onSkip])
 
   useEffect(() => {
     if (photoLoaded && photoDataUrl) removeBackground()
@@ -185,7 +186,7 @@ export default function PhotoBgProcessor({
         Preparing Your Photo
       </div>
       <p style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>
-        Removing background locally and applying colour
+        Removing background and applying colour
         {schoolBgColor && (
           <>
             {" "}
@@ -253,7 +254,7 @@ export default function PhotoBgProcessor({
           </div>
 
           <p style={{ fontSize: 11, color: '#64748b', textAlign: 'center', marginTop: 14, marginBottom: 0, lineHeight: 1.5 }}>
-            Your phone is working on the photo right now. First time may take up to a minute while the AI loads.
+            AI is working on the photo right now. First time may take up to a minute.
           </p>
         </div>
       )}

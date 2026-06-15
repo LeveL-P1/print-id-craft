@@ -564,8 +564,8 @@ export default function SubmitPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData, photoVerified, step, draftRestored, config?.fixedBranch, config?.fieldConfig])
 
-  // Preload the ISNet background-removal model while the parent is on photo/crop
-  // so AI processing after crop feels faster on first use.
+  // Preload the local ISNet background-removal model while the parent is on photo/crop
+  // so if Gemini is unavailable, fallback AI processing after crop feels faster.
   useEffect(() => {
     if (step === "photo" || step === "crop") {
       preloadBgRemovalModel().catch(() => {})
@@ -2138,7 +2138,7 @@ export default function SubmitPage() {
             </div>
           )}
 
-          {/* BACKGROUND REMOVAL STEP — runs ISNet locally, same model as manufacturer */}
+          {/* BACKGROUND REMOVAL STEP — tries Google AI (Gemini) first, falls back to local ISNet */}
           {step === "bg" && croppedPhoto && (
             <div>
               <PhotoBgProcessor
