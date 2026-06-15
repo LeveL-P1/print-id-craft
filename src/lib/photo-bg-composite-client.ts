@@ -17,7 +17,7 @@ import {
   loadImageToCanvas,
 } from "@/lib/photo-background"
 
-export const BG_WORK_MAX_DIM = 768
+export const BG_WORK_MAX_DIM = 1024
 export const BG_JPEG_QUALITY = 0.88
 
 const MIN_FOREGROUND_RATIO = 0.06
@@ -156,16 +156,21 @@ export async function processPhotoBackgroundLocal(
   return { dataUrl, usedAi: true }
 }
 
+const SERVER_REMOVE_TIMEOUT_MS = 280_000
+
 async function removeBackgroundWithServerModel(blob: Blob, bgColor: string): Promise<Blob> {
   const form = new FormData()
   form.append("image", blob, "photo.jpg")
   form.append("bgColor", bgColor)
   form.append("model", "birefnet-portrait")
 
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), SERVER_REMOVE_TIMEOUT_MS)
   const response = await fetch("/api/photo-bg/remove", {
     method: "POST",
     body: form,
-  })
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timer))
 
   if (response.status === 503) {
     throw new Error("Background AI service is not configured — set BG_REMOVAL_SERVICE_URL")

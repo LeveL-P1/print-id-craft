@@ -1,18 +1,11 @@
 import { NextResponse } from "next/server"
+import {
+  configuredBgRemovalServiceUrl,
+  removeBackgroundViaService,
+} from "@/lib/bg-removal-service"
 
 export const runtime = "nodejs"
-export const maxDuration = 60
-
-const SERVICE_TIMEOUT_MS = 55_000
-
-function configuredServiceUrl() {
-  return (
-    process.env.BIREFNET_REMOVAL_URL ||
-    process.env.REMBG_SERVICE_URL ||
-    process.env.BG_REMOVAL_SERVICE_URL ||
-    ""
-  ).replace(/\/+$/, "")
-}
+export const maxDuration = 300
 
 function dataUrlToBuffer(dataUrl: string): { buffer: Buffer; contentType: string } | null {
   const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
@@ -54,8 +47,20 @@ async function readRequestImage(req: Request) {
   }
 }
 
+function buildRemoveForm(image: Awaited<ReturnType<typeof readRequestImage>>) {
+  const form = new FormData()
+  form.append(
+    "image",
+    new Blob([new Uint8Array(image.buffer)], { type: image.contentType }),
+    image.fileName
+  )
+  form.append("bgColor", image.bgColor)
+  form.append("model", process.env.BG_REMOVAL_MODEL || "birefnet-portrait")
+  return form
+}
+
 export async function POST(req: Request) {
-  const serviceUrl = configuredServiceUrl()
+  const serviceUrl = configuredBgRemovalServiceUrl()
   if (!serviceUrl) {
     return NextResponse.json(
       { error: "Professional background service is not configured" },
@@ -65,29 +70,21 @@ export async function POST(req: Request) {
 
   try {
     const image = await readRequestImage(req)
-    const form = new FormData()
-    form.append("image", new Blob([new Uint8Array(image.buffer)], { type: image.contentType }), image.fileName)
-    form.append("bgColor", image.bgColor)
-    form.append("model", process.env.BG_REMOVAL_MODEL || "birefnet-portrait")
-
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), SERVICE_TIMEOUT_MS)
-    const headers: HeadersInit = {}
-    if (process.env.BG_REMOVAL_SERVICE_TOKEN) {
-      headers.authorization = `Bearer ${process.env.BG_REMOVAL_SERVICE_TOKEN}`
-    }
-
-    const response = await fetch(`${serviceUrl}/remove`, {
-      method: "POST",
-      headers,
-      body: form,
-      signal: controller.signal,
-    }).finally(() => clearTimeout(timer))
+    const { response, wokeService } = await removeBackgroundViaService(
+      serviceUrl,
+      () => buildRemoveForm(image)
+    )
 
     if (!response.ok) {
       const detail = await response.text().catch(() => "")
       return NextResponse.json(
-        { error: detail || "Professional background removal failed" },
+        {
+          error:
+            detail ||
+            (wokeService
+              ? "Professional background service is still starting — try again in a moment"
+              : "Professional background removal failed"),
+        },
         { status: response.status }
       )
     }
@@ -105,15 +102,18 @@ export async function POST(req: Request) {
         "content-type": resultType,
         "cache-control": "no-store",
         ...(modelUsed ? { "x-bg-removal-model": modelUsed } : {}),
+        ...(wokeService ? { "x-bg-service-woke": "1" } : {}),
       },
     })
-  } catch (error: any) {
-    const aborted = error?.name === "AbortError"
+  } catch (error: unknown) {
+    const aborted = error instanceof Error && error.name === "AbortError"
     return NextResponse.json(
       {
         error: aborted
-          ? "Professional background removal timed out"
-          : error?.message || "Background removal failed",
+          ? "Professional background removal timed out — the AI service may still be waking up"
+          : error instanceof Error
+            ? error.message
+            : "Background removal failed",
       },
       { status: aborted ? 504 : 400 }
     )

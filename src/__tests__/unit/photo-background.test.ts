@@ -1,5 +1,9 @@
 ﻿import { describe, expect, it } from "vitest"
 import {
+  configuredBgRemovalServiceUrl,
+  isRetryableBgServiceStatus,
+} from "@/lib/bg-removal-service"
+import {
   canUseFastRecolorOnly,
   colorDistance,
   enhanceForegroundMask,
@@ -149,5 +153,21 @@ describe("photo-background hair hole repair", () => {
     const enhanced = enhanceForegroundMask(original, mask)
     expect(enhanced.data[(2 * 5 + 2) * 4]).toBe(90)
     expect(enhanced.data[(2 * 5 + 2) * 4 + 1]).toBe(60)
+  })
+})
+
+describe("bg-removal-service helpers", () => {
+  it("strips trailing slashes from configured service URL", () => {
+    const prev = process.env.BG_REMOVAL_SERVICE_URL
+    process.env.BG_REMOVAL_SERVICE_URL = "https://example.hf.space/"
+    expect(configuredBgRemovalServiceUrl()).toBe("https://example.hf.space")
+    process.env.BG_REMOVAL_SERVICE_URL = prev
+  })
+
+  it("treats gateway statuses as retryable", () => {
+    expect(isRetryableBgServiceStatus(502)).toBe(true)
+    expect(isRetryableBgServiceStatus(503)).toBe(true)
+    expect(isRetryableBgServiceStatus(504)).toBe(true)
+    expect(isRetryableBgServiceStatus(400)).toBe(false)
   })
 })
