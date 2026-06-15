@@ -221,6 +221,13 @@ function readAlpha(data: Uint8ClampedArray, idx: number): number {
   return data[idx * 4 + 3]
 }
 
+function createImageData(data: Uint8ClampedArray, width: number, height: number): ImageData {
+  if (typeof ImageData !== "undefined") {
+    return new ImageData(data.slice() as unknown as ImageDataArray, width, height)
+  }
+  return { data, width, height } as ImageData
+}
+
 function countSolidNeighbors(
   alphaAt: (idx: number) => number,
   idx: number,
@@ -361,7 +368,7 @@ export function repairForegroundMaskHoles(
     }
   }
 
-  return { data: outData, width: w, height: h } as ImageData
+  return createImageData(outData, w, h)
 }
 
 export async function loadBlobAsImageData(blob: Blob): Promise<ImageData> {
@@ -445,7 +452,80 @@ export function alignMaskWithOriginalColors(original: ImageData, mask: ImageData
     out[i + 1] = original.data[i + 1]
     out[i + 2] = original.data[i + 2]
   }
-  return { data: out, width: mask.width, height: mask.height } as ImageData
+  return createImageData(out, mask.width, mask.height)
+}
+
+/**
+ * ID-card portraits follow a predictable shape: head at top, shoulders/shirt below.
+ * Some free models keep hair but incorrectly mark white shirts as background.
+ * This repairs the inferred torso envelope using original pixels instead of the
+ * selected plain background colour.
+ */
+export function rescuePortraitEnvelope(original: ImageData, mask: ImageData): ImageData {
+  const w = mask.width
+  const h = mask.height
+  const out = new Uint8ClampedArray(mask.data)
+  const rowBounds: Array<{ min: number; max: number } | null> = new Array(h).fill(null)
+
+  for (let y = 0; y < h; y++) {
+    let min = w
+    let max = -1
+    for (let x = 0; x < w; x++) {
+      const a = out[(y * w + x) * 4 + 3]
+      if (a < 72) continue
+      min = Math.min(min, x)
+      max = Math.max(max, x)
+    }
+    if (max >= min) rowBounds[y] = { min, max }
+  }
+
+  const solidRows = rowBounds
+    .map((bounds, y) => bounds ? y : -1)
+    .filter((y) => y >= 0)
+  if (solidRows.length < Math.max(8, Math.floor(h * 0.08))) return mask
+
+  const top = solidRows[0]
+  const bottom = solidRows[solidRows.length - 1]
+  const centerX = (() => {
+    let sum = 0
+    let n = 0
+    for (let y = top; y <= bottom; y++) {
+      const bounds = rowBounds[y]
+      if (!bounds) continue
+      sum += (bounds.min + bounds.max) / 2
+      n++
+    }
+    return n ? sum / n : w / 2
+  })()
+
+  let lastMin = Math.floor(centerX - w * 0.12)
+  let lastMax = Math.ceil(centerX + w * 0.12)
+  for (let y = top; y < h; y++) {
+    const bounds = rowBounds[y]
+    if (bounds) {
+      lastMin = Math.min(lastMin, bounds.min)
+      lastMax = Math.max(lastMax, bounds.max)
+      continue
+    }
+
+    const yRatio = y / h
+    if (yRatio < 0.38) continue
+
+    const expansion = Math.min(w * 0.22, w * (0.04 + (yRatio - 0.38) * 0.34))
+    const minX = Math.max(0, Math.floor(Math.min(lastMin, centerX - w * 0.16) - expansion))
+    const maxX = Math.min(w - 1, Math.ceil(Math.max(lastMax, centerX + w * 0.16) + expansion))
+
+    for (let x = minX; x <= maxX; x++) {
+      const idx = (y * w + x) * 4
+      if (out[idx + 3] >= 96) continue
+      out[idx] = original.data[idx]
+      out[idx + 1] = original.data[idx + 1]
+      out[idx + 2] = original.data[idx + 2]
+      out[idx + 3] = 255
+    }
+  }
+
+  return createImageData(out, w, h)
 }
 
 /** Close tiny alpha gaps (hair strands, shirt folds) using original colours. */
@@ -479,14 +559,15 @@ export function closeMaskAlphaGaps(original: ImageData, mask: ImageData): ImageD
     }
   }
 
-  return { data: out, width: w, height: h } as ImageData
+  return createImageData(out, w, h)
 }
 
 /** Full mask prep: hole fill → alpha close → original RGB alignment. */
 export function enhanceForegroundMask(original: ImageData, mask: ImageData): ImageData {
   const repaired = repairForegroundMaskHoles(original, mask, DEFAULT_MASK_ENHANCE)
   const closed = closeMaskAlphaGaps(original, repaired)
-  return alignMaskWithOriginalColors(original, closed)
+  const rescued = rescuePortraitEnvelope(original, closed)
+  return alignMaskWithOriginalColors(original, rescued)
 }
 
 export function isPersonZonePixel(x: number, y: number, w: number, h: number): boolean {
@@ -645,7 +726,7 @@ export function compositeMaskImageDataOntoPlainColor(
     out[p + 3] = 255
   }
 
-  return { data: out, width: w, height: h } as ImageData
+  return createImageData(out, w, h)
 }
 
 export function scoreRawMaskQuality(original: ImageData, mask: ImageData): number {

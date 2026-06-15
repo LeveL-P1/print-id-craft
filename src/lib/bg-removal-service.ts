@@ -67,7 +67,7 @@ export async function wakeBgRemovalService(
 export async function postBgRemovalRemove(
   serviceUrl: string,
   form: FormData,
-  timeoutMs = 180_000
+  timeoutMs = 260_000
 ): Promise<Response> {
   return fetchWithTimeout(
     `${serviceUrl}/remove`,
@@ -92,12 +92,12 @@ export async function removeBackgroundViaService(
     wokeService = true
   }
 
-  let response = await postBgRemovalRemove(serviceUrl, buildForm(), 180_000)
+  let response = await postBgRemovalRemove(serviceUrl, buildForm(), 260_000)
   if (response.ok || !isRetryableBgServiceStatus(response.status)) {
     return { response, wokeService }
   }
 
   await wakeBgRemovalService(serviceUrl, 60_000)
-  response = await postBgRemovalRemove(serviceUrl, buildForm(), 180_000)
+  response = await postBgRemovalRemove(serviceUrl, buildForm(), 260_000)
   return { response, wokeService: true }
 }
