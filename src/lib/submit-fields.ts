@@ -198,7 +198,7 @@ export function applyFixedBranchToFormData(
   ) as Record<string, string>
   if (!trimmed) return fd
 
-  const out = { ...fd, branch: trimmed }
+  const out: Record<string, string> = { ...fd, branch: trimmed }
   for (const field of fields) {
     if (getFieldRole(field.key, field.label, field.role) === "branch") {
       out[field.key] = trimmed

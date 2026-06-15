@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { APP_BUILD_ID } from "@/lib/app-build-id"
 import { buildFormFields, checkSubmissionStatus, type FormField } from "@/lib/submit-fields"
+import { computeSubmitFormRevision } from "@/lib/submit-draft"
 import { migrateTemplateToPt } from "@/lib/font-size-units"
 import { getFieldRole, inferFieldRole, resolveFieldValue, sortFieldsByRole } from "@/lib/field-resolver"
 import { getTemplateForClass } from "@/lib/template-resolver"
@@ -192,10 +194,17 @@ export async function GET(req: Request, props: { params: Promise<{ token: string
       cls.name
     )
     const usesClassPicker = classOptions.length > 0
+    const fixedBranch = ((template?.printConfig as { fixedBranch?: string } | null)?.fixedBranch || "").trim()
+    const publicFieldConfig = fixedBranch
+      ? resolvedFieldConfig.filter((f) => getFieldRole(f.key, f.label, f.role) !== "branch")
+      : resolvedFieldConfig
+    const formRevision = computeSubmitFormRevision(fixedBranch, publicFieldConfig)
 
     return NextResponse.json({
       success: true,
       data: {
+        appBuildId: APP_BUILD_ID,
+        formRevision,
         schoolName: cls.school.name,
         schoolLogo: cls.school.logoUrl,
         className: cls.name,
@@ -205,7 +214,7 @@ export async function GET(req: Request, props: { params: Promise<{ token: string
         usesClassPicker,
         classOptions,
         divisions: usesClassPicker ? [...DIVISIONS] : [],
-        fieldConfig: resolvedFieldConfig,
+        fieldConfig: publicFieldConfig,
         frontLayout: template?.frontLayout || [],
         backLayout: template?.backLayout || [],
         cardWidthMm: template?.cardWidthMm || 85.6,
@@ -219,7 +228,7 @@ export async function GET(req: Request, props: { params: Promise<{ token: string
         // Available house/flag colours for dropdown in public form
         flagColors,
         // Fixed branch option
-        fixedBranch: (template?.printConfig as any)?.fixedBranch || "",
+        fixedBranch,
       },
     })
   } catch (error) {

@@ -11,7 +11,14 @@ import {
   type FieldRole,
 } from "@/lib/field-resolver"
 import { formatClassSection } from "@/lib/section-class"
+import { APP_BUILD_ID } from "@/lib/app-build-id"
 import { applyFixedBranchToFormData } from "@/lib/submit-fields"
+import {
+  computeSubmitFormRevision,
+  createSubmitDraftPayload,
+  getSubmitDraftStaleReason,
+  parseSubmitDraft,
+} from "@/lib/submit-draft"
 import { uploadStudentPhotoResilient } from "@/lib/client-photo-upload"
 import { preloadBgRemovalModel } from "@/lib/photo-background"
 import { PHOTO_BG_STATUS, type PhotoBgStatus } from "@/lib/photo-bg-status"
@@ -98,6 +105,8 @@ type FormConfig = {
   // render the House Flag input as a dropdown so parents don't misspell.
   flagColors?: string[]
   fixedBranch?: string
+  appBuildId?: string
+  formRevision?: string
 }
 
 const fieldRole = (field: FieldConfig): FieldRole =>
@@ -468,19 +477,15 @@ export default function SubmitPage() {
   const [mobileLocals, setMobileLocals] = useState<Record<string, string>>({})
 
   // ───────────────────────────────────────────────────────────────────────────
-  // Auto-save / restore form draft per token. Parents on slow networks
-  // accidentally hit Back, refresh, or close the tab — without persistence
-  // they have to fill the form from scratch. We keep everything in
-  // localStorage keyed by the class's linkToken so different classes never
-  // collide. The draft is cleared on successful submit.
-  //
-  // We persist text/state only. Large base64 photo strings can exceed mobile
-  // storage quotas and block the main thread while the parent is filling data.
+  // Auto-save / restore form draft per token. Drafts are tagged with the
+  // current deploy build id and form revision so every device drops stale
+  // saved answers after a new release or template change.
   // ───────────────────────────────────────────────────────────────────────────
   const DRAFT_KEY = `submit-draft:${token}`
   const SUBMITTED_KEY = `submit-done:${token}`
   const [draftRestored, setDraftRestored] = useState(false)
   const [draftBanner, setDraftBanner] = useState(false)
+  const [restoredDraftRevision, setRestoredDraftRevision] = useState<string | null>(null)
 
   const checkSubmissionStatus = useCallback(async (fd: Record<string, string>) => {
     const name = resolveFieldValue(fd, "name")
@@ -506,23 +511,19 @@ export default function SubmitPage() {
   useEffect(() => {
     if (typeof window === "undefined" || !token) return
     try {
-      const raw = window.localStorage.getItem(DRAFT_KEY)
-      if (!raw) { setDraftRestored(true); return }
-      const draft = JSON.parse(raw) as {
-        formData?: Record<string, string>
-        photoVerified?: boolean
-        step?: typeof step
-        savedAt?: number
-      }
-      // Discard drafts older than 7 days to avoid stale data hanging around.
-      const TTL_MS = 7 * 24 * 60 * 60 * 1000
-      if (draft.savedAt && Date.now() - draft.savedAt > TTL_MS) {
+      const draft = parseSubmitDraft(window.localStorage.getItem(DRAFT_KEY))
+      if (!draft) { setDraftRestored(true); return }
+
+      const staleReason = getSubmitDraftStaleReason(draft)
+      if (staleReason !== "ok") {
         window.localStorage.removeItem(DRAFT_KEY)
         setDraftRestored(true)
         return
       }
+
       if (draft.formData) setFormData(draft.formData)
       if (draft.photoVerified) setPhotoVerified(true)
+      setRestoredDraftRevision(draft.formRevision ?? null)
       const hasAnyData =
         !!(draft.formData && Object.keys(draft.formData).some(k => k !== "class" && (draft.formData?.[k] || "").trim() !== ""))
       if (hasAnyData) setDraftBanner(true)
@@ -545,12 +546,14 @@ export default function SubmitPage() {
   useEffect(() => {
     if (typeof window === "undefined" || !token || !draftRestored) return
     if (step === "loading" || step === "error" || step === "success") return
-    const draft = {
+    if (!config?.fieldConfig) return
+    const formRevision = computeSubmitFormRevision(config.fixedBranch, config.fieldConfig)
+    const draft = createSubmitDraftPayload({
+      formRevision,
       formData,
       photoVerified,
       step,
-      savedAt: Date.now(),
-    }
+    })
     try {
       window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
     } catch {
@@ -559,7 +562,7 @@ export default function SubmitPage() {
       } catch { /* give up silently — draft just won't survive this session */ }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formData, photoVerified, step, draftRestored])
+  }, [formData, photoVerified, step, draftRestored, config?.fixedBranch, config?.fieldConfig])
 
   // Preload the ISNet background-removal model while the parent is on photo/crop
   // so AI processing after crop feels faster on first use.
@@ -584,10 +587,23 @@ export default function SubmitPage() {
       .then(r => r.json())
       .then(data => {
         if (data.success) {
-          setConfig(data.data)
+          const nextConfig: FormConfig = {
+            ...data.data,
+            fixedBranch: (data.data.fixedBranch || "").trim(),
+          }
+          setConfig(nextConfig)
           // Legacy fixed-class links auto-fill class; section links use dropdowns.
-          if (data.data.className && !data.data.usesClassPicker) {
-            setFormData(prev => ({ ...prev, class: data.data.className }))
+          if (nextConfig.className && !nextConfig.usesClassPicker) {
+            setFormData(prev => {
+              const base = { ...prev, class: nextConfig.className }
+              return nextConfig.fixedBranch
+                ? applyFixedBranchToFormData(base, nextConfig.fixedBranch, nextConfig.fieldConfig)
+                : base
+            })
+          } else if (nextConfig.fixedBranch) {
+            setFormData(prev =>
+              applyFixedBranchToFormData(prev, nextConfig.fixedBranch, nextConfig.fieldConfig)
+            )
           }
           setStep("form")
         } else {
@@ -598,15 +614,49 @@ export default function SubmitPage() {
       .catch(() => { setErrorMsg("Failed to load form"); setStep("error") })
   }, [token])
 
-  // Always merge the template's fixed branch after config loads or a draft
-  // is restored. Laptop browsers often have a saved draft (localStorage) from
-  // an earlier visit that omits branch — phones usually start with a clean slate.
+  // If the tab still runs an old JS bundle after deploy, reload once so every
+  // device picks up the latest validation and draft rules.
   useEffect(() => {
-    if (!config?.fixedBranch || !draftRestored) return
-    setFormData(prev =>
-      applyFixedBranchToFormData(prev, config.fixedBranch, config.fieldConfig)
-    )
-  }, [config, draftRestored])
+    if (!config?.appBuildId || config.appBuildId === APP_BUILD_ID) return
+    if (typeof window === "undefined") return
+    const reloadKey = `submit-reload:${config.appBuildId}`
+    if (window.sessionStorage.getItem(reloadKey)) return
+    window.sessionStorage.setItem(reloadKey, "1")
+    window.location.reload()
+  }, [config?.appBuildId])
+
+  // Drop drafts saved under an older form/template revision (e.g. branch lock added).
+  useEffect(() => {
+    if (!config?.fieldConfig || !draftRestored) return
+    const currentRevision = computeSubmitFormRevision(config.fixedBranch, config.fieldConfig)
+    if (
+      restoredDraftRevision !== null &&
+      restoredDraftRevision !== currentRevision
+    ) {
+      clearDraft()
+      setDraftBanner(false)
+      setRestoredDraftRevision(currentRevision)
+      const freshBase: Record<string, string> = config.className && !config.usesClassPicker
+        ? { class: config.className }
+        : {}
+      setFormData(
+        config.fixedBranch
+          ? applyFixedBranchToFormData(freshBase, config.fixedBranch, config.fieldConfig)
+          : freshBase
+      )
+      setPhotoFile(null)
+      setPhotoPreview("")
+      setCroppedPhoto("")
+      setPhotoVerified(false)
+      setPhotoBgStatus("")
+      return
+    }
+    if (config.fixedBranch) {
+      setFormData(prev =>
+        applyFixedBranchToFormData(prev, config.fixedBranch, config.fieldConfig)
+      )
+    }
+  }, [config, draftRestored, restoredDraftRevision])
 
   useEffect(() => {
     if (!config || step === "loading" || step === "error" || step === "success") return

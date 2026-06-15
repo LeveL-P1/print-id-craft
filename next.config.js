@@ -12,6 +12,14 @@ const supabaseImageHost = (() => {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  env: {
+    NEXT_PUBLIC_APP_BUILD_ID:
+      process.env.VERCEL_GIT_COMMIT_SHA ||
+      process.env.RAILWAY_GIT_COMMIT_SHA ||
+      process.env.GIT_COMMIT_SHA ||
+      process.env.NEXT_PUBLIC_APP_BUILD_ID ||
+      "dev-local",
+  },
   // Performance: enable React strict mode (catches bugs early)
   reactStrictMode: true,
   // Performance: compress responses
