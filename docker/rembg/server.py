@@ -87,6 +87,16 @@ def health():
     }
 
 
+@app.get("/")
+def root():
+    return {
+        "ok": True,
+        "service": "WiseMelon background removal",
+        "health": "/health",
+        "remove": "/remove",
+    }
+
+
 @app.post("/remove")
 async def remove_background(
     image: UploadFile = File(...),
