@@ -11,6 +11,7 @@ import {
   type FieldRole,
 } from "@/lib/field-resolver"
 import { formatClassSection } from "@/lib/section-class"
+import { applyFixedBranchToFormData } from "@/lib/submit-fields"
 import { uploadStudentPhotoResilient } from "@/lib/client-photo-upload"
 import { preloadBgRemovalModel } from "@/lib/photo-background"
 import { PHOTO_BG_STATUS, type PhotoBgStatus } from "@/lib/photo-bg-status"
@@ -588,17 +589,6 @@ export default function SubmitPage() {
           if (data.data.className && !data.data.usesClassPicker) {
             setFormData(prev => ({ ...prev, class: data.data.className }))
           }
-          // Auto-populate fixed branch if configured
-          if (data.data.fixedBranch) {
-            const branchField = data.data.fieldConfig.find((f: any) => getFieldRole(f.key, f.label, f.role) === "branch")
-            setFormData(prev => {
-              const updated: Record<string, string> = { ...prev, branch: data.data.fixedBranch }
-              if (branchField) {
-                updated[branchField.key] = data.data.fixedBranch
-              }
-              return updated
-            })
-          }
           setStep("form")
         } else {
           setErrorMsg(data.error || "Invalid link")
@@ -607,6 +597,16 @@ export default function SubmitPage() {
       })
       .catch(() => { setErrorMsg("Failed to load form"); setStep("error") })
   }, [token])
+
+  // Always merge the template's fixed branch after config loads or a draft
+  // is restored. Laptop browsers often have a saved draft (localStorage) from
+  // an earlier visit that omits branch — phones usually start with a clean slate.
+  useEffect(() => {
+    if (!config?.fixedBranch || !draftRestored) return
+    setFormData(prev =>
+      applyFixedBranchToFormData(prev, config.fixedBranch, config.fieldConfig)
+    )
+  }, [config, draftRestored])
 
   useEffect(() => {
     if (!config || step === "loading" || step === "error" || step === "success") return
@@ -696,6 +696,7 @@ export default function SubmitPage() {
     }
     for (const f of config.fieldConfig) {
       if (f.key === "class") continue
+      if (config.fixedBranch && fieldRole(f) === "branch") continue
       const value = (formData[f.key] || "").trim()
       const role = fieldRole(f)
       if (f.required && !value) return `Please fill in ${getCleanLabel(f.label)}.`
@@ -734,6 +735,7 @@ export default function SubmitPage() {
       }
       for (const f of config.fieldConfig) {
         if (f.key === "class") continue
+        if (config.fixedBranch && fieldRole(f) === "branch") continue
         const value = (formData[f.key] || "").trim()
         const role = fieldRole(f)
         if (f.required && !value) {
@@ -827,13 +829,18 @@ export default function SubmitPage() {
       }
 
       setUploadProgress(85)
+      const submitFormData = applyFixedBranchToFormData(
+        formData,
+        config.fixedBranch,
+        config.fieldConfig
+      )
       let res: Response
       try {
         res = await fetch(`/api/submit/${token}/submit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            formData,
+            formData: submitFormData,
             photoUrl: photoResult.photoUrl,
             photoPath: photoResult.photoPath,
             photoDataUrl: photoResult.photoDataUrl,
@@ -1412,7 +1419,14 @@ export default function SubmitPage() {
                     onClick={() => {
                       if (!confirm("Discard the saved draft and start over?")) return
                       clearDraft()
-                      setFormData(config?.className ? { class: config.className } : {})
+                      const freshBase: Record<string, string> = config?.className
+                        ? { class: config.className }
+                        : {}
+                      setFormData(
+                        config?.fixedBranch
+                          ? applyFixedBranchToFormData(freshBase, config.fixedBranch, config.fieldConfig)
+                          : freshBase
+                      )
                       setPhotoFile(null)
                       setPhotoPreview("")
                       setCroppedPhoto("")

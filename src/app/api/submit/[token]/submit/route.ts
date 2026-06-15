@@ -5,6 +5,7 @@ import { durableRateLimit, getClientIp } from "@/lib/rate-limit"
 import { storageUpload, storagePublicUrl } from "@/lib/storage"
 import QRCode from "qrcode"
 import {
+  applyFixedBranchToFormData,
   computeAutoAssignedFields,
   getPublicSubmissionFields,
   requireValidSubmitPhotoFields,
@@ -75,9 +76,11 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
     const formData = validated.formData as Record<string, string>
     const template = await getTemplateForClass(cls.id)
     const requiredFields = await getPublicSubmissionFields(cls.school.id, template)
+    const fixedBranch = (template?.printConfig as { fixedBranch?: string } | null)?.fixedBranch || ""
+    const formDataWithBranch = applyFixedBranchToFormData(formData, fixedBranch, requiredFields)
 
     const classFields = validateAndBuildClassFields(
-      formData,
+      formDataWithBranch,
       cls.name,
       cls.classOptions,
       cls.sectionType
@@ -86,7 +89,9 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
       return NextResponse.json({ error: classFields.error }, { status: 400 })
     }
 
-    const detailValidation = validatePublicSubmissionDetails(formData, requiredFields)
+    const detailValidation = validatePublicSubmissionDetails(formDataWithBranch, requiredFields, {
+      fixedBranch,
+    })
     if (!detailValidation.ok) {
       return NextResponse.json({ error: detailValidation.error }, { status: 400 })
     }
@@ -146,7 +151,7 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
     // serialisation guarantee of the advisory-lock transaction.
     const autoFields = await computeAutoAssignedFields(cls.school.id)
     const finalFormData = {
-      ...validated.formData,
+      ...formDataWithBranch,
       ...autoFields,
       class: classFields.class,
       ...(classFields.classGrade ? { classGrade: classFields.classGrade } : {}),

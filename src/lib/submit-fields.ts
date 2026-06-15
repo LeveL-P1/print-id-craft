@@ -177,16 +177,47 @@ function wordCount(value: string): number {
   return (value || "").trim().split(/\s+/).filter(Boolean).length
 }
 
-export function validatePublicSubmissionDetails(
+/** Branch fields are hidden on the public form when the template locks a fixed branch. */
+export function isHiddenFixedBranchField(
+  field: FormField,
+  fixedBranch?: string
+): boolean {
+  if (!fixedBranch?.trim()) return false
+  return getFieldRole(field.key, field.label, field.role) === "branch"
+}
+
+/** Inject the template's fixed branch into every branch-shaped form key. */
+export function applyFixedBranchToFormData(
   formData: Record<string, unknown>,
+  fixedBranch: string | undefined,
   fields: FormField[]
-): { ok: true } | { ok: false; error: string } {
+): Record<string, string> {
+  const trimmed = (fixedBranch || "").trim()
   const fd = Object.fromEntries(
     Object.entries(formData || {}).map(([key, value]) => [key, String(value ?? "").trim()])
   ) as Record<string, string>
+  if (!trimmed) return fd
+
+  const out = { ...fd, branch: trimmed }
+  for (const field of fields) {
+    if (getFieldRole(field.key, field.label, field.role) === "branch") {
+      out[field.key] = trimmed
+    }
+  }
+  return out
+}
+
+export function validatePublicSubmissionDetails(
+  formData: Record<string, unknown>,
+  fields: FormField[],
+  options?: { fixedBranch?: string }
+): { ok: true } | { ok: false; error: string } {
+  const fixedBranch = options?.fixedBranch?.trim() || ""
+  const fd = applyFixedBranchToFormData(formData, fixedBranch, fields)
 
   for (const field of fields) {
     if (field.key === "class") continue
+    if (isHiddenFixedBranchField(field, fixedBranch)) continue
     const value = (fd[field.key] || "").trim()
     const label = field.label || field.key
     const role = getFieldRole(field.key, field.label, field.role)
