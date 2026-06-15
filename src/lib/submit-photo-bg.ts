@@ -1,30 +1,34 @@
 /**
- * Submit-form photo background — Remove.bg API only.
- * Transparent PNG from server → client compositing → school-colour JPEG.
+ * Submit-form photo background — Remove.bg passthrough.
+ * Remove.bg removes the background and applies the school colour on their servers.
+ * Custom client compositing / quality checks are disabled for now.
  */
 
-import {
-  analyzeEdgeBackground,
-  canUseFastRecolorOnly,
-  cleanupBackgroundArtifacts,
-  downscaleBlob,
-  finalizePlainBackgroundFromMaskBlobs,
-  loadImageToCanvas,
-  measureEdgeBackgroundMatch,
-  measureForegroundRatioInTransparentBlob,
-  recolorPlainBackgroundOnCanvas,
-  scorePlainBackgroundFromMaskBlobs,
-} from "@/lib/photo-background"
+// CUSTOM PIPELINE (disabled — re-enable later):
+// import {
+//   analyzeEdgeBackground,
+//   canUseFastRecolorOnly,
+//   cleanupBackgroundArtifacts,
+//   downscaleBlob,
+//   finalizePlainBackgroundFromMaskBlobs,
+//   loadImageToCanvas,
+//   measureEdgeBackgroundMatch,
+//   measureForegroundRatioInTransparentBlob,
+//   recolorPlainBackgroundOnCanvas,
+//   scorePlainBackgroundFromMaskBlobs,
+// } from "@/lib/photo-background"
 
 export const SUBMIT_BG_JPEG_QUALITY = 0.88
 export const SUBMIT_BG_WORK_MAX_DIM = 768
 
 const REMOVEBG_MODEL = "removebg"
 const SERVER_REMOVE_TIMEOUT_MS = 280_000
-const MIN_FOREGROUND_RATIO = 0.06
-const MIN_EDGE_MATCH_PERCENT = 72
-const MIN_FINISHED_QUALITY_SCORE = 68
-const MAX_SUBJECT_BACKGROUND_LEAK_PERCENT = 12
+
+// CUSTOM PIPELINE (disabled — re-enable later):
+// const MIN_FOREGROUND_RATIO = 0.06
+// const MIN_EDGE_MATCH_PERCENT = 72
+// const MIN_FINISHED_QUALITY_SCORE = 68
+// const MAX_SUBJECT_BACKGROUND_LEAK_PERCENT = 12
 
 export type SubmitBgProgress = (message: string, percent: number, previewDataUrl?: string) => void
 
@@ -42,6 +46,15 @@ async function photoUrlToBlob(url: string): Promise<Blob> {
   const response = await fetch(url, { credentials: "include", cache: "no-store" })
   if (!response.ok) throw new Error("Could not read photo")
   return response.blob()
+}
+
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(new Error("Could not read processed photo"))
+    reader.readAsDataURL(blob)
+  })
 }
 
 async function removeBackgroundWithRemoveBg(blob: Blob, bgColor: string): Promise<Blob> {
@@ -82,14 +95,15 @@ async function removeBackgroundWithRemoveBg(blob: Blob, bgColor: string): Promis
   }
 }
 
-function finalizeCanvasToDataUrl(
-  canvas: HTMLCanvasElement,
-  ctx: CanvasRenderingContext2D,
-  bgColor: string
-): string {
-  cleanupBackgroundArtifacts(ctx, canvas.width, canvas.height, bgColor)
-  return canvas.toDataURL("image/jpeg", SUBMIT_BG_JPEG_QUALITY)
-}
+// CUSTOM PIPELINE (disabled — re-enable later):
+// function finalizeCanvasToDataUrl(
+//   canvas: HTMLCanvasElement,
+//   ctx: CanvasRenderingContext2D,
+//   bgColor: string
+// ): string {
+//   cleanupBackgroundArtifacts(ctx, canvas.width, canvas.height, bgColor)
+//   return canvas.toDataURL("image/jpeg", SUBMIT_BG_JPEG_QUALITY)
+// }
 
 export async function processSubmitPhotoBackground(
   photoUrl: string,
@@ -98,6 +112,16 @@ export async function processSubmitPhotoBackground(
 ): Promise<{ dataUrl: string; usedAi: boolean }> {
   onProgress?.("Preparing photo...", 5)
 
+  const workBlob = await photoUrlToBlob(photoUrl)
+
+  onProgress?.("Removing background (Remove.bg)...", 25)
+  const resultBlob = await removeBackgroundWithRemoveBg(workBlob, bgColor)
+
+  const dataUrl = await blobToDataUrl(resultBlob)
+  onProgress?.("Done", 100, dataUrl)
+  return { dataUrl, usedAi: true }
+
+  /* CUSTOM PIPELINE (disabled — re-enable later):
   const { canvas, ctx } = await loadImageToCanvas(photoUrl, SUBMIT_BG_WORK_MAX_DIM)
   const edgeBg = analyzeEdgeBackground(ctx, canvas.width, canvas.height)
 
@@ -157,4 +181,5 @@ export async function processSubmitPhotoBackground(
 
   onProgress?.("Done", 100, dataUrl)
   return { dataUrl, usedAi: true }
+  */
 }

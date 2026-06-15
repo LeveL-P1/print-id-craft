@@ -150,11 +150,13 @@ export async function POST(req: Request) {
         const result = await removeBackgroundWithRemoveBg(
           image.buffer,
           image.contentType,
-          image.fileName
+          image.fileName,
+          image.bgColor
         )
+        const withBgColor = !!image.bgColor?.replace(/^#/, "").trim()
         return new NextResponse(new Uint8Array(result), {
           headers: {
-            "content-type": "image/png",
+            "content-type": withBgColor ? "image/jpeg" : "image/png",
             "cache-control": "no-store",
             "x-bg-removal-model": "removebg",
           },

@@ -128,7 +128,8 @@ export default function PhotoBgProcessor({
   }, [processing])
 
   const removeBackground = useCallback(async () => {
-    const sourceUrl = photoDataUrl || photoUrl
+    // Use full-resolution cropped photo — Remove.bg handles everything server-side.
+    const sourceUrl = photoUrl
     if (!sourceUrl || removalStartedRef.current) return
     removalStartedRef.current = true
 
@@ -167,7 +168,7 @@ export default function PhotoBgProcessor({
     } finally {
       if (!cancelledRef.current) setProcessing(false)
     }
-  }, [photoUrl, photoDataUrl, schoolBgColor, setBgStatus, autoConfirm, onSkip])
+  }, [photoUrl, schoolBgColor, setBgStatus, autoConfirm, onSkip])
 
   const handleUseOriginal = useCallback(() => {
     cancelledRef.current = true
@@ -191,9 +192,9 @@ export default function PhotoBgProcessor({
   }, [removeBackground])
 
   useEffect(() => {
-    if (photoLoaded && photoDataUrl) removeBackground()
+    if (photoLoaded && photoUrl) removeBackground()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [photoLoaded, photoDataUrl])
+  }, [photoLoaded, photoUrl])
 
   const handleConfirm = () => {
     if (processedUrl) {
@@ -230,7 +231,7 @@ export default function PhotoBgProcessor({
         Preparing Your Photo
       </div>
       <p style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>
-        Removing background and applying colour
+        Remove.bg is preparing your photo with school colour
         {schoolBgColor && (
           <>
             {" "}

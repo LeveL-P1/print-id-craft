@@ -7,15 +7,23 @@ export function isRemoveBgConfigured(): boolean {
   return !!(process.env.REMOVEBG_API_KEY?.trim())
 }
 
+function normalizeBgColorHex(bgColor?: string): string | undefined {
+  const hex = bgColor?.replace(/^#/, "").trim()
+  return hex && /^[0-9a-fA-F]{3,8}$/.test(hex) ? hex : undefined
+}
+
 export async function removeBackgroundWithRemoveBg(
   buffer: Buffer,
   contentType: string,
-  fileName: string
+  fileName: string,
+  bgColor?: string
 ): Promise<Buffer> {
   const apiKey = process.env.REMOVEBG_API_KEY?.trim()
   if (!apiKey) {
     throw new Error("REMOVEBG_API_KEY is not configured")
   }
+
+  const bgHex = normalizeBgColorHex(bgColor)
 
   const form = new FormData()
   form.append(
@@ -24,9 +32,12 @@ export async function removeBackgroundWithRemoveBg(
     fileName || "photo.jpg"
   )
   form.append("size", "auto")
-  form.append("format", "png")
+  form.append("format", bgHex ? "jpg" : "png")
   form.append("type", "person")
   form.append("crop", "false")
+  if (bgHex) {
+    form.append("bg_color", bgHex)
+  }
 
   const response = await fetch("https://api.remove.bg/v1.0/removebg", {
     method: "POST",
