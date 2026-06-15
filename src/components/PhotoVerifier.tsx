@@ -49,6 +49,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [cameraPermission, setCameraPermission] = useState<CameraPermissionState>("checking")
   const [permissionRequested, setPermissionRequested] = useState(false)
+  const [showCameraPermissionModal, setShowCameraPermissionModal] = useState(false)
   const [facingMode, setFacingMode] = useState<"user" | "environment">("user")
 
   // ──────────────────────────────────────────────────────
@@ -148,6 +149,16 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
     )
   }
 
+  const handleCameraButtonClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setCameraError("")
+    if (cameraPermission === "granted") {
+      startCamera(e)
+      return
+    }
+    setShowCameraPermissionModal(true)
+  }
+
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach(t => t.stop())
     streamRef.current = null
@@ -182,6 +193,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
       setStream(s)
       setCameraActive(true)
       setCameraPermission("granted")
+      setShowCameraPermissionModal(false)
       // Wait for React to render the video element, then attach
       setTimeout(() => {
         if (videoRef.current) {
@@ -1239,6 +1251,130 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
     <div>
       <canvas ref={canvasRef} style={{ display: "none" }} />
 
+      {showCameraPermissionModal && !cameraActive && !preview && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="camera-permission-title"
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15,23,42,0.55)',
+            zIndex: 2000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 18,
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 420,
+              background: 'white',
+              borderRadius: 18,
+              padding: 22,
+              boxShadow: '0 24px 60px rgba(15,23,42,0.28)',
+              border: '1px solid #e2e8f0',
+              textAlign: 'center',
+            }}
+          >
+            <div style={{
+              width: 56, height: 56, borderRadius: 16,
+              background: cameraPermission === "denied" ? '#fef2f2' : '#ecfdf5',
+              color: cameraPermission === "denied" ? '#dc2626' : '#047857',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              margin: '0 auto 14px', fontSize: 26,
+            }}>
+              📷
+            </div>
+            <h3 id="camera-permission-title" style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', marginBottom: 8 }}>
+              {cameraPermission === "denied" ? "Camera is Blocked" : "Allow Camera Access"}
+            </h3>
+            <p style={{ fontSize: 13, color: '#64748b', lineHeight: 1.6, marginBottom: 16 }}>
+              {cameraPermission === "denied"
+                ? "Your browser has blocked camera access for this site. Change Camera to Allow in the lock/settings icon near the address bar, then reload."
+                : "Tap Allow Camera below. Your browser will show a permission popup; choose Allow so you can take the student photo."}
+            </p>
+            {cameraPermission === "denied" && (
+              <div style={{
+                textAlign: 'left',
+                background: '#fffbeb',
+                border: '1px solid #fde68a',
+                borderRadius: 12,
+                padding: 12,
+                fontSize: 12,
+                color: '#92400e',
+                lineHeight: 1.55,
+                marginBottom: 14,
+              }}>
+                <strong>Chrome:</strong> tap the lock/settings icon beside the address, open Permissions, set Camera to Allow, then reload.
+              </div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <button
+                type="button"
+                onClick={(e) => { setCameraError(""); startCamera(e) }}
+                style={{
+                  width: '100%',
+                  padding: '13px 16px',
+                  borderRadius: 12,
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #2563eb, #4f46e5)',
+                  color: 'white',
+                  fontSize: 14,
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                Allow Camera
+              </button>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); cameraFileInputRef.current?.click(); setShowCameraPermissionModal(false) }}
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  borderRadius: 12,
+                  background: '#ecfdf5',
+                  color: '#047857',
+                  border: '1px solid #a7f3d0',
+                  fontSize: 13,
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                Take Photo from Phone Camera
+              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); void refreshCameraPermission() }}
+                  style={{ flex: 1, padding: '10px 12px', borderRadius: 10, background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                >
+                  Check Again
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); window.location.reload() }}
+                  style={{ flex: 1, padding: '10px 12px', borderRadius: 10, background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                >
+                  Reload
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setShowCameraPermissionModal(false); fileInputRef.current?.click() }}
+                style={{ border: 'none', background: 'transparent', color: '#64748b', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 6 }}
+              >
+                Upload File Instead
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Camera Permission Status Banner */}
       {cameraPermission === "denied" && !cameraActive && !preview && (
         <div style={{
@@ -1725,7 +1861,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
                 📁 Browse File
               </button>
               <button
-                onClick={startCamera}
+                onClick={handleCameraButtonClick}
                 style={{
                   padding: '10px 20px',
                   background: cameraPermission === "denied"
