@@ -498,22 +498,13 @@ export function rescuePortraitEnvelope(original: ImageData, mask: ImageData): Im
     return n ? sum / n : w / 2
   })()
 
-  let lastMin = Math.floor(centerX - w * 0.12)
-  let lastMax = Math.ceil(centerX + w * 0.12)
   for (let y = top; y < h; y++) {
-    const bounds = rowBounds[y]
-    if (bounds) {
-      lastMin = Math.min(lastMin, bounds.min)
-      lastMax = Math.max(lastMax, bounds.max)
-      continue
-    }
-
     const yRatio = y / h
-    if (yRatio < 0.38) continue
+    if (yRatio < 0.52) continue
 
-    const expansion = Math.min(w * 0.22, w * (0.04 + (yRatio - 0.38) * 0.34))
-    const minX = Math.max(0, Math.floor(Math.min(lastMin, centerX - w * 0.16) - expansion))
-    const maxX = Math.min(w - 1, Math.ceil(Math.max(lastMax, centerX + w * 0.16) + expansion))
+    const halfWidth = Math.min(w * 0.42, w * (0.16 + (yRatio - 0.52) * 0.55))
+    const minX = Math.max(0, Math.floor(centerX - halfWidth))
+    const maxX = Math.min(w - 1, Math.ceil(centerX + halfWidth))
 
     for (let x = minX; x <= maxX; x++) {
       const idx = (y * w + x) * 4
@@ -630,6 +621,47 @@ export function repairCompositedSubjectHoles(
     data[p + 1] = original.data[p + 1]
     data[p + 2] = original.data[p + 2]
     data[p + 3] = 255
+  }
+
+  ctx.putImageData(imageData, 0, 0)
+}
+
+/** Remove white/grey wall islands around hair while preserving the lower shirt area. */
+export function removeUpperNeutralBackgroundIslands(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  targetHex: string
+): void {
+  const target = parseHexColor(targetHex)
+  if (!target) return
+
+  const imageData = ctx.getImageData(0, 0, w, h)
+  const data = imageData.data
+  const isNeutralWall = (r: number, g: number, b: number) => {
+    const max = Math.max(r, g, b)
+    const min = Math.min(r, g, b)
+    return max > 168 && max - min < 52
+  }
+
+  for (let y = 0; y < Math.floor(h * 0.64); y++) {
+    const yRatio = y / h
+    for (let x = 0; x < w; x++) {
+      const xRatio = x / w
+      const inLowerShirtSafeZone = yRatio > 0.48 && xRatio > 0.22 && xRatio < 0.78
+      if (inLowerShirtSafeZone) continue
+
+      const p = (y * w + x) * 4
+      const r = data[p]
+      const g = data[p + 1]
+      const b = data[p + 2]
+      if (!isNeutralWall(r, g, b)) continue
+
+      data[p] = target.r
+      data[p + 1] = target.g
+      data[p + 2] = target.b
+      data[p + 3] = 255
+    }
   }
 
   ctx.putImageData(imageData, 0, 0)
@@ -816,6 +848,7 @@ export function finalizePlainBackgroundFromMask(
 
   ctx.putImageData(composited, 0, 0)
   repairCompositedSubjectHoles(ctx, composited.width, composited.height, original, bgColor)
+  removeUpperNeutralBackgroundIslands(ctx, composited.width, composited.height, bgColor)
   cleanupBackgroundArtifacts(ctx, composited.width, composited.height, bgColor)
   enforcePlainBackgroundEdges(ctx, composited.width, composited.height, bgColor)
 
@@ -824,6 +857,7 @@ export function finalizePlainBackgroundFromMask(
     cleanupBackgroundArtifacts(ctx, composited.width, composited.height, bgColor)
     enforcePlainBackgroundEdges(ctx, composited.width, composited.height, bgColor)
     repairCompositedSubjectHoles(ctx, composited.width, composited.height, original, bgColor)
+    removeUpperNeutralBackgroundIslands(ctx, composited.width, composited.height, bgColor)
     quality = scorePlainBackgroundQuality(ctx, composited.width, composited.height, bgColor)
   }
 
