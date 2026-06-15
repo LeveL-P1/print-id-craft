@@ -9,10 +9,24 @@ from fastapi.responses import Response
 from PIL import Image
 from rembg import new_session, remove
 
+try:
+    from scipy.ndimage import maximum_filter as _scipy_max_filter
+    from scipy.ndimage import binary_dilation, binary_erosion
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
+
+try:
+    from PIL import ImageFilter, ImageOps
+    HAS_PIL_ENHANCE = True
+except ImportError:
+    HAS_PIL_ENHANCE = False
+    HAS_SCIPY = False
+
 
 app = FastAPI(title="WiseMelon Professional Background Removal")
 
-SERVICE_VERSION = "2026-06-15-merge-v1"
+SERVICE_VERSION = "2026-06-15-cutout-v2"
 DEFAULT_MODEL = os.getenv("BG_REMOVAL_MODEL", "birefnet-portrait")
 DEFAULT_MODEL_CHAIN = [
     name.strip()
@@ -22,11 +36,11 @@ DEFAULT_MODEL_CHAIN = [
     ).split(",")
     if name.strip()
 ]
-MERGE_MASK_MODEL = os.getenv("BG_REMOVAL_MERGE_MODEL", "u2net_human_seg").strip()
+MERGE_MASK_MODEL = os.getenv("BG_REMOVAL_MERGE_MODEL", "birefnet-massive").strip()
 MERGE_MASK_ENABLED = os.getenv("BG_REMOVAL_MERGE_MASK", "1").lower() not in {"0", "false", "no"}
 MERGE_ALPHA_SCALE = float(os.getenv("BG_REMOVAL_MERGE_ALPHA_SCALE", "0.94"))
-MERGE_HOLE_PRIMARY_MAX = int(os.getenv("BG_REMOVAL_MERGE_HOLE_PRIMARY_MAX", "84"))
-MERGE_HOLE_SECONDARY_MIN = int(os.getenv("BG_REMOVAL_MERGE_HOLE_SECONDARY_MIN", "112"))
+MERGE_HOLE_PRIMARY_MAX = int(os.getenv("BG_REMOVAL_MERGE_HOLE_PRIMARY_MAX", "96"))
+MERGE_HOLE_SECONDARY_MIN = int(os.getenv("BG_REMOVAL_MERGE_HOLE_SECONDARY_MIN", "88"))
 SERVICE_TOKEN = os.getenv("BG_REMOVAL_SERVICE_TOKEN", "")
 MAX_PIXELS = int(os.getenv("BG_REMOVAL_MAX_PIXELS", "3600000"))
 ALPHA_MATTING = os.getenv("BG_REMOVAL_ALPHA_MATTING", "1").lower() not in {"0", "false", "no"}
@@ -59,6 +73,35 @@ def prepare_image(raw: bytes) -> Image.Image:
             Image.Resampling.LANCZOS,
         )
     return image
+
+
+def enhance_contrast_for_model(image: Image.Image) -> Image.Image:
+    """
+    Apply CLAHE-style local contrast enhancement before sending to the model.
+    This makes dark hair stand out more against light walls, dramatically
+    improving detection accuracy for Indian school hairstyles (black hair
+    on grey/white backgrounds).
+    
+    Uses PIL autocontrast + detail enhancement as a lightweight CLAHE equivalent.
+    The enhanced image is only used for MODEL INFERENCE — the original is used
+    for the final output colours.
+    """
+    if not HAS_PIL_ENHANCE:
+        return image
+    try:
+        # Convert to RGB for enhancement (model sees RGB internally)
+        rgb = image.convert("RGB")
+        # Autocontrast: stretches histogram per channel
+        enhanced = ImageOps.autocontrast(rgb, cutoff=1)
+        # Sharpen slightly to make edges (hair boundaries) more pronounced
+        enhanced = enhanced.filter(ImageFilter.DETAIL)
+        # Convert back to RGBA
+        enhanced_rgba = enhanced.convert("RGBA")
+        # Restore original alpha channel
+        enhanced_rgba.putalpha(image.split()[3])
+        return enhanced_rgba
+    except Exception:
+        return image
 
 
 def candidate_models(requested_model: str | None) -> list[str]:
@@ -95,7 +138,82 @@ def to_rgba_image(result: Image.Image | bytes) -> Image.Image:
     return result.convert("RGBA")
 
 
+BRIA_SESSION = None
+
+
+def get_bria_session():
+    global BRIA_SESSION
+    if BRIA_SESSION is None:
+        try:
+            from huggingface_hub import hf_hub_download
+            import onnxruntime as ort
+        except ImportError as exc:
+            raise ImportError(
+                "huggingface_hub and onnxruntime are required for BRIA RMBG-2.0. "
+                "Make sure they are installed in requirements.txt."
+            ) from exc
+
+        # Download the quantized ONNX model from Hugging Face
+        model_path = hf_hub_download(
+            repo_id="briaai/RMBG-2.0",
+            filename="onnx/model_quantized.onnx",
+        )
+
+        available_providers = ort.get_available_providers()
+        providers = []
+        if "CUDAExecutionProvider" in available_providers:
+            providers.append("CUDAExecutionProvider")
+        if "CPUExecutionProvider" in available_providers:
+            providers.append("CPUExecutionProvider")
+        if not providers:
+            providers = ort.get_all_providers()
+
+        BRIA_SESSION = ort.InferenceSession(model_path, providers=providers)
+    return BRIA_SESSION
+
+
+def run_bria_remove(source: Image.Image) -> Image.Image:
+    session = get_bria_session()
+
+    # Preprocess
+    w, h = source.size
+    # RMBG-2.0 expects 1024x1024 input
+    im = source.convert("RGB").resize((1024, 1024), Image.Resampling.BILINEAR)
+    im_arr = np.array(im, dtype=np.float32) / 255.0
+
+    mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+    std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+    im_arr = (im_arr - mean) / std
+
+    im_arr = im_arr.transpose((2, 0, 1))
+    input_data = np.expand_dims(im_arr, axis=0)
+
+    # Inference
+    input_name = session.get_inputs()[0].name
+    output_name = session.get_outputs()[0].name
+    outputs = session.run([output_name], {input_name: input_data})
+
+    # Postprocess
+    pred = outputs[0]
+    pred = np.squeeze(pred)
+
+    # Sigmoid activation: 1 / (1 + exp(-x))
+    pred = np.clip(pred, -20.0, 20.0)
+    mask = 1.0 / (1.0 + np.exp(-pred))
+
+    mask_uint8 = (mask * 255.0).astype(np.uint8)
+    mask_pil = Image.fromarray(mask_uint8, mode="L").resize((w, h), Image.Resampling.BILINEAR)
+
+    # Create output image with transparency
+    output = source.convert("RGBA")
+    output.putalpha(mask_pil)
+    return output
+
+
 def run_remove(source: Image.Image, model_name: str, *, alpha_matting: bool | None = None) -> Image.Image:
+    if model_name == "bria-rmbg2":
+        return run_bria_remove(source)
+
     session = get_session(model_name)
     result = remove(
         source,
@@ -103,6 +221,7 @@ def run_remove(source: Image.Image, model_name: str, *, alpha_matting: bool | No
         **supported_remove_kwargs(alpha_matting=alpha_matting),
     )
     return to_rgba_image(result)
+
 
 
 def merge_person_masks(
@@ -143,6 +262,24 @@ def merge_person_masks(
 
     out = source_rgba.copy()
     out[..., 3] = merged_a
+
+    # --- 1px alpha dilation: expand foreground edge to cover micro-gaps ---
+    if HAS_SCIPY:
+        dilated_a = _scipy_max_filter(merged_a, size=3)
+        boost_mask = (merged_a < 48) & (dilated_a >= 48)
+        out[boost_mask, :3] = source_rgba[boost_mask, :3]
+        out[boost_mask, 3] = np.clip(dilated_a[boost_mask].astype(np.int16) - 16, 32, 255).astype(np.uint8)
+
+        # --- Morphological closing: fill tiny interior gaps without expanding silhouette ---
+        # dilate(3x3) then erode(3x3) on the alpha channel
+        fg_binary = out[..., 3] >= 64
+        closed = binary_dilation(fg_binary, iterations=1)
+        closed = binary_erosion(closed, iterations=1)
+        # Any pixel that was closed but had low alpha → boost it
+        close_fill = closed & (~fg_binary)
+        out[close_fill, :3] = source_rgba[close_fill, :3]  # original RGB
+        out[close_fill, 3] = 192  # semi-strong alpha
+
     return Image.fromarray(out, "RGBA")
 
 
@@ -201,12 +338,23 @@ async def remove_background(
 
     try:
         source = prepare_image(raw)
+        enhanced = enhance_contrast_for_model(source)
         last_error: Exception | None = None
         result: Image.Image | None = None
         used_model = ""
+
+        # Run model on contrast-enhanced image for better hair/edge detection,
+        # then extract the ALPHA MASK and apply it to original-colour pixels.
         for model_name in candidate_models(model):
             try:
-                result = run_remove(source, model_name)
+                enhanced_result = run_remove(enhanced, model_name)
+                # Take the alpha mask from the enhanced result,
+                # but use original source RGB for the output
+                enhanced_a = np.array(enhanced_result.convert("RGBA"), dtype=np.uint8)[..., 3]
+                source_rgba = np.array(source.convert("RGBA"), dtype=np.uint8)
+                out = source_rgba.copy()
+                out[..., 3] = enhanced_a
+                result = Image.fromarray(out, "RGBA")
                 used_model = model_name
                 break
             except Exception as exc:
@@ -215,6 +363,21 @@ async def remove_background(
 
         if result is None:
             raise last_error or RuntimeError("No background removal model could run")
+
+        # --- Dual-inference boost: also run on original (non-enhanced) and
+        # take the max alpha from both masks for maximum hair coverage ---
+        try:
+            if used_model and enhanced is not source:
+                original_result = run_remove(source, used_model)
+                original_a = np.array(original_result.convert("RGBA"), dtype=np.uint8)[..., 3]
+                result_rgba = np.array(result.convert("RGBA"), dtype=np.uint8)
+                # Union: take the higher alpha from either inference
+                combined_a = np.maximum(result_rgba[..., 3], original_a)
+                result_rgba[..., 3] = combined_a
+                result = Image.fromarray(result_rgba, "RGBA")
+                used_model = f"{used_model}+dual"
+        except Exception:
+            pass  # dual-inference is best-effort
 
         result, used_model = maybe_merge_with_person_mask(source, result, used_model)
 

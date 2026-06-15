@@ -26,6 +26,11 @@ type Props = {
 
 const MODEL_OPTIONS: { value: BgModelChoice; label: string; desc: string }[] = [
   {
+    value: "bria-rmbg2",
+    label: "✨ BRIA RMBG-2.0",
+    desc: "Ultra precision — best for hair, ponytails, and braids. Requires internet.",
+  },
+  {
     value: "gemini",
     label: "☁️ Google AI (Gemini)",
     desc: "Premium quality — handles hair perfectly. Requires internet.",
@@ -61,7 +66,7 @@ export default function ManufacturerBgBatchProcessor({
   const [failed, setFailed] = useState(0)
   const [errors, setErrors] = useState<Array<{ serialNumber: string; error: string }>>([])
   const [modelReady, setModelReady] = useState(false)
-  const [selectedModel, setSelectedModel] = useState<BgModelChoice>("gemini")
+  const [selectedModel, setSelectedModel] = useState<BgModelChoice>("birefnet")
   const abortRef = useRef(false)
   const pausedRef = useRef(false)
 
@@ -196,20 +201,22 @@ export default function ManufacturerBgBatchProcessor({
 
       <div style={{
         padding: 14,
-        background: selectedModel === "gemini" ? "#faf5ff" : selectedModel === "birefnet" ? "#eff6ff" : (modelReady ? "#f0fdf4" : "#fffbeb"),
+        background: selectedModel === "bria-rmbg2" ? "#fdf4ff" : selectedModel === "gemini" ? "#faf5ff" : selectedModel === "birefnet" ? "#eff6ff" : (modelReady ? "#f0fdf4" : "#fffbeb"),
         borderRadius: 10,
-        border: `1px solid ${selectedModel === "gemini" ? "#e9d5ff" : selectedModel === "birefnet" ? "#bfdbfe" : (modelReady ? "#bbf7d0" : "#fde68a")}`,
+        border: `1px solid ${selectedModel === "bria-rmbg2" ? "#f5d0fe" : selectedModel === "gemini" ? "#e9d5ff" : selectedModel === "birefnet" ? "#bfdbfe" : (modelReady ? "#bbf7d0" : "#fde68a")}`,
         fontSize: 12,
-        color: selectedModel === "gemini" ? "#701a75" : selectedModel === "birefnet" ? "#1e40af" : (modelReady ? "#166534" : "#92400e"),
+        color: selectedModel === "bria-rmbg2" ? "#86198f" : selectedModel === "gemini" ? "#701a75" : selectedModel === "birefnet" ? "#1e40af" : (modelReady ? "#166534" : "#92400e"),
         marginBottom: 16, lineHeight: 1.5,
       }}>
-        {selectedModel === "gemini"
-          ? "Using Google Gemini AI for premium quality. Photos are sent to the server for processing."
-          : selectedModel === "birefnet"
-            ? "Using Cloud AI (BiRefNet) for cloud processing. Photos are sent to the server."
-            : modelReady
-              ? "Local AI model ready on this PC. Processing runs entirely in your browser."
-              : "Downloading AI model on first use (~170MB, best quality). Cached for future runs."}
+        {selectedModel === "bria-rmbg2"
+          ? "Using BRIA RMBG-2.0 for ultra-high precision cutout matting. Photos are sent to the server for processing."
+          : selectedModel === "gemini"
+            ? "Using Google Gemini AI for premium quality. Photos are sent to the server for processing."
+            : selectedModel === "birefnet"
+              ? "Using Cloud AI (BiRefNet) for cloud processing. Photos are sent to the server."
+              : modelReady
+                ? "Local AI model ready on this PC. Processing runs entirely in your browser."
+                : "Downloading AI model on first use (~170MB, best quality). Cached for future runs."}
         {" "}Each processed photo is saved automatically.
       </div>
 

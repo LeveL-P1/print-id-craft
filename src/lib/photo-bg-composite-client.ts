@@ -22,7 +22,7 @@ import {
   scorePlainBackgroundFromMaskBlobs,
 } from "@/lib/photo-background"
 
-export type BgModelChoice = "gemini" | "isnet" | "birefnet"
+export type BgModelChoice = "gemini" | "isnet" | "birefnet" | "bria-rmbg2"
 
 export const BG_WORK_MAX_DIM = 1024
 export const BG_JPEG_QUALITY = 0.88
@@ -99,14 +99,14 @@ function finalizeCanvasToDataUrl(
 const SERVER_REMOVE_TIMEOUT_MS = 280_000
 
 /**
- * Call the server-side BiRefNet/rembg endpoint.
+ * Call the server-side background removal endpoint.
  * Returns a transparent mask blob.
  */
-async function removeBackgroundWithServerBirefnet(blob: Blob, bgColor: string): Promise<Blob> {
+async function removeBackgroundWithServerModel(blob: Blob, bgColor: string, model: string): Promise<Blob> {
   const form = new FormData()
   form.append("image", blob, "photo.jpg")
   form.append("bgColor", bgColor)
-  form.append("model", "birefnet-portrait")
+  form.append("model", model)
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), SERVER_REMOVE_TIMEOUT_MS)
@@ -203,17 +203,19 @@ async function obtainBestAiResult(
     }
   }
 
-  // ── BiRefNet: transparent mask from server ────────────────────────────
-  if (model === "birefnet" || model === "gemini") {
-    onProgress?.("Trying professional background model…", 18)
+  // ── Server-based mask models (BiRefNet / BRIA) ────────────────────────────
+  if (model === "birefnet" || model === "bria-rmbg2" || model === "gemini") {
+    const targetModel = model === "bria-rmbg2" ? "bria-rmbg2" : "birefnet-portrait"
+    onProgress?.(`Trying professional model (${model === "bria-rmbg2" ? "BRIA" : "BiRefNet"})…`, 18)
     try {
-      const remoteMask = await removeBackgroundWithServerBirefnet(workBlob, bgColor)
+      const remoteMask = await removeBackgroundWithServerModel(workBlob, bgColor, targetModel)
       const remoteFg = await measureForegroundRatioInTransparentBlob(remoteMask)
       if (remoteFg >= MIN_FOREGROUND_RATIO) {
         onProgress?.("Professional model ready", 82)
         return { type: "mask", maskBlob: remoteMask }
       }
-    } catch {
+    } catch (err: unknown) {
+      console.warn(`Server model ${targetModel} failed:`, err)
       /* fall back to local model below */
     }
   }
@@ -244,8 +246,8 @@ export async function processPhotoBackgroundLocal(
   photoUrl: string,
   bgColor: string,
   onProgress?: BgProcessProgress,
-  /** Which AI model to use. Defaults to "gemini". */
-  model: BgModelChoice = "gemini",
+  /** Which AI model to use. Defaults to "birefnet". */
+  model: BgModelChoice = "birefnet",
   forceAi: boolean = false
 ): Promise<{ dataUrl: string; maskUrl: string | null; usedAi: boolean }> {
   onProgress?.("Preparing photo…", 5)

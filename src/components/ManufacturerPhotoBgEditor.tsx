@@ -19,6 +19,11 @@ type Props = {
 
 const MODEL_OPTIONS: { value: BgModelChoice; label: string; desc: string }[] = [
   {
+    value: "bria-rmbg2",
+    label: "✨ BRIA RMBG-2.0",
+    desc: "Ultra precision — best for hair, ponytails, and braids. Requires internet.",
+  },
+  {
     value: "gemini",
     label: "☁️ Google AI (Gemini)",
     desc: "Premium quality — handles hair perfectly. Requires internet.",
@@ -56,7 +61,7 @@ export default function ManufacturerPhotoBgEditor({
   const [error, setError] = useState("")
   const [modelReady, setModelReady] = useState(false)
   const [colorSaved, setColorSaved] = useState(true)
-  const [selectedModel, setSelectedModel] = useState<BgModelChoice>("gemini")
+  const [selectedModel, setSelectedModel] = useState<BgModelChoice>("birefnet")
 
   useEffect(() => {
     preloadBgRemovalModel()

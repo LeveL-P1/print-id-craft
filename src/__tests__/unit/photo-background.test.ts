@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
 import {
   configuredBgRemovalServiceUrl,
   isRetryableBgServiceStatus,
@@ -6,7 +6,9 @@ import {
 import {
   canUseFastRecolorOnly,
   colorDistance,
+  edgeAwareAlphaRefine,
   enhanceForegroundMask,
+  floodFillInteriorHoles,
   isBackgroundLikePixel,
   isHeadHairZonePixel,
   isPlainBackground,
@@ -15,6 +17,7 @@ import {
   markExteriorBackgroundMask,
   matchesSchoolColor,
   parseHexColor,
+  recoverHairByColor,
   repairForegroundMaskHoles,
   rescuePortraitEnvelope,
   scoreRawMaskQuality,
@@ -135,7 +138,7 @@ describe("photo-background hair hole repair", () => {
 
   it("targets the head band for hair repair", () => {
     expect(isHeadHairZonePixel(50, 40, 100, 200)).toBe(true)
-    expect(isHeadHairZonePixel(50, 150, 100, 200)).toBe(false)
+    expect(isHeadHairZonePixel(50, 180, 100, 200)).toBe(false)
   })
 
   it("scores masks with fewer person-zone holes higher", () => {
@@ -190,5 +193,131 @@ describe("bg-removal-service helpers", () => {
     expect(isRetryableBgServiceStatus(503)).toBe(true)
     expect(isRetryableBgServiceStatus(504)).toBe(true)
     expect(isRetryableBgServiceStatus(400)).toBe(false)
+  })
+})
+
+describe("new background enhancements", () => {
+  it("covers extended head/hair zone for braids/venis", () => {
+    expect(isHeadHairZonePixel(80, 160, 100, 200)).toBe(true)
+  })
+
+  it("covers wider shirt/torso zone in protected core", () => {
+    expect(isProtectedPortraitCorePixel(10, 100, 100, 200)).toBe(true)
+  })
+})
+
+describe("phone-quality cutout optimizations", () => {
+  // Helper to make fake ImageData
+  const makeImageData = (w: number, h: number, fill: (x: number, y: number) => [number, number, number, number]) => {
+    const data = new Uint8ClampedArray(w * h * 4)
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const [r, g, b, a] = fill(x, y)
+        const p = (y * w + x) * 4
+        data[p] = r; data[p+1] = g; data[p+2] = b; data[p+3] = a
+      }
+    }
+    return { data, width: w, height: h } as ImageData
+  }
+
+  it("floodFillInteriorHoles fills holes that cannot reach the border", () => {
+    // 10×10 image: solid foreground ring with a transparent hole in the centre
+    const original = makeImageData(10, 10, () => [100, 50, 50, 255])
+    const mask = makeImageData(10, 10, (x, y) => {
+      // Border: transparent background
+      if (x === 0 || y === 0 || x === 9 || y === 9) return [0, 0, 0, 0]
+      // Inner ring (1-pixel thick): solid foreground
+      if (x === 1 || y === 1 || x === 8 || y === 8) return [100, 50, 50, 255]
+      // Centre 6×6: transparent hole (interior)
+      return [0, 0, 0, 0]
+    })
+
+    const result = floodFillInteriorHoles(original, mask)
+    // Centre pixel (5,5) was transparent but is an interior hole → should now be filled
+    const centreAlpha = result.data[(5 * 10 + 5) * 4 + 3]
+    expect(centreAlpha).toBe(255)
+
+    // Border pixel (0,0) should remain transparent (exterior)
+    const borderAlpha = result.data[3]
+    expect(borderAlpha).toBe(0)
+  })
+
+  it("floodFillInteriorHoles does NOT fill holes connected to the border", () => {
+    // 10×10 image: foreground with a gap in the left wall so the hole reaches the border
+    const original = makeImageData(10, 10, () => [100, 50, 50, 255])
+    const mask = makeImageData(10, 10, (x, y) => {
+      if (x === 0 || y === 0 || x === 9 || y === 9) return [0, 0, 0, 0]
+      // Left wall has a gap at y=5 (hole connects to border through x=0,y=5 → x=1,y=5)
+      if (x === 1 && y === 5) return [0, 0, 0, 0]  // gap!
+      if (x === 1 || y === 1 || x === 8 || y === 8) return [100, 50, 50, 255]
+      return [0, 0, 0, 0]  // interior
+    })
+
+    const result = floodFillInteriorHoles(original, mask)
+    // Centre should still be transparent because the hole connects to border via the gap
+    const centreAlpha = result.data[(5 * 10 + 5) * 4 + 3]
+    expect(centreAlpha).toBe(0)
+  })
+
+  it("edgeAwareAlphaRefine boosts alpha for pixels similar to high-alpha neighbours", () => {
+    // 10×10 image: uniform dark colour, mask has a weak pixel surrounded by strong ones
+    const original = makeImageData(10, 10, () => [40, 30, 20, 255]) // all same dark colour
+    const mask = makeImageData(10, 10, (x, y) => {
+      if (x === 5 && y === 5) return [40, 30, 20, 60]  // weak alpha in centre
+      return [40, 30, 20, 200]  // strong alpha everywhere else
+    })
+
+    const result = edgeAwareAlphaRefine(original, mask)
+    const centreAlpha = result.data[(5 * 10 + 5) * 4 + 3]
+    // Since all neighbours have alpha 200 and same colour, the centre should be boosted
+    expect(centreAlpha).toBeGreaterThan(60)
+  })
+
+  it("recoverHairByColor recovers dark pixels adjacent to foreground in head zone", () => {
+    // 20×20 image: light grey wall with a dark hair pixel at (10, 5) that has low mask alpha
+    const original = makeImageData(20, 20, (x, y) => {
+      // Wall colour: light grey (this becomes the edge background)
+      if (x <= 1 || x >= 18 || y <= 1) return [220, 220, 220, 255]
+      // Dark hair pixel
+      if (x === 10 && y === 5) return [30, 20, 15, 255]
+      // Face/foreground
+      return [180, 140, 120, 255]
+    })
+
+    const mask = makeImageData(20, 20, (x, y) => {
+      // The dark pixel is missed by the model (low alpha)
+      if (x === 10 && y === 5) return [30, 20, 15, 10]
+      // Adjacent pixel is solid foreground
+      if (x === 10 && y === 6) return [180, 140, 120, 255]
+      // Everything else: some foreground
+      if (x > 5 && x < 15 && y > 2 && y < 15) return [180, 140, 120, 200]
+      return [220, 220, 220, 0]  // background
+    })
+
+    const result = recoverHairByColor(original, mask)
+    const hairAlpha = result.data[(5 * 20 + 10) * 4 + 3]
+    // Dark pixel at (10,5) should be recovered since it's dark, far from wall, and has fg neighbour
+    expect(hairAlpha).toBe(255)
+  })
+
+  it("recoverHairByColor does NOT recover light pixels (not hair)", () => {
+    const original = makeImageData(20, 20, (x, y) => {
+      if (x <= 1 || x >= 18 || y <= 1) return [220, 220, 220, 255]
+      // Light pixel — not hair
+      if (x === 10 && y === 5) return [200, 190, 180, 255]
+      return [180, 140, 120, 255]
+    })
+
+    const mask = makeImageData(20, 20, (x, y) => {
+      if (x === 10 && y === 5) return [200, 190, 180, 10]  // low alpha
+      if (x === 10 && y === 6) return [180, 140, 120, 255]
+      if (x > 5 && x < 15 && y > 2 && y < 15) return [180, 140, 120, 200]
+      return [220, 220, 220, 0]
+    })
+
+    const result = recoverHairByColor(original, mask)
+    const pixelAlpha = result.data[(5 * 20 + 10) * 4 + 3]
+    // Light pixel should NOT be recovered (brightness > 100)
+    expect(pixelAlpha).toBe(10)
   })
 })

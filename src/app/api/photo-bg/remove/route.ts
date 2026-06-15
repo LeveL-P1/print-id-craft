@@ -53,7 +53,7 @@ async function readRequestImage(req: Request) {
   }
 }
 
-function buildRemoveForm(image: Awaited<ReturnType<typeof readRequestImage>>) {
+function buildRemoveForm(image: Awaited<ReturnType<typeof readRequestImage>>, model?: string) {
   const form = new FormData()
   form.append(
     "image",
@@ -61,7 +61,7 @@ function buildRemoveForm(image: Awaited<ReturnType<typeof readRequestImage>>) {
     image.fileName
   )
   form.append("bgColor", image.bgColor)
-  form.append("model", process.env.BG_REMOVAL_MODEL || "birefnet-portrait")
+  form.append("model", model || image.model || process.env.BG_REMOVAL_MODEL || "birefnet-portrait")
   return form
 }
 
@@ -101,7 +101,7 @@ export async function POST(req: Request) {
           try {
             const { response } = await removeBackgroundViaService(
               serviceUrl,
-              () => buildRemoveForm(image)
+              () => buildRemoveForm(image, "birefnet-portrait")
             )
             if (response.ok) {
               const resultType = response.headers.get("content-type") || "image/png"
@@ -133,9 +133,15 @@ export async function POST(req: Request) {
       }
     }
 
-    // ─── BiRefNet / rembg service path ───────────────────────
-    if (requestedModel === "birefnet-portrait" || requestedModel === "birefnet") {
-      const serviceUrl = configuredBgRemovalServiceUrl()
+    // ─── BiRefNet / BRIA / rembg service path ───────────────────────
+    if (
+      requestedModel === "birefnet-portrait" ||
+      requestedModel === "birefnet" ||
+      requestedModel === "bria-rmbg2"
+    ) {
+      const serviceUrl = (requestedModel === "bria-rmbg2" && process.env.BRIA_REMOVAL_URL)
+        ? process.env.BRIA_REMOVAL_URL.replace(/\/+$/, "")
+        : configuredBgRemovalServiceUrl()
       if (!serviceUrl) {
         return NextResponse.json(
           { error: "Professional background service is not configured" },
@@ -145,7 +151,7 @@ export async function POST(req: Request) {
 
       const { response, wokeService } = await removeBackgroundViaService(
         serviceUrl,
-        () => buildRemoveForm(image)
+        () => buildRemoveForm(image, requestedModel)
       )
 
       if (!response.ok) {
@@ -182,7 +188,7 @@ export async function POST(req: Request) {
 
     // ─── Unknown model → 400 ────────────────────────────────────────────
     return NextResponse.json(
-      { error: `Unknown model: ${requestedModel}. Use "gemini", "birefnet-portrait", or process locally with ISNet.` },
+      { error: `Unknown model: ${requestedModel}. Use "gemini", "birefnet-portrait", "bria-rmbg2", or process locally with ISNet.` },
       { status: 400 }
     )
   } catch (error: unknown) {

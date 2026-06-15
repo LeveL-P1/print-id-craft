@@ -205,7 +205,7 @@ export function isSubjectInteriorPixel(x: number, y: number, w: number, h: numbe
 export function isHeadHairZonePixel(x: number, y: number, w: number, h: number): boolean {
   const xRatio = x / w
   const yRatio = y / h
-  return xRatio > 0.1 && xRatio < 0.9 && yRatio > 0.04 && yRatio < 0.58
+  return xRatio > 0.05 && xRatio < 0.95 && yRatio > 0.02 && yRatio < 0.85
 }
 
 export type MaskHoleRepairOptions = {
@@ -431,11 +431,13 @@ export async function repairTransparentBlobHoles(
   return imageDataToPngBlob(repaired)
 }
 
-/** Alpha below this is treated as background when compositing. */
-export const BG_ALPHA_CUTOFF = 48
+/** Alpha below this is treated as background when compositing.
+ *  Lowered from 48→20 to preserve semi-transparent hair strands during
+ *  the "cutout sticker" compositing step. */
+export const BG_ALPHA_CUTOFF = 20
 
 const DEFAULT_MASK_ENHANCE: MaskHoleRepairOptions = {
-  iterations: 3,
+  iterations: 4,
   holeAlphaMax: 80,
   solidNeighborAlpha: 108,
   minSolidNeighbors: 3,
@@ -553,12 +555,333 @@ export function closeMaskAlphaGaps(original: ImageData, mask: ImageData): ImageD
   return createImageData(out, w, h)
 }
 
-/** Full mask prep: hole fill → alpha close → original RGB alignment. */
+function getEdgeColorFromImageData(original: ImageData): { r: number; g: number; b: number } {
+  const w = original.width
+  const h = original.height
+  const data = original.data
+  
+  let sumR = 0, sumG = 0, sumB = 0, count = 0
+  const samplePixel = (x: number, y: number) => {
+    const idx = (y * w + x) * 4
+    sumR += data[idx]
+    sumG += data[idx + 1]
+    sumB += data[idx + 2]
+    count++
+  }
+  
+  const topRows = Math.max(5, Math.floor(h * 0.08))
+  for (let y = 0; y < topRows; y++) {
+    for (let x = 0; x < w; x += 4) {
+      samplePixel(x, y)
+    }
+  }
+  
+  const sideCols = Math.max(5, Math.floor(w * 0.08))
+  for (let y = topRows; y < h * 0.6; y += 4) {
+    for (let x = 0; x < sideCols; x++) {
+      samplePixel(x, y)
+    }
+    for (let x = w - sideCols; x < w; x++) {
+      samplePixel(x, y)
+    }
+  }
+  
+  if (count === 0) return { r: 240, g: 240, b: 240 }
+  return {
+    r: Math.round(sumR / count),
+    g: Math.round(sumG / count),
+    b: Math.round(sumB / count),
+  }
+}
+
+export function protectClothingInMask(original: ImageData, mask: ImageData): ImageData {
+  const w = mask.width
+  const h = mask.height
+  const out = new Uint8ClampedArray(mask.data)
+  const edgeBg = getEdgeColorFromImageData(original)
+  
+  for (let y = Math.floor(h * 0.45); y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const xRatio = x / w
+      if (xRatio < 0.08 || xRatio > 0.92) continue
+      
+      const idx = (y * w + x) * 4
+      if (out[idx + 3] >= 180) continue
+      
+      const r = original.data[idx]
+      const g = original.data[idx + 1]
+      const b = original.data[idx + 2]
+      
+      const dist = colorDistance({ r, g, b }, edgeBg)
+      if (dist > 25) {
+        out[idx] = r
+        out[idx + 1] = g
+        out[idx + 2] = b
+        out[idx + 3] = 255
+      }
+    }
+  }
+  
+  return createImageData(out, w, h)
+}
+
+/**
+ * Flood-fill from all 4 image borders to find true exterior background.
+ * Any transparent pixel that CANNOT be reached from the border through other
+ * transparent pixels is an interior hole → force it to foreground (255 alpha
+ * with original RGB).  This guarantees zero "donut holes" inside the person.
+ */
+export function floodFillInteriorHoles(original: ImageData, mask: ImageData): ImageData {
+  const w = mask.width
+  const h = mask.height
+  const total = w * h
+  const out = new Uint8ClampedArray(mask.data)
+
+  // Build binary map: 1 = background-ish (alpha < threshold)
+  const BG_THRESH = 64
+  const isBg = new Uint8Array(total)
+  for (let i = 0; i < total; i++) {
+    isBg[i] = out[i * 4 + 3] < BG_THRESH ? 1 : 0
+  }
+
+  // Flood fill from all border pixels that are background
+  const visited = new Uint8Array(total)
+  const queue = new Int32Array(total)
+  let head = 0, tail = 0
+
+  const seed = (idx: number) => {
+    if (isBg[idx] && !visited[idx]) {
+      visited[idx] = 1
+      queue[tail++] = idx
+    }
+  }
+
+  // Seed all border pixels
+  for (let x = 0; x < w; x++) {
+    seed(x)                    // top row
+    seed((h - 1) * w + x)     // bottom row
+  }
+  for (let y = 1; y < h - 1; y++) {
+    seed(y * w)                // left col
+    seed(y * w + (w - 1))     // right col
+  }
+
+  // BFS — 8-connected
+  while (head < tail) {
+    const idx = queue[head++]
+    const x = idx % w
+    const y = (idx / w) | 0
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue
+        const nx = x + dx, ny = y + dy
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
+        const ni = ny * w + nx
+        if (!visited[ni] && isBg[ni]) {
+          visited[ni] = 1
+          queue[tail++] = ni
+        }
+      }
+    }
+  }
+
+  // Any background pixel NOT reached = interior hole → fill with original
+  let filled = 0
+  for (let i = 0; i < total; i++) {
+    if (isBg[i] && !visited[i]) {
+      const p = i * 4
+      out[p] = original.data[p]
+      out[p + 1] = original.data[p + 1]
+      out[p + 2] = original.data[p + 2]
+      out[p + 3] = 255
+      filled++
+    }
+  }
+
+  return createImageData(out, w, h)
+}
+
+/**
+ * Edge-aware alpha refinement.  For each pixel with intermediate alpha,
+ * look at a small window in the ORIGINAL image.  Find neighbours with
+ * similar colour and average their mask alphas.  Result: the mask smooths
+ * out in uniform regions (inside solid hair) but stays sharp at real colour
+ * edges (hair against wall).
+ *
+ * This is a simplified guided-filter approach that produces the smooth,
+ * natural alpha transitions that phone cutouts have.
+ */
+export function edgeAwareAlphaRefine(original: ImageData, mask: ImageData): ImageData {
+  const w = mask.width
+  const h = mask.height
+  const out = new Uint8ClampedArray(mask.data)
+  const orig = original.data
+  const RADIUS = 2                // 5×5 window
+  const COLOR_SIM_THRESH = 35     // max RGB distance to count as "similar colour"
+  const ALPHA_LOW = 24            // only refine pixels with alpha in this range
+  const ALPHA_HIGH = 220
+
+  for (let y = RADIUS; y < h - RADIUS; y++) {
+    for (let x = RADIUS; x < w - RADIUS; x++) {
+      const idx = y * w + x
+      const p = idx * 4
+      const sa = out[p + 3]
+      if (sa < ALPHA_LOW || sa >= ALPHA_HIGH) continue
+
+      // Centre pixel colour in original
+      const cr = orig[p], cg = orig[p + 1], cb = orig[p + 2]
+
+      // Gather alpha values from colour-similar neighbours
+      let alphaSum = 0, count = 0
+      for (let dy = -RADIUS; dy <= RADIUS; dy++) {
+        for (let dx = -RADIUS; dx <= RADIUS; dx++) {
+          const ni = (y + dy) * w + (x + dx)
+          const np = ni * 4
+          const dr = Math.abs(orig[np] - cr)
+          const dg = Math.abs(orig[np + 1] - cg)
+          const db = Math.abs(orig[np + 2] - cb)
+          const dist = dr + dg + db  // L1 distance, fast
+          if (dist <= COLOR_SIM_THRESH) {
+            alphaSum += out[np + 3]
+            count++
+          }
+        }
+      }
+
+      if (count < 3) continue   // not enough similar-colour neighbours
+
+      const avgAlpha = alphaSum / count
+      // Bias toward the higher alpha (foreground-friendly)
+      const refined = Math.round(Math.max(sa, avgAlpha * 0.85 + sa * 0.15))
+      out[p + 3] = Math.min(255, refined) as number
+      // If we boosted significantly, also restore original RGB
+      if (refined > sa + 20) {
+        out[p] = orig[p]
+        out[p + 1] = orig[p + 1]
+        out[p + 2] = orig[p + 2]
+      }
+    }
+  }
+
+  return createImageData(out, w, h)
+}
+
+/**
+ * Recover hair pixels the AI model missed.  Many Indian school hairstyles
+ * (black/dark-brown hair on grey/white wall) cause the model to confuse
+ * dark hair strands with shadows.  This function:
+ * 1. Builds a confirmed-background colour model from BOTH edge pixels AND
+ *    confirmed-background pixels in the mask (alpha < 20).
+ * 2. Runs 3 iterative passes in the head zone.  Each pass recovers dark
+ *    pixels adjacent to existing foreground.  Recovered pixels then become
+ *    "foreground neighbours" for the next pass, allowing the recovery to
+ *    propagate along long braids, ponytails, and venis.
+ */
+export function recoverHairByColor(original: ImageData, mask: ImageData): ImageData {
+  const w = mask.width
+  const h = mask.height
+  const out = new Uint8ClampedArray(mask.data)
+  const orig = original.data
+
+  // --- Build a confirmed-background colour model ---
+  // Sample 1: edge pixels (always background in a portrait)
+  const edgeBg = getEdgeColorFromImageData(original)
+
+  // Sample 2: confirmed bg pixels from the mask (alpha < 20) within edge region
+  let bgR = 0, bgG = 0, bgB = 0, bgCount = 0
+  const sampleBand = Math.max(8, Math.floor(Math.min(w, h) * 0.12))
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      // Only sample from the outer band (likely background)
+      const isEdgeBand = x < sampleBand || x >= w - sampleBand ||
+                         y < sampleBand || y >= h - sampleBand
+      if (!isEdgeBand) continue
+      const idx = (y * w + x) * 4
+      if (out[idx + 3] >= 20) continue  // not confirmed background in mask
+      bgR += orig[idx]
+      bgG += orig[idx + 1]
+      bgB += orig[idx + 2]
+      bgCount++
+    }
+  }
+
+  // Use confirmed-bg model if we have enough samples, otherwise fall back to edge
+  const wallColor = bgCount > 50
+    ? { r: Math.round(bgR / bgCount), g: Math.round(bgG / bgCount), b: Math.round(bgB / bgCount) }
+    : edgeBg
+
+  // --- Multi-pass iterative recovery ---
+  const yEnd = Math.floor(h * 0.65)  // extended to 65% to catch longer hair
+  const xStart = Math.floor(w * 0.04)
+  const xEnd = Math.floor(w * 0.96)
+
+  const DARK_THRESH = 110       // pixel brightness below this = "dark" (slightly raised)
+  const BG_DIST_MIN = 35        // min colour distance from wall to be "not wall"
+  const ALPHA_CUTOFF = 80       // only recover pixels with alpha below this
+  const NEIGHBOR_MIN_ALPHA = 70 // lowered to allow chaining from recently recovered pixels
+  const PASSES = 3              // 3 iterative passes for braid/ponytail propagation
+
+  for (let pass = 0; pass < PASSES; pass++) {
+    let recovered = 0
+    for (let y = 0; y < yEnd; y++) {
+      for (let x = xStart; x < xEnd; x++) {
+        const idx = y * w + x
+        const p = idx * 4
+        if (out[p + 3] >= ALPHA_CUTOFF) continue   // already foreground
+
+        const r = orig[p], g = orig[p + 1], b = orig[p + 2]
+        const brightness = (r + g + b) / 3
+
+        if (brightness > DARK_THRESH) continue
+
+        const wallDist = colorDistance({ r, g, b }, wallColor)
+        if (wallDist < BG_DIST_MIN) continue
+
+        // Check if at least 1 neighbour (cardinal + diagonal) is foreground
+        let hasFgNeighbor = false
+        for (const [dx, dy] of [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]] as const) {
+          const nx = x + dx, ny = y + dy
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
+          if (out[(ny * w + nx) * 4 + 3] >= NEIGHBOR_MIN_ALPHA) {
+            hasFgNeighbor = true
+            break
+          }
+        }
+        if (!hasFgNeighbor) continue
+
+        out[p] = r
+        out[p + 1] = g
+        out[p + 2] = b
+        out[p + 3] = 255
+        recovered++
+      }
+    }
+    if (recovered === 0) break  // no more pixels to recover, stop early
+  }
+
+  return createImageData(out, w, h)
+}
+
+/** Full mask prep pipeline for phone-quality cutouts:
+ *  1. Iterative hole fill (4 passes)
+ *  2. Alpha gap closing (×2 for 2px coverage)
+ *  3. Clothing protection (white-shirt-safe)
+ *  4. Portrait envelope rescue (shoulder/torso fill)
+ *  5. Hair colour recovery (dark hair on light wall)
+ *  6. Connected-component interior fill (zero donut holes)
+ *  7. Edge-aware alpha refinement (smooth transitions)
+ *  8. Original RGB alignment
+ */
 export function enhanceForegroundMask(original: ImageData, mask: ImageData): ImageData {
   const repaired = repairForegroundMaskHoles(original, mask, DEFAULT_MASK_ENHANCE)
-  const closed = closeMaskAlphaGaps(original, repaired)
-  const rescued = rescuePortraitEnvelope(original, closed)
-  return alignMaskWithOriginalColors(original, rescued)
+  const closed1 = closeMaskAlphaGaps(original, repaired)
+  const closed2 = closeMaskAlphaGaps(original, closed1)   // 2nd pass: fill wider hair gaps
+  const clothingProtected = protectClothingInMask(original, closed2)
+  const rescued = rescuePortraitEnvelope(original, clothingProtected)
+  const hairRecovered = recoverHairByColor(original, rescued)
+  const interiorFilled = floodFillInteriorHoles(original, hairRecovered)
+  const edgeRefined = edgeAwareAlphaRefine(original, interiorFilled)
+  return alignMaskWithOriginalColors(original, edgeRefined)
 }
 
 export function isPersonZonePixel(x: number, y: number, w: number, h: number): boolean {
@@ -570,16 +893,16 @@ export function isProtectedPortraitCorePixel(x: number, y: number, w: number, h:
   const yRatio = y / h
 
   const faceAndNeckCore =
-    xRatio > 0.26 &&
-    xRatio < 0.74 &&
-    yRatio > 0.12 &&
-    yRatio < 0.56
+    xRatio > 0.22 &&
+    xRatio < 0.78 &&
+    yRatio > 0.10 &&
+    yRatio < 0.58
 
   const shirtAndHandsCore =
-    xRatio > 0.16 &&
-    xRatio < 0.84 &&
-    yRatio >= 0.48 &&
-    yRatio < 0.98
+    xRatio > 0.08 &&
+    xRatio < 0.92 &&
+    yRatio >= 0.42 &&
+    yRatio < 0.99
 
   return faceAndNeckCore || shirtAndHandsCore
 }
@@ -650,10 +973,17 @@ export function removeUpperNeutralBackgroundIslands(
   ctx: CanvasRenderingContext2D,
   w: number,
   h: number,
-  targetHex: string
+  targetHex: string,
+  original: ImageData
 ): void {
   const target = parseHexColor(targetHex)
   if (!target) return
+
+  const edgeBg = getEdgeColorFromImageData(original)
+  const maxEdge = Math.max(edgeBg.r, edgeBg.g, edgeBg.b)
+  const minEdge = Math.min(edgeBg.r, edgeBg.g, edgeBg.b)
+  const isOriginalBgNeutral = maxEdge > 160 && maxEdge - minEdge < 55
+  if (!isOriginalBgNeutral) return
 
   const imageData = ctx.getImageData(0, 0, w, h)
   const data = imageData.data
@@ -677,6 +1007,12 @@ export function removeUpperNeutralBackgroundIslands(
       const g = data[p + 1]
       const b = data[p + 2]
       if (!isNeutralWall(r, g, b)) continue
+
+      const origR = original.data[p]
+      const origG = original.data[p + 1]
+      const origB = original.data[p + 2]
+      const distToOrigBg = colorDistance({ r: origR, g: origG, b: origB }, edgeBg)
+      if (distToOrigBg > 28) continue
 
       data[p] = target.r
       data[p + 1] = target.g
@@ -744,6 +1080,7 @@ export function compositeMaskImageDataOntoPlainColor(
   const out = new Uint8ClampedArray(w * h * 4)
   const { r: tr, g: tg, b: tb } = target
 
+  // --- Pass 1: Alpha composite (cutout sticker onto colour) ---
   for (let idx = 0; idx < w * h; idx++) {
     const p = idx * 4
     const x = idx % w
@@ -759,7 +1096,10 @@ export function compositeMaskImageDataOntoPlainColor(
     }
 
     const inPerson = isPersonZonePixel(x, y, w, h)
-    const preserveThreshold = inPerson ? 88 : 124
+    // Lower thresholds: treat more pixels as fully opaque original.
+    // Person zone: 56 (was 88) — aggressively preserve hair/face/shirt
+    // Outer zone: 96 (was 124) — still preserve clear foreground
+    const preserveThreshold = inPerson ? 56 : 96
 
     if (sa >= preserveThreshold) {
       out[p] = original.data[p]
@@ -769,7 +1109,9 @@ export function compositeMaskImageDataOntoPlainColor(
       continue
     }
 
-    const a = inPerson ? Math.max(sa / 255, 0.85) : sa / 255
+    // In person zone, strongly favour original photo (0.92 min alpha, was 0.85).
+    // This prevents the cutout from looking "ghostly" around hair edges.
+    const a = inPerson ? Math.max(sa / 255, 0.92) : sa / 255
     const fr = original.data[p]
     const fg = original.data[p + 1]
     const fb = original.data[p + 2]
@@ -779,7 +1121,50 @@ export function compositeMaskImageDataOntoPlainColor(
     out[p + 3] = 255
   }
 
-  return createImageData(out, w, h)
+  // --- Pass 2: Edge feathering for smooth cutout transitions ---
+  // At the boundary between person and background, apply a 1px soft blend
+  // so edges look phone-quality instead of pixelated.
+  const feathered = new Uint8ClampedArray(out)
+  for (let idx = 0; idx < w * h; idx++) {
+    const x = idx % w
+    const y = (idx / w) | 0
+    if (x === 0 || y === 0 || x >= w - 1 || y >= h - 1) continue
+
+    const p = idx * 4
+    const sa = mask.data[p + 3]
+    // Only feather pixels at the edge (alpha between BG_ALPHA_CUTOFF and 96)
+    if (sa < BG_ALPHA_CUTOFF || sa >= 96) continue
+
+    // Count how many cardinal neighbours are pure background
+    let bgNeighbors = 0
+    let fgNeighbors = 0
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+      const na = mask.data[((y + dy) * w + (x + dx)) * 4 + 3]
+      if (na < BG_ALPHA_CUTOFF) bgNeighbors++
+      else if (na >= 96) fgNeighbors++
+    }
+
+    // Only feather boundary pixels (next to both bg and fg)
+    if (bgNeighbors === 0 || fgNeighbors === 0) continue
+
+    // Soft blend: average the composited colour with neighbours
+    let rSum = 0, gSum = 0, bSum = 0, count = 0
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const np = ((y + dy) * w + (x + dx)) * 4
+        rSum += out[np]
+        gSum += out[np + 1]
+        bSum += out[np + 2]
+        count++
+      }
+    }
+    feathered[p] = Math.round(rSum / count)
+    feathered[p + 1] = Math.round(gSum / count)
+    feathered[p + 2] = Math.round(bSum / count)
+    feathered[p + 3] = 255
+  }
+
+  return createImageData(feathered, w, h)
 }
 
 export function scoreRawMaskQuality(original: ImageData, mask: ImageData): number {
@@ -869,7 +1254,7 @@ export function finalizePlainBackgroundFromMask(
 
   ctx.putImageData(composited, 0, 0)
   repairCompositedSubjectHoles(ctx, composited.width, composited.height, original, bgColor)
-  removeUpperNeutralBackgroundIslands(ctx, composited.width, composited.height, bgColor)
+  removeUpperNeutralBackgroundIslands(ctx, composited.width, composited.height, bgColor, original)
   cleanupBackgroundArtifacts(ctx, composited.width, composited.height, bgColor)
   enforcePlainBackgroundEdges(ctx, composited.width, composited.height, bgColor)
 
@@ -878,7 +1263,7 @@ export function finalizePlainBackgroundFromMask(
     cleanupBackgroundArtifacts(ctx, composited.width, composited.height, bgColor)
     enforcePlainBackgroundEdges(ctx, composited.width, composited.height, bgColor)
     repairCompositedSubjectHoles(ctx, composited.width, composited.height, original, bgColor)
-    removeUpperNeutralBackgroundIslands(ctx, composited.width, composited.height, bgColor)
+    removeUpperNeutralBackgroundIslands(ctx, composited.width, composited.height, bgColor, original)
     quality = scorePlainBackgroundQuality(ctx, composited.width, composited.height, bgColor)
   }
 
@@ -948,7 +1333,11 @@ export function cleanupBackgroundArtifacts(
     return isBackgroundLikePixel(r, g, b, target, isSubjectInteriorPixel(x, y, w, h))
   }
 
-  const isProtectedSubject = (r: number, g: number, b: number) => {
+  const isProtectedSubject = (idx: number, r: number, g: number, b: number) => {
+    const x = idx % w
+    const y = (idx / w) | 0
+    if (isProtectedPortraitCorePixel(x, y, w, h)) return true
+
     if (g > r + 12 && g > b + 12 && g > 60) return true
     if (r > 95 && g > 50 && b > 35 && r >= g - 15 && r > b + 8) return true
     if (r < 90 && g < 90 && b < 90) return true
@@ -967,7 +1356,7 @@ export function cleanupBackgroundArtifacts(
     const r = data[i]
     const g = data[i + 1]
     const b = data[i + 2]
-    if (isProtectedSubject(r, g, b)) {
+    if (isProtectedSubject(idx, r, g, b)) {
       visited[idx] = 1
       return
     }
@@ -1005,7 +1394,7 @@ export function cleanupBackgroundArtifacts(
       const r = data[i]
       const g = data[i + 1]
       const b = data[i + 2]
-      if (isProtectedSubject(r, g, b)) {
+      if (isProtectedSubject(n, r, g, b)) {
         visited[n] = 1
         continue
       }
