@@ -3,10 +3,6 @@ import {
   configuredBgRemovalServiceUrl,
   removeBackgroundViaService,
 } from "@/lib/bg-removal-service"
-import {
-  isGeminiConfigured,
-  removeBackgroundWithGemini,
-} from "@/lib/gemini-bg-removal"
 
 export const runtime = "nodejs"
 export const maxDuration = 300
@@ -37,7 +33,7 @@ async function readRequestImage(req: Request) {
       contentType: file.type || "image/jpeg",
       fileName: file.name || "photo.jpg",
       bgColor: String(form.get("bgColor") || "#FFFFFF"),
-      model: String(form.get("model") || "gemini"),
+      model: String(form.get("model") || "birefnet"),
     }
   }
 
@@ -49,7 +45,7 @@ async function readRequestImage(req: Request) {
     contentType: parsed.contentType,
     fileName: "photo.jpg",
     bgColor: String(body?.bgColor || "#FFFFFF"),
-    model: String(body?.model || "gemini"),
+    model: String(body?.model || "birefnet"),
   }
 }
 
@@ -70,70 +66,7 @@ export async function POST(req: Request) {
     const image = await readRequestImage(req)
     const requestedModel = image.model
 
-    // ─── Gemini path ────────────────────────────────────────────────────
-    if (requestedModel === "gemini" || requestedModel === "google") {
-      if (!isGeminiConfigured()) {
-        return NextResponse.json(
-          { error: "Google AI is not configured — set GEMINI_API_KEY in .env" },
-          { status: 503 }
-        )
-      }
-
-      try {
-        const result = await removeBackgroundWithGemini(
-          image.buffer,
-          image.contentType,
-          image.bgColor
-        )
-        return new NextResponse(new Uint8Array(result.imageBuffer), {
-          headers: {
-            "content-type": result.mimeType,
-            "cache-control": "no-store",
-            "x-bg-removal-model": "gemini",
-          },
-        })
-      } catch (geminiErr) {
-        console.error("[photo-bg/remove] Gemini failed:", geminiErr)
-        // Fall through to birefnet if available
-        const serviceUrl = configuredBgRemovalServiceUrl()
-        if (serviceUrl) {
-          console.log("[photo-bg/remove] Falling back to BiRefNet service...")
-          try {
-            const { response } = await removeBackgroundViaService(
-              serviceUrl,
-              () => buildRemoveForm(image)
-            )
-            if (response.ok) {
-              const resultType = response.headers.get("content-type") || "image/png"
-              if (resultType.includes("application/json")) {
-                const json = await response.json()
-                return NextResponse.json(json)
-              }
-              const result = await response.arrayBuffer()
-              return new NextResponse(result, {
-                headers: {
-                  "content-type": resultType,
-                  "cache-control": "no-store",
-                  "x-bg-removal-model": "birefnet-fallback",
-                },
-              })
-            }
-          } catch {
-            /* fall through to error */
-          }
-        }
-        return NextResponse.json(
-          {
-            error: geminiErr instanceof Error
-              ? geminiErr.message
-              : "Google AI background removal failed",
-          },
-          { status: 500 }
-        )
-      }
-    }
-
-    // ─── BiRefNet / rembg service path (existing) ───────────────────────
+    // ─── BiRefNet / rembg service path ───────────────────────
     if (requestedModel === "birefnet-portrait" || requestedModel === "birefnet") {
       const serviceUrl = configuredBgRemovalServiceUrl()
       if (!serviceUrl) {
@@ -182,7 +115,7 @@ export async function POST(req: Request) {
 
     // ─── Unknown model → 400 ────────────────────────────────────────────
     return NextResponse.json(
-      { error: `Unknown model: ${requestedModel}. Use "gemini", "birefnet-portrait", or process locally with ISNet.` },
+      { error: `Unknown model: ${requestedModel}. Use "birefnet", or process locally with ISNet.` },
       { status: 400 }
     )
   } catch (error: unknown) {

@@ -26,14 +26,14 @@ type Props = {
 
 const MODEL_OPTIONS: { value: BgModelChoice; label: string; desc: string }[] = [
   {
-    value: "gemini",
-    label: "☁️ Google AI",
-    desc: "Best quality — handles hair perfectly",
+    value: "birefnet",
+    label: "☁️ Cloud AI (BiRefNet)",
+    desc: "Best quality — handles hair perfectly. Requires internet.",
   },
   {
     value: "isnet",
     label: "💻 Local ISNet",
-    desc: "Runs on this PC, works offline",
+    desc: "Runs on this PC. First use downloads ~170MB. Works offline.",
   },
 ]
 
@@ -56,7 +56,7 @@ export default function ManufacturerBgBatchProcessor({
   const [failed, setFailed] = useState(0)
   const [errors, setErrors] = useState<Array<{ serialNumber: string; error: string }>>([])
   const [modelReady, setModelReady] = useState(false)
-  const [selectedModel, setSelectedModel] = useState<BgModelChoice>("gemini")
+  const [selectedModel, setSelectedModel] = useState<BgModelChoice>("birefnet")
   const abortRef = useRef(false)
   const pausedRef = useRef(false)
 
@@ -75,7 +75,8 @@ export default function ManufacturerBgBatchProcessor({
           setProgressMsg(msg)
           setItemProgress(pct)
         },
-        selectedModel
+        selectedModel,
+        true
       )
       const file = await prepareStudentPhotoForUpload(dataUrl, {
         fileName: `${student.id}.jpg`,
