@@ -2,7 +2,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react"
 import {
   processSubmitPhotoBackground,
-  preloadSubmitBgService,
   SUBMIT_BG_JPEG_QUALITY,
   SUBMIT_BG_WORK_MAX_DIM,
 } from "@/lib/submit-photo-bg"
@@ -21,8 +20,8 @@ type Props = {
 
 const LIVE_STEPS = [
   { id: "prepare", label: "Preparing photo", match: /prepar/i },
-  { id: "service", label: "Connecting to rembg", match: /send|service|connect|rembg|waking/i },
-  { id: "clean", label: "Removing background", match: /remov|clean|background|rembg/i },
+  { id: "service", label: "Connecting to Remove.bg", match: /send|service|connect|remove\.bg/i },
+  { id: "clean", label: "Removing background", match: /remov|clean|background|remove\.bg/i },
   { id: "color", label: "Applying colour", match: /colour|color|apply|background updated|done|complete|finish|preview/i },
 ] as const
 
@@ -45,10 +44,10 @@ function formatProcessingError(err: unknown) {
     return "We couldn't detect you clearly in the photo. You can continue with your original upload or try a clearer photo."
   }
   if (detail.includes("not configured") || detail.includes("not running")) {
-    return "rembg is unavailable right now. You can continue with your original photo or try again later."
+    return "Remove.bg is unavailable right now. You can continue with your original photo or try again later."
   }
-  if (detail.includes("waking up") || detail.includes("failed to respond") || detail.includes("502")) {
-    return "The rembg server is starting up. Wait 1–2 minutes, then tap Retry."
+  if (detail.includes("credits exhausted") || detail.includes("402")) {
+    return "Remove.bg credits are used up. You can continue with your original photo or contact the school."
   }
   return "Photo preparation didn't work this time. You can continue with your original upload or retry."
 }
@@ -88,10 +87,6 @@ export default function PhotoBgProcessor({
     lastBgStatusRef.current = status
     onStatus?.(status)
   }, [onStatus])
-
-  useEffect(() => {
-    void preloadSubmitBgService()
-  }, [])
 
   useEffect(() => {
     if (!photoUrl) {
@@ -136,7 +131,7 @@ export default function PhotoBgProcessor({
   }, [processing])
 
   const removeBackground = useCallback(async () => {
-    // Use full-resolution cropped photo for best free-model quality.
+    // Use full-resolution cropped photo.
     const sourceUrl = photoUrl
     if (!sourceUrl || removalStartedRef.current) return
     removalStartedRef.current = true
@@ -239,7 +234,7 @@ export default function PhotoBgProcessor({
         Preparing Your Photo
       </div>
       <p style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>
-        Removing background with rembg and applying school colour
+        Remove.bg is preparing your photo with school colour
         {schoolBgColor && (
           <>
             {" "}
@@ -339,7 +334,7 @@ export default function PhotoBgProcessor({
           <p style={{ fontSize: 11, color: '#64748b', textAlign: 'center', marginTop: 14, marginBottom: livePreviewUrl ? 12 : 0, lineHeight: 1.5 }}>
             {livePreviewUrl
               ? "Preview is ready — you can keep your original photo or wait for the final version."
-              : "rembg is processing your photo. First run after idle may take 1–2 minutes."}
+              : "Remove.bg is preparing your photo. This usually takes a few seconds."}
           </p>
           <div style={{ textAlign: "center" }}>
             <button

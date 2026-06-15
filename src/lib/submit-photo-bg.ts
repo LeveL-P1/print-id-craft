@@ -1,28 +1,17 @@
 /**
- * Submit photo background — rembg only (FastAPI on HF Space).
+ * Submit photo background — Remove.bg API passthrough.
  *
- *   cropped photo → POST /api/photo-bg/remove → transparent PNG
- *                 → fill school colour on canvas → JPEG
- *
- * No Remove.bg, no browser models, no custom mask pipeline.
+ *   cropped photo → POST /api/photo-bg/remove (removebg)
+ *                 → Remove.bg applies school colour server-side → JPEG
  */
 
 export const SUBMIT_BG_JPEG_QUALITY = 0.88
 export const SUBMIT_BG_WORK_MAX_DIM = 768
 
-const REMBG_MODEL = "birefnet-portrait"
-const API_TIMEOUT_MS = 280_000
+const REMOVEBG_MODEL = "removebg"
+const API_TIMEOUT_MS = 90_000
 
 export type SubmitBgProgress = (message: string, percent: number, previewDataUrl?: string) => void
-
-/** Wake HF Space while parent crops (best-effort). */
-export async function preloadSubmitBgService(): Promise<void> {
-  try {
-    await fetch("/api/photo-bg/health", { cache: "no-store" })
-  } catch {
-    /* ignore */
-  }
-}
 
 async function photoUrlToBlob(url: string): Promise<Blob> {
   if (url.startsWith("data:")) {
@@ -38,54 +27,36 @@ async function photoUrlToBlob(url: string): Promise<Blob> {
   return res.blob()
 }
 
-function loadImage(src: string): Promise<HTMLImageElement> {
+async function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.onload = () => resolve(img)
-    img.onerror = () => reject(new Error("Could not load processed photo"))
-    img.src = src
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(new Error("Could not read processed photo"))
+    reader.readAsDataURL(blob)
   })
 }
 
-async function compositeOntoColour(cutout: Blob, bgColor: string, quality: number): Promise<string> {
-  const url = URL.createObjectURL(cutout)
-  try {
-    const img = await loadImage(url)
-    const canvas = document.createElement("canvas")
-    canvas.width = img.naturalWidth
-    canvas.height = img.naturalHeight
-    const ctx = canvas.getContext("2d")
-    if (!ctx) throw new Error("Canvas unavailable")
-    ctx.fillStyle = bgColor
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    ctx.drawImage(img, 0, 0)
-    return canvas.toDataURL("image/jpeg", quality)
-  } finally {
-    URL.revokeObjectURL(url)
-  }
-}
-
 function friendlyApiError(status: number, body: string): string {
-  if (status === 503) return "rembg service is not configured (BG_REMOVAL_SERVICE_URL)."
-  if (status === 502 || status === 504 || body.includes("failed to respond")) {
-    return "rembg server is waking up — wait 1–2 minutes and tap Retry."
+  if (status === 503) {
+    return "Remove.bg is not configured — set REMOVEBG_API_KEY on the server."
+  }
+  if (status === 402) {
+    return "Remove.bg credits exhausted — add credits to your account."
   }
   try {
     const { error } = JSON.parse(body) as { error?: string }
-    if (error?.includes("failed to respond")) {
-      return "rembg server is waking up — wait 1–2 minutes and tap Retry."
-    }
     if (error) return error
   } catch {
     /* use body */
   }
-  return body || "rembg background removal failed"
+  return body || "Remove.bg background removal failed"
 }
 
-async function callRembg(image: Blob): Promise<Blob> {
+async function callRemoveBg(image: Blob, bgColor: string): Promise<Blob> {
   const form = new FormData()
   form.append("image", image, "photo.jpg")
-  form.append("model", REMBG_MODEL)
+  form.append("bgColor", bgColor)
+  form.append("model", REMOVEBG_MODEL)
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS)
@@ -110,13 +81,10 @@ export async function processSubmitPhotoBackground(
   onProgress?: SubmitBgProgress
 ): Promise<{ dataUrl: string; usedAi: boolean }> {
   onProgress?.("Preparing photo...", 5)
-  await preloadSubmitBgService()
+  onProgress?.("Removing background (Remove.bg)...", 25)
 
-  onProgress?.("Removing background (rembg)...", 20)
-  const cutout = await callRembg(await photoUrlToBlob(photoUrl))
-
-  onProgress?.("Applying school colour...", 85)
-  const dataUrl = await compositeOntoColour(cutout, bgColor, SUBMIT_BG_JPEG_QUALITY)
+  const result = await callRemoveBg(await photoUrlToBlob(photoUrl), bgColor)
+  const dataUrl = await blobToDataUrl(result)
 
   onProgress?.("Done", 100, dataUrl)
   return { dataUrl, usedAi: true }
