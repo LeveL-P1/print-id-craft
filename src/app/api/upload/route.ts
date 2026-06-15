@@ -65,14 +65,11 @@ async function validateAndPrepareImage(
   try {
     sharp = (await import("sharp")).default
   } catch {
-    if (options.normalizePublicStudentPhoto) {
-      const detected = detectImageType(buffer)
-      if (!detected) {
-        throw new Error("Invalid image file. Please upload a real JPEG, PNG, or WebP photo.")
-      }
-      return { buffer, ...detected }
+    const detected = detectImageType(buffer)
+    if (!detected) {
+      throw new Error("Invalid image file. Please upload a real JPEG, PNG, or WebP photo.")
     }
-    throw new Error("Image processing is temporarily unavailable. Please try again.")
+    return { buffer, ...detected }
   }
 
   let metadata: Awaited<ReturnType<ReturnType<typeof sharp>["metadata"]>>

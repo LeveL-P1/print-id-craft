@@ -133,6 +133,11 @@ export default function PhotoBgProcessor({
       setProcessedUrl(dataUrl)
     } catch (err: unknown) {
       removalStartedRef.current = false
+      if (autoConfirm) {
+        setBgStatus(PHOTO_BG_STATUS.SKIPPED)
+        onSkip(PHOTO_BG_STATUS.SKIPPED)
+        return
+      }
       setError("Could not clean the background. You can still continue with your photo.")
       console.error("Background removal failed:", err)
     } finally {
