@@ -128,7 +128,7 @@ export default function PhotoBgProcessor({
           setProgressMsg(msg)
           setProgress(pct)
         },
-        "gemini"
+        "birefnet"
       )
       setBgStatus(usedAi ? PHOTO_BG_STATUS.PROCESSED : PHOTO_BG_STATUS.PLAIN)
       setProcessedUrl(dataUrl)

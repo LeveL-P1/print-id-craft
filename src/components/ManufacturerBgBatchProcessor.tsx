@@ -191,15 +191,15 @@ export default function ManufacturerBgBatchProcessor({
 
       <div style={{
         padding: 14,
-        background: selectedModel === "gemini" ? "#eff6ff" : (modelReady ? "#f0fdf4" : "#fffbeb"),
+        background: selectedModel === "birefnet" ? "#eff6ff" : (modelReady ? "#f0fdf4" : "#fffbeb"),
         borderRadius: 10,
-        border: `1px solid ${selectedModel === "gemini" ? "#bfdbfe" : (modelReady ? "#bbf7d0" : "#fde68a")}`,
+        border: `1px solid ${selectedModel === "birefnet" ? "#bfdbfe" : (modelReady ? "#bbf7d0" : "#fde68a")}`,
         fontSize: 12,
-        color: selectedModel === "gemini" ? "#1e40af" : (modelReady ? "#166534" : "#92400e"),
+        color: selectedModel === "birefnet" ? "#1e40af" : (modelReady ? "#166534" : "#92400e"),
         marginBottom: 16, lineHeight: 1.5,
       }}>
-        {selectedModel === "gemini"
-          ? "Using Google AI for best quality. Photos are sent to Google's server for processing."
+        {selectedModel === "birefnet"
+          ? "Using Cloud AI (BiRefNet) for best quality. Photos are sent to the server for processing."
           : modelReady
             ? "Local AI model ready on this PC. Processing runs entirely in your browser."
             : "Downloading AI model on first use (~170MB, best quality). Cached for future runs."}
