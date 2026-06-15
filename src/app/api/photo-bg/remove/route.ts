@@ -99,10 +99,12 @@ export async function POST(req: Request) {
     }
 
     const result = await response.arrayBuffer()
+    const modelUsed = response.headers.get("x-bg-removal-model")
     return new NextResponse(result, {
       headers: {
         "content-type": resultType,
         "cache-control": "no-store",
+        ...(modelUsed ? { "x-bg-removal-model": modelUsed } : {}),
       },
     })
   } catch (error: any) {
