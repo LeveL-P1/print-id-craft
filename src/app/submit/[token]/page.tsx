@@ -569,7 +569,7 @@ export default function SubmitPage() {
     setStep("bg")
   }, [])
 
-  // Wake the HF rembg Space while the parent adjusts the crop.
+  // Wake rembg HF Space while parent crops.
   useEffect(() => {
     if (step === "photo" || step === "crop") {
       void preloadSubmitBgService()
@@ -2140,7 +2140,7 @@ export default function SubmitPage() {
             </div>
           )}
 
-          {/* BACKGROUND REMOVAL STEP — BiRefNet portrait (free) + simple colour composite */}
+          {/* BACKGROUND REMOVAL — rembg (HF Space) + school colour */}
           {step === "bg" && croppedPhoto && (
             <div>
               <PhotoBgProcessor
