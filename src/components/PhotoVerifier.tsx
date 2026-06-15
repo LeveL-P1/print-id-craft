@@ -36,6 +36,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
   const [verifying, setVerifying] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const cameraFileInputRef = useRef<HTMLInputElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const lastAdjustedFileRef = useRef<File | null>(null)
@@ -124,6 +125,29 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
   // ──────────────────────────────────────────────────────
   // Camera helpers
   // ──────────────────────────────────────────────────────
+  const refreshCameraPermission = async () => {
+    setCameraError("")
+    setCameraPermission("checking")
+    await checkCameraPermission()
+  }
+
+  const openCameraPermissionHelp = () => {
+    const ua = navigator.userAgent || ""
+    const isIOS = /iPad|iPhone|iPod/.test(ua)
+    const isChrome = /Chrome|CriOS/.test(ua)
+    const isSafari = /Safari/.test(ua) && !isChrome
+
+    const browserHelp = isIOS && isSafari
+      ? "iPhone Safari: tap AA or the lock icon near the address bar, open Website Settings, allow Camera, then reload."
+      : isChrome
+        ? "Chrome: tap the lock/settings icon beside the address, open Permissions, set Camera to Allow, then reload."
+        : "Open your browser's site settings for this page, set Camera to Allow, then reload."
+
+    setCameraError(
+      `Camera access is blocked by the browser.\n\n${browserHelp}\n\nYou can also use Take Photo from Phone Camera below, or upload a photo file.`
+    )
+  }
+
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach(t => t.stop())
     streamRef.current = null
@@ -137,11 +161,6 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setCameraError("Camera API not supported in this browser. Please use a modern browser or upload a file instead.")
-      return
-    }
-
-    if (cameraPermission === "denied") {
-      setCameraError("Camera permission was denied. Please click the camera/lock icon in your browser's address bar → Allow Camera → Reload the page, then try again.")
       return
     }
 
@@ -174,7 +193,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
       console.error("Camera error:", err)
       if (err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError") {
         setCameraPermission("denied")
-        setCameraError("Camera permission was denied. To fix this:\n1. Click the 🔒 lock icon (or camera icon) in your browser's address bar\n2. Set Camera to 'Allow'\n3. Reload the page\n\nOr simply upload a photo file instead.")
+        openCameraPermissionHelp()
       } else if (err?.name === "NotFoundError" || err?.name === "DevicesNotFoundError") {
         setCameraPermission("unsupported")
         setCameraError("No camera found on this device. Please upload a photo file instead.")
@@ -1241,7 +1260,30 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
                 <li>Click <strong>Reload</strong> or refresh the page</li>
               </ol>
               <div style={{ marginTop: 8, fontSize: 11, color: '#a67c00', fontStyle: 'italic' }}>
-                You can still upload a photo file even without camera access.
+                You can still take a photo with your phone camera or upload a file.
+              </div>
+              <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); void refreshCameraPermission() }}
+                  style={{ fontSize: 11, padding: '7px 12px', background: '#2563eb', color: 'white', border: 'none', borderRadius: 7, cursor: 'pointer', fontWeight: 700 }}
+                >
+                  Check Again
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); window.location.reload() }}
+                  style={{ fontSize: 11, padding: '7px 12px', background: '#f59e0b', color: 'white', border: 'none', borderRadius: 7, cursor: 'pointer', fontWeight: 700 }}
+                >
+                  Reload
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); cameraFileInputRef.current?.click() }}
+                  style={{ fontSize: 11, padding: '7px 12px', background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', borderRadius: 7, cursor: 'pointer', fontWeight: 700 }}
+                >
+                  Phone Camera
+                </button>
               </div>
             </div>
           </div>
@@ -1285,11 +1327,19 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
           <div style={{ fontSize: 12, color: '#7f1d1d', lineHeight: 1.6, whiteSpace: 'pre-line' }}>
             {cameraError}
           </div>
-          <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+          <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button
               onClick={(e) => { e.stopPropagation(); setCameraError(""); startCamera(e) }}
               style={{ fontSize: 11, padding: '6px 14px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}
             >Try Again</button>
+            <button
+              onClick={(e) => { e.stopPropagation(); void refreshCameraPermission() }}
+              style={{ fontSize: 11, padding: '6px 14px', background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}
+            >Check Permission</button>
+            <button
+              onClick={(e) => { e.stopPropagation(); cameraFileInputRef.current?.click() }}
+              style={{ fontSize: 11, padding: '6px 14px', background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}
+            >Phone Camera</button>
             <button
               onClick={(e) => { e.stopPropagation(); setCameraError(""); fileInputRef.current?.click() }}
               style={{ fontSize: 11, padding: '6px 14px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}
@@ -1325,6 +1375,18 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
           ref={fileInputRef}
           type="file"
           accept="image/jpeg,image/png,image/webp"
+          style={{ display: 'none' }}
+          onChange={e => {
+            const file = e.target.files?.[0]
+            if (file) handleFile(file)
+            e.target.value = ""
+          }}
+        />
+        <input
+          ref={cameraFileInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
           style={{ display: 'none' }}
           onChange={e => {
             const file = e.target.files?.[0]
@@ -1680,6 +1742,25 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
                  "📸 Take Photo"}
               </button>
             </div>
+            {(cameraPermission === "denied" || cameraPermission === "unsupported") && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); cameraFileInputRef.current?.click() }}
+                style={{
+                  marginTop: 10,
+                  padding: '9px 18px',
+                  background: '#fff7ed',
+                  color: '#c2410c',
+                  border: '1px solid #fed7aa',
+                  borderRadius: 10,
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  fontWeight: 700,
+                }}
+              >
+                Take Photo from Phone Camera
+              </button>
+            )}
             {cameraPermission === "granted" && (
               <div style={{ fontSize: 10, color: '#22c55e', marginTop: 8, fontWeight: 600 }}>
                 ✓ Camera access granted

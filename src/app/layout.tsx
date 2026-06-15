@@ -6,6 +6,7 @@ import { Toaster } from "sonner"
 import ErrorBoundary from "@/components/ErrorBoundary"
 import { Analytics } from "@vercel/analytics/next"
 import { SpeedInsights } from "@vercel/speed-insights/next"
+import AppVersionReloader from "@/components/AppVersionReloader"
 
 const inter = Inter({ subsets: ["latin"] })
 const poppins = Poppins({ 
@@ -76,6 +77,7 @@ export default function RootLayout({
       </head>
       <body className={`${inter.className} ${poppins.variable}`} suppressHydrationWarning>
         <Providers>
+          <AppVersionReloader />
           <ErrorBoundary>
             {children}
           </ErrorBoundary>
