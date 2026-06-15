@@ -436,6 +436,11 @@ export async function repairTransparentBlobHoles(
  *  the "cutout sticker" compositing step. */
 export const BG_ALPHA_CUTOFF = 20
 
+/** rembg / ISNet / BiRefNet masks need full client repair + defringe (not pre-composited Gemini). */
+export function useFullClientMaskPipeline(model?: string): boolean {
+  return model !== "gemini"
+}
+
 const DEFAULT_MASK_ENHANCE: MaskHoleRepairOptions = {
   iterations: 4,
   holeAlphaMax: 80,
@@ -502,15 +507,18 @@ export function rescuePortraitEnvelope(original: ImageData, mask: ImageData): Im
 
   for (let y = top; y < h; y++) {
     const yRatio = y / h
-    if (yRatio < 0.46) continue
+    if (yRatio < 0.40) continue
 
-    const halfWidth = Math.min(w * 0.48, w * (0.22 + (yRatio - 0.46) * 0.6))
+    const halfWidth = yRatio > 0.72
+      ? w * 0.495
+      : Math.min(w * 0.49, w * (0.24 + Math.max(0, yRatio - 0.40) * 0.72))
     const minX = Math.max(0, Math.floor(centerX - halfWidth))
     const maxX = Math.min(w - 1, Math.ceil(centerX + halfWidth))
+    const alphaCutoff = yRatio > 0.65 ? 148 : 96
 
     for (let x = minX; x <= maxX; x++) {
       const idx = (y * w + x) * 4
-      if (out[idx + 3] >= 96) continue
+      if (out[idx + 3] >= alphaCutoff) continue
       out[idx] = original.data[idx]
       out[idx + 1] = original.data[idx + 1]
       out[idx + 2] = original.data[idx + 2]
@@ -873,11 +881,11 @@ export function recoverHairByColor(original: ImageData, mask: ImageData): ImageD
  *  8. Original RGB alignment
  */
 export function enhanceForegroundMask(original: ImageData, mask: ImageData, model?: string): ImageData {
-  const isLocal = model === "isnet"
+  const fullPrep = useFullClientMaskPipeline(model)
   const repaired = repairForegroundMaskHoles(original, mask, DEFAULT_MASK_ENHANCE)
   
   let current = repaired
-  if (isLocal) {
+  if (fullPrep) {
     const closed1 = closeMaskAlphaGaps(original, current)
     current = closeMaskAlphaGaps(original, closed1)   // 2nd pass: fill wider hair gaps
   }
@@ -885,7 +893,7 @@ export function enhanceForegroundMask(original: ImageData, mask: ImageData, mode
   const clothingProtected = protectClothingInMask(original, current)
   
   let rescued = clothingProtected
-  if (isLocal) {
+  if (fullPrep) {
     rescued = rescuePortraitEnvelope(original, clothingProtected)
   }
   
@@ -1054,12 +1062,17 @@ export function enforcePlainBackgroundEdges(
   const paint = (idx: number) => {
     const x = idx % w
     const y = (idx / w) | 0
+    const p = idx * 4
+    const pixel = { r: data[p], g: data[p + 1], b: data[p + 2] }
     if (isPersonZonePixel(x, y, w, h)) {
-      const p = idx * 4
-      const dist = colorDistance({ r: data[p], g: data[p + 1], b: data[p + 2] }, target)
+      const dist = colorDistance(pixel, target)
       if (dist > 28) return
     }
-    const p = idx * 4
+    // Do not paint over lower-shirt / torso pixels that clearly belong to the subject.
+    if (y / h > 0.55 && x / w > 0.06 && x / w < 0.94) {
+      const dist = colorDistance(pixel, target)
+      if (dist > 38) return
+    }
     data[p] = target.r
     data[p + 1] = target.g
     data[p + 2] = target.b
@@ -1091,7 +1104,8 @@ export function compositeMaskImageDataOntoPlainColor(
   const h = mask.height
   const out = new Uint8ClampedArray(w * h * 4)
   const { r: tr, g: tg, b: tb } = target
-  const isLocal = model === "isnet"
+  const fullPrep = useFullClientMaskPipeline(model)
+  const wallColor = fullPrep ? getEdgeColorFromImageData(original) : null
 
   // --- Pass 1: Alpha composite (cutout sticker onto colour) ---
   for (let idx = 0; idx < w * h; idx++) {
@@ -1109,24 +1123,39 @@ export function compositeMaskImageDataOntoPlainColor(
     }
 
     const inPerson = isPersonZonePixel(x, y, w, h)
-    // High thresholds: treat only very confident pixels as fully opaque original.
-    // Person zone: 180 (was 56) — only copy original directly for fully opaque parts
-    // Outer zone: 200 (was 96) — ensure proper blending at all edges
-    const preserveThreshold = inPerson ? 180 : 200
+    const preserveThreshold = fullPrep
+      ? (inPerson ? 152 : 176)
+      : (inPerson ? 180 : 200)
+
+    const fr = original.data[p]
+    const fg = original.data[p + 1]
+    const fb = original.data[p + 2]
 
     if (sa >= preserveThreshold) {
-      out[p] = original.data[p]
-      out[p + 1] = original.data[p + 1]
-      out[p + 2] = original.data[p + 2]
+      out[p] = fr
+      out[p + 1] = fg
+      out[p + 2] = fb
       out[p + 3] = 255
       continue
     }
 
+    // Drop wall-coloured fringe around hair — prevents white/grey halos on coloured bg.
+    if (
+      wallColor &&
+      isHeadHairZonePixel(x, y, w, h) &&
+      colorDistance({ r: fr, g: fg, b: fb }, wallColor) < 50
+    ) {
+      if (sa < 145) {
+        out[p] = tr
+        out[p + 1] = tg
+        out[p + 2] = tb
+        out[p + 3] = 255
+        continue
+      }
+    }
+
     // Smooth blending using the mask alpha
     const a = sa / 255
-    const fr = original.data[p]
-    const fg = original.data[p + 1]
-    const fb = original.data[p + 2]
     out[p] = Math.round(fr * a + tr * (1 - a))
     out[p + 1] = Math.round(fg * a + tg * (1 - a))
     out[p + 2] = Math.round(fb * a + tb * (1 - a))

@@ -20,7 +20,6 @@ import {
   parseSubmitDraft,
 } from "@/lib/submit-draft"
 import { uploadStudentPhotoResilient } from "@/lib/client-photo-upload"
-import { preloadBgRemovalModel } from "@/lib/photo-background"
 import { PHOTO_BG_STATUS, type PhotoBgStatus } from "@/lib/photo-bg-status"
 
 const SUPPORT_PHONE_DISPLAY = "+91 98818 77607"
@@ -563,14 +562,6 @@ export default function SubmitPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData, photoVerified, step, draftRestored, config?.fixedBranch, config?.fieldConfig])
-
-  // Preload the local ISNet background-removal model while the parent is on photo/crop
-  // so if Gemini is unavailable, fallback AI processing after crop feels faster.
-  useEffect(() => {
-    if (step === "photo" || step === "crop") {
-      preloadBgRemovalModel().catch(() => {})
-    }
-  }, [step])
 
   const goToBgProcessing = useCallback(() => {
     setPhotoBgStatus("")
@@ -2141,7 +2132,7 @@ export default function SubmitPage() {
             </div>
           )}
 
-          {/* BACKGROUND REMOVAL STEP — tries Google AI (Gemini) first, falls back to local ISNet */}
+          {/* BACKGROUND REMOVAL STEP — Remove.bg API + school colour composite */}
           {step === "bg" && croppedPhoto && (
             <div>
               <PhotoBgProcessor

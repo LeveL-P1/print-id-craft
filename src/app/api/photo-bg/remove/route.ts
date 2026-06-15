@@ -7,6 +7,10 @@ import {
   isGeminiConfigured,
   removeBackgroundWithGemini,
 } from "@/lib/gemini-bg-removal"
+import {
+  isRemoveBgConfigured,
+  removeBackgroundWithRemoveBg,
+} from "@/lib/removebg-api"
 
 export const runtime = "nodejs"
 export const maxDuration = 300
@@ -37,7 +41,7 @@ async function readRequestImage(req: Request) {
       contentType: file.type || "image/jpeg",
       fileName: file.name || "photo.jpg",
       bgColor: String(form.get("bgColor") || "#FFFFFF"),
-      model: String(form.get("model") || "gemini"),
+      model: String(form.get("model") || "birefnet-portrait"),
     }
   }
 
@@ -49,7 +53,7 @@ async function readRequestImage(req: Request) {
     contentType: parsed.contentType,
     fileName: "photo.jpg",
     bgColor: String(body?.bgColor || "#FFFFFF"),
-    model: String(body?.model || "gemini"),
+    model: String(body?.model || "birefnet-portrait"),
   }
 }
 
@@ -133,6 +137,42 @@ export async function POST(req: Request) {
       }
     }
 
+    // ─── remove.bg API (submit form) ─────────────────────────────────
+    if (requestedModel === "removebg" || requestedModel === "remove.bg") {
+      if (!isRemoveBgConfigured()) {
+        return NextResponse.json(
+          { error: "Remove.bg is not configured — set REMOVEBG_API_KEY" },
+          { status: 503 }
+        )
+      }
+
+      try {
+        const result = await removeBackgroundWithRemoveBg(
+          image.buffer,
+          image.contentType,
+          image.fileName
+        )
+        return new NextResponse(new Uint8Array(result), {
+          headers: {
+            "content-type": "image/png",
+            "cache-control": "no-store",
+            "x-bg-removal-model": "removebg",
+          },
+        })
+      } catch (removeBgErr) {
+        console.error("[photo-bg/remove] remove.bg failed:", removeBgErr)
+        return NextResponse.json(
+          {
+            error:
+              removeBgErr instanceof Error
+                ? removeBgErr.message
+                : "Remove.bg background removal failed",
+          },
+          { status: 500 }
+        )
+      }
+    }
+
     // ─── BiRefNet / BRIA / rembg service path ───────────────────────
     if (
       requestedModel === "birefnet-portrait" ||
@@ -188,7 +228,7 @@ export async function POST(req: Request) {
 
     // ─── Unknown model → 400 ────────────────────────────────────────────
     return NextResponse.json(
-      { error: `Unknown model: ${requestedModel}. Use "gemini", "birefnet-portrait", "bria-rmbg2", or process locally with ISNet.` },
+      { error: `Unknown model: ${requestedModel}. Use "removebg", "birefnet-portrait", "bria-rmbg2", or "gemini".` },
       { status: 400 }
     )
   } catch (error: unknown) {
