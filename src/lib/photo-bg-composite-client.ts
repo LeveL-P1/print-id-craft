@@ -9,14 +9,12 @@ import {
   cleanupBackgroundArtifacts,
   downscaleBlob,
   finalizePlainBackgroundFromMaskBlobs,
-  loadBlobAsImageData,
   measureEdgeBackgroundMatch,
   measureForegroundRatioInTransparentBlob,
   preloadBgRemovalModel,
   recolorPlainBackgroundOnCanvas,
   removeBackgroundWithBestModel,
   loadImageToCanvas,
-  scoreRawMaskQuality,
 } from "@/lib/photo-background"
 
 export const BG_WORK_MAX_DIM = 768
@@ -90,26 +88,16 @@ async function obtainBestAiMask(
   bgColor: string,
   onProgress?: BgProcessProgress
 ): Promise<Blob> {
-  const original = await loadBlobAsImageData(workBlob)
-  let bestMask: Blob | null = null
-  let bestScore = 0
-
   onProgress?.("Trying professional background model…", 18)
   try {
     const remoteMask = await removeBackgroundWithServerModel(workBlob, bgColor)
-    const remoteMaskData = await loadBlobAsImageData(remoteMask)
     const remoteFg = await measureForegroundRatioInTransparentBlob(remoteMask)
     if (remoteFg >= MIN_FOREGROUND_RATIO) {
-      bestScore = scoreRawMaskQuality(original, remoteMaskData)
-      bestMask = remoteMask
-      onProgress?.("Professional model ready", 52)
-      if (bestScore >= 78) {
-        onProgress?.("Using professional AI result", 82)
-        return bestMask
-      }
+      onProgress?.("Professional model ready", 82)
+      return remoteMask
     }
   } catch {
-    /* server optional */
+    /* fall back to local model below */
   }
 
   onProgress?.("Loading local AI model (first use ~170MB)…", 55)
@@ -122,20 +110,11 @@ async function obtainBestAiMask(
 
   const localFg = await measureForegroundRatioInTransparentBlob(localMask)
   if (localFg < MIN_FOREGROUND_RATIO) {
-    if (bestMask) return bestMask
     throw new Error("Background removal failed — could not detect the student in the photo")
   }
 
-  const localMaskData = await loadBlobAsImageData(localMask)
-  const localScore = scoreRawMaskQuality(original, localMaskData)
-
-  if (!bestMask || localScore > bestScore + 3) {
-    onProgress?.("Using local AI result", 82)
-    return localMask
-  }
-
-  onProgress?.("Using professional AI result", 82)
-  return bestMask!
+  onProgress?.("Using local AI result", 82)
+  return localMask
 }
 
 export async function processPhotoBackgroundLocal(
@@ -181,13 +160,19 @@ async function removeBackgroundWithServerModel(blob: Blob, bgColor: string): Pro
   const form = new FormData()
   form.append("image", blob, "photo.jpg")
   form.append("bgColor", bgColor)
+  form.append("model", "birefnet-portrait")
 
   const response = await fetch("/api/photo-bg/remove", {
     method: "POST",
     body: form,
   })
+
+  if (response.status === 503) {
+    throw new Error("Background AI service is not configured — set BG_REMOVAL_SERVICE_URL")
+  }
   if (!response.ok) {
-    throw new Error("Professional background service unavailable")
+    const detail = await response.text().catch(() => "")
+    throw new Error(detail || "Professional background service unavailable")
   }
 
   const contentType = response.headers.get("content-type") || ""

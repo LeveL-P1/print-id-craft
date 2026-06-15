@@ -48,6 +48,29 @@ Why this order:
 - `isnet-general-use`: stable fallback when BiRefNet fails to load/run.
 - `u2net_human_seg`: last-resort human segmentation fallback.
 
+## Hugging Face Space setup (baby steps)
+
+Your production Space: **https://teamsasd-wisemelon-bg-removal.hf.space**
+
+1. Open the Space on Hugging Face → **Settings → Repository**
+2. Set **Space directory** to `docker/rembg` (if the repo root is `print-id-craft`)
+3. Click **Factory rebuild** (restart alone does not pull new code)
+4. Wait for build to finish, then open `/health` and confirm:
+   - `"serviceVersion": "2026-06-15-merge-v1"`
+   - `"mergeMask": true`
+   - `"mergeModel": "u2net_human_seg"`
+5. In Vercel/Railway (and local `.env`), set:
+   ```bash
+   BG_REMOVAL_SERVICE_URL=https://teamsasd-wisemelon-bg-removal.hf.space
+   ```
+6. Redeploy the Next.js app, then visit `/api/photo-bg/health` — should show `"mergeReady": true`
+
+Test the Space from your machine:
+
+```bash
+npm run test:bg-service
+```
+
 ## App env
 
 Set one of these in the Next.js app deployment:

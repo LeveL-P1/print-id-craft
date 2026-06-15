@@ -12,6 +12,7 @@ from rembg import new_session, remove
 
 app = FastAPI(title="WiseMelon Professional Background Removal")
 
+SERVICE_VERSION = "2026-06-15-merge-v1"
 DEFAULT_MODEL = os.getenv("BG_REMOVAL_MODEL", "birefnet-portrait")
 DEFAULT_MODEL_CHAIN = [
     name.strip()
@@ -167,6 +168,7 @@ def maybe_merge_with_person_mask(
 def health():
     return {
         "ok": True,
+        "serviceVersion": SERVICE_VERSION,
         "model": DEFAULT_MODEL,
         "modelChain": candidate_models(DEFAULT_MODEL),
         "mergeMask": MERGE_MASK_ENABLED,
