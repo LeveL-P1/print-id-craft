@@ -3212,6 +3212,16 @@ export default function SchoolDetailPage() {
                               >
                                 AI
                               </button>
+                              {hasPhoto && (
+                                <a
+                                  className="btn btn-outline"
+                                  href={`/api/media/student-photo/${s.id}?download=1`}
+                                  style={{ fontSize: 10, padding: '4px 7px', borderColor: '#0ea5e9', color: '#0284c7', fontWeight: 700, minWidth: 32, textDecoration: 'none' }}
+                                  title="Download uploaded photo"
+                                >
+                                  DL
+                                </a>
+                              )}
                               <button className="btn btn-outline" style={{ fontSize: 11, padding: '4px 8px', borderColor: '#3b82f6', color: '#2563eb' }} onClick={() => openEditStudent(s)} title="Edit student">✏️</button>
                               <button className="btn btn-outline" style={{ fontSize: 11, padding: '4px 8px', borderColor: '#22c55e', color: '#16a34a' }} onClick={() => handleStatusUpdate(s.id, "APPROVED")}>✓</button>
                               {s.status === "FLAGGED" ? (
@@ -4599,6 +4609,15 @@ export default function SchoolDetailPage() {
                   >
                     AI Background
                   </button>
+                  {studentHasPhoto(selectedStudent) && (
+                    <a
+                      className="btn btn-outline"
+                      href={`/api/media/student-photo/${selectedStudent.id}?download=1`}
+                      style={{ fontSize: 13, borderColor: '#0ea5e9', color: '#0284c7', textDecoration: 'none' }}
+                    >
+                      Download Photo
+                    </a>
+                  )}
                   <button className="btn btn-outline" style={{ fontSize: 13, borderColor: '#22c55e', color: '#16a34a' }} onClick={() => { handleStatusUpdate(selectedStudent.id, "APPROVED"); setSelectedStudent(null) }}>✓ Approve</button>
                   {selectedStudent.status === "FLAGGED" ? (
                     <button className="btn btn-outline" style={{ fontSize: 13, borderColor: '#3b82f6', color: '#2563eb' }} onClick={() => { handleUnflag(selectedStudent.id); setSelectedStudent(null) }}>Unflag</button>

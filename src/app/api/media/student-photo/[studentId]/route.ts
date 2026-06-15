@@ -15,8 +15,17 @@ function contentTypeFromPath(path: string): string {
   return "image/jpeg"
 }
 
-export async function GET(_req: Request, props: { params: Promise<{ studentId: string }> }) {
+function safeFilePart(input: string): string {
+  return input
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "student"
+}
+
+export async function GET(req: Request, props: { params: Promise<{ studentId: string }> }) {
   const params = await props.params
+  const forceDownload = new URL(req.url).searchParams.get("download") === "1"
   const session = await getServerSession(authOptions)
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -24,7 +33,7 @@ export async function GET(_req: Request, props: { params: Promise<{ studentId: s
 
   const student = await prisma.student.findUnique({
     where: { id: params.studentId },
-    select: { id: true, schoolId: true, classId: true, photoPath: true, photoUrl: true },
+    select: { id: true, schoolId: true, classId: true, serialNumber: true, photoPath: true, photoUrl: true, formData: true },
   })
 
   if (!student) {
@@ -60,6 +69,14 @@ export async function GET(_req: Request, props: { params: Promise<{ studentId: s
       "Content-Type": contentTypeFromPath(student.photoPath),
       "Cache-Control": "private, max-age=0, must-revalidate",
       "Cross-Origin-Resource-Policy": "same-origin",
+      ...(forceDownload ? {
+        "Content-Disposition": `attachment; filename="${safeFilePart(student.serialNumber)}-${safeFilePart(
+          ((student.formData as Record<string, string> | null)?.fullName ||
+            (student.formData as Record<string, string> | null)?.["Full Name"] ||
+            (student.formData as Record<string, string> | null)?.["Student Name"] ||
+            "photo").toString()
+        )}.${student.photoPath.split(".").pop()?.toLowerCase() || "jpg"}"`,
+      } : {}),
     },
   })
 }
