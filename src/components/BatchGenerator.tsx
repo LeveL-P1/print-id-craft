@@ -239,6 +239,31 @@ function pathRoundedRect(
   ctx.closePath()
 }
 
+function drawImageContain(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+) {
+  const photoAspect = img.naturalWidth / img.naturalHeight
+  const boxAspect = w / h
+  let dx: number, dy: number, dw: number, dh: number
+  if (photoAspect > boxAspect) {
+    dw = w
+    dh = w / photoAspect
+    dx = x
+    dy = y + (h - dh) / 2
+  } else {
+    dh = h
+    dw = h * photoAspect
+    dx = x + (w - dw) / 2
+    dy = y
+  }
+  ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, dx, dy, dw, dh)
+}
+
 /**
  * Word-wrap + auto-shrink text on canvas to fit a fixed box.
  * Tries single-line shrink first, then falls back to multi-line word-wrap
@@ -416,7 +441,7 @@ async function renderIdCard(
           ctx.save()
           pathRoundedRect(ctx, fx, fy, fw, fh, radiusPx)
           ctx.clip()
-          ctx.drawImage(photoImg, 0, 0, photoImg.naturalWidth, photoImg.naturalHeight, dx, dy, dw, dh)
+          drawImageContain(ctx, photoImg, fx, fy, fw, fh)
           ctx.restore()
         }
       }

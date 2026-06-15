@@ -500,9 +500,9 @@ export function rescuePortraitEnvelope(original: ImageData, mask: ImageData): Im
 
   for (let y = top; y < h; y++) {
     const yRatio = y / h
-    if (yRatio < 0.52) continue
+    if (yRatio < 0.46) continue
 
-    const halfWidth = Math.min(w * 0.42, w * (0.16 + (yRatio - 0.52) * 0.55))
+    const halfWidth = Math.min(w * 0.48, w * (0.22 + (yRatio - 0.46) * 0.6))
     const minX = Math.max(0, Math.floor(centerX - halfWidth))
     const maxX = Math.min(w - 1, Math.ceil(centerX + halfWidth))
 

@@ -20,7 +20,7 @@ const MAX_VIEWPORT_WIDTH = 480
 const MAX_VIEWPORT_HEIGHT_RATIO = 0.58
 const MIN_IMAGE_SCALE = 0.5
 const MAX_IMAGE_SCALE = 3
-const DEFAULT_CROP_FRACTION = 0.72
+const DEFAULT_CROP_FRACTION = 0.94
 
 function fitImageViewport(
   naturalW: number,

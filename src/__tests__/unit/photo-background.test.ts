@@ -16,6 +16,7 @@ import {
   matchesSchoolColor,
   parseHexColor,
   repairForegroundMaskHoles,
+  rescuePortraitEnvelope,
   scoreRawMaskQuality,
   type BgUniformity,
 } from "@/lib/photo-background"
@@ -161,6 +162,18 @@ describe("photo-background hair hole repair", () => {
     const enhanced = enhanceForegroundMask(original, mask)
     expect(enhanced.data[(2 * 5 + 2) * 4]).toBe(90)
     expect(enhanced.data[(2 * 5 + 2) * 4 + 1]).toBe(60)
+  })
+
+  it("rescues a wider lower portrait envelope for shoulders and sleeves", () => {
+    const original = makeImage(20, 20, () => [248, 248, 245, 255])
+    const mask = makeImage(20, 20, (x, y) => {
+      if (x >= 7 && x <= 12 && y >= 1 && y <= 8) return [0, 0, 0, 255]
+      return [0, 0, 0, 0]
+    })
+
+    const rescued = rescuePortraitEnvelope(original, mask)
+    expect(rescued.data[(12 * 20 + 4) * 4 + 3]).toBe(255)
+    expect(rescued.data[(12 * 20 + 4) * 4]).toBe(248)
   })
 })
 
