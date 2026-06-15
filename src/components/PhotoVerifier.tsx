@@ -1294,7 +1294,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
             </h3>
             <p style={{ fontSize: 13, color: '#64748b', lineHeight: 1.6, marginBottom: 16 }}>
               {cameraPermission === "denied"
-                ? "Your browser has blocked camera access for this site. Change Camera to Allow in the lock/settings icon near the address bar, then reload."
+                ? "Chrome will not show the camera permission popup again while this site is blocked. First unblock Camera from the lock/settings icon near the address bar, then tap the button below."
                 : "Tap Allow Camera below. Your browser will show a permission popup; choose Allow so you can take the student photo."}
             </p>
             {cameraPermission === "denied" && (
@@ -1309,7 +1309,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
                 lineHeight: 1.55,
                 marginBottom: 14,
               }}>
-                <strong>Chrome:</strong> tap the lock/settings icon beside the address, open Permissions, set Camera to Allow, then reload.
+                <strong>Chrome:</strong> tap the lock/settings icon beside the address, open Permissions, set Camera to Allow, then come back here.
               </div>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1321,14 +1321,16 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
                   padding: '13px 16px',
                   borderRadius: 12,
                   border: 'none',
-                  background: 'linear-gradient(135deg, #2563eb, #4f46e5)',
+                  background: cameraPermission === "denied"
+                    ? 'linear-gradient(135deg, #f59e0b, #ea580c)'
+                    : 'linear-gradient(135deg, #2563eb, #4f46e5)',
                   color: 'white',
                   fontSize: 14,
                   fontWeight: 800,
                   cursor: 'pointer',
                 }}
               >
-                Allow Camera
+                {cameraPermission === "denied" ? "I Changed It - Ask Again" : "Allow Camera"}
               </button>
               <button
                 type="button"
