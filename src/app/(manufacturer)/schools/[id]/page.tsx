@@ -19,7 +19,7 @@ import {
   stripIndianPrefix,
   validatePublicSubmissionDetails,
   type FormField,
-} from "@/lib/submit-fields"
+} from "@/lib/form-validation"
 
 const EDIT_ADDRESS_MIN_WORDS = 5
 

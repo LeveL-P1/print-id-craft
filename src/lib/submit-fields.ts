@@ -19,19 +19,16 @@ import {
   normalizeFormValue,
   resolveFieldValue,
 } from "@/lib/field-resolver"
-import { applyFixedBranchToFormData } from "@/lib/fixed-branch"
 import { buildStudentIndexData } from "@/lib/student-index"
+import {
+  isHiddenFixedBranchField,
+  stripIndianPrefix,
+  validatePublicSubmissionDetails,
+  type FormField,
+} from "@/lib/form-validation"
 
-export type FormField = {
-  key: string
-  label: string
-  type: string
-  required: boolean
-  /** Semantic role for validation/sorting — set by manufacturer template or inferred */
-  role?: string
-}
-
-const ADDRESS_MIN_WORDS = 5
+export type { FormField }
+export { isHiddenFixedBranchField, stripIndianPrefix, validatePublicSubmissionDetails }
 
 const FORM_SKIP_KEYS = new Set(["class", "classSection", "classGrade", "division", "photoUrl", "srNo", "photoId"])
 const FORM_SKIP_LABELS = new Set([
@@ -163,62 +160,6 @@ export async function getPublicSubmissionFields(schoolId: string, template: any)
     ...field,
     role: field.role || getFieldRole(field.key, field.label),
   }))
-}
-
-export function stripIndianPrefix(raw: string): string {
-  if (!raw) return ""
-  const explicit = raw.match(/^\+?\s*91[\s-]*(\d{0,10})\s*$/)
-  if (explicit) return explicit[1]
-  const digits = raw.replace(/\D/g, "")
-  if (digits.length === 12 && digits.startsWith("91")) return digits.slice(2)
-  return digits.slice(0, 10)
-}
-
-function wordCount(value: string): number {
-  return (value || "").trim().split(/\s+/).filter(Boolean).length
-}
-
-/** Branch fields are hidden on the public form when the template locks a fixed branch. */
-export function isHiddenFixedBranchField(
-  field: FormField,
-  fixedBranch?: string
-): boolean {
-  if (!fixedBranch?.trim()) return false
-  return getFieldRole(field.key, field.label, field.role) === "branch"
-}
-
-export function validatePublicSubmissionDetails(
-  formData: Record<string, unknown>,
-  fields: FormField[],
-  options?: { fixedBranch?: string }
-): { ok: true } | { ok: false; error: string } {
-  const fixedBranch = options?.fixedBranch?.trim() || ""
-  const fd = applyFixedBranchToFormData(formData, fixedBranch, fields)
-
-  for (const field of fields) {
-    if (field.key === "class") continue
-    if (isHiddenFixedBranchField(field, fixedBranch)) continue
-    const value = (fd[field.key] || "").trim()
-    const label = field.label || field.key
-    const role = getFieldRole(field.key, field.label, field.role)
-
-    if (field.required && !value) {
-      return { ok: false, error: `Please fill in ${label}.` }
-    }
-    if (!value) continue
-
-    if (role === "address" && field.required && wordCount(value) < ADDRESS_MIN_WORDS) {
-      return { ok: false, error: `Please write the full address with at least ${ADDRESS_MIN_WORDS} words.` }
-    }
-    if (role === "mobile" && field.required && stripIndianPrefix(value).length !== 10) {
-      return { ok: false, error: "Mobile number must be exactly 10 digits." }
-    }
-    if (role === "branch" && field.required && value.length < 2) {
-      return { ok: false, error: "Please enter the branch name." }
-    }
-  }
-
-  return { ok: true }
 }
 
 /**
