@@ -14,6 +14,81 @@ import {
   type SectionType,
 } from "@/lib/section-class"
 import { photoCacheVersion, studentPhotoUrl as buildStudentPhotoUrl } from "@/lib/student-photo-url"
+import { getFieldRole, resolveEditFieldValue } from "@/lib/field-resolver"
+import {
+  stripIndianPrefix,
+  validatePublicSubmissionDetails,
+  type FormField,
+} from "@/lib/submit-fields"
+
+const EDIT_ADDRESS_MIN_WORDS = 5
+
+type EditStudentField = FormField & {
+  inputType: "flag" | "mobile" | "address" | "dob" | "text" | "textarea"
+}
+
+function buildEditStudentFields(templateData: any): EditStudentField[] {
+  const mappings = (templateData?.fieldMappings || []) as any[]
+  const textMappings = mappings.filter(
+    (m) => m.type !== "photo" && m.fieldKey !== "class" && m.fieldKey !== "classSection"
+  )
+  if (textMappings.length === 0) {
+    return [
+      { key: "fullName", label: "Full Name", type: "text", required: true, role: "name", inputType: "text" },
+      { key: "phone", label: "Phone", type: "tel", required: true, role: "mobile", inputType: "mobile" },
+      { key: "address", label: "Address", type: "text", required: true, role: "address", inputType: "address" },
+    ]
+  }
+  return textMappings.map((m) => {
+    const role = getFieldRole(m.fieldKey, m.label)
+    let inputType: EditStudentField["inputType"] = "text"
+    if (m.type === "flag") inputType = "flag"
+    else if (role === "mobile") inputType = "mobile"
+    else if (role === "address") inputType = "address"
+    else if (role === "dob") inputType = "dob"
+    else if (m.fieldKey.toLowerCase().includes("address")) inputType = "textarea"
+    return {
+      key: m.fieldKey,
+      label: m.label,
+      type: role === "mobile" ? "tel" : "text",
+      required: true,
+      role,
+      inputType,
+    }
+  })
+}
+
+function normalizeEditMobileValue(value: string): string {
+  const local = stripIndianPrefix(value)
+  return local.length === 10 ? `+91 ${local}` : value.trim()
+}
+
+function hydrateEditFormFromStudent(
+  templateData: any,
+  fd: Record<string, string>
+): { formFields: Record<string, string>; mobileLocals: Record<string, string> } {
+  const fields = buildEditStudentFields(templateData)
+  const formFields = { ...fd }
+  const mobileLocals: Record<string, string> = {}
+
+  for (const field of fields) {
+    const resolved = resolveEditFieldValue(fd, field.key, field.label, field.role)
+    if (resolved) {
+      formFields[field.key] = field.inputType === "mobile"
+        ? normalizeEditMobileValue(resolved)
+        : resolved
+    }
+    if (field.inputType === "mobile") {
+      mobileLocals[field.key] = stripIndianPrefix(formFields[field.key] || "")
+    }
+  }
+
+  return { formFields, mobileLocals }
+}
+
+function editFieldWordCount(value: string): number {
+  return (value || "").trim().split(/\s+/).filter(Boolean).length
+}
 
 // Lazy-load heavy components — only loaded when their tab is active
 const IDCardPreview = dynamic(() => import("@/components/IDCardPreview"), { ssr: false })
@@ -1156,6 +1231,7 @@ export default function SchoolDetailPage() {
   const [editStudentOpen, setEditStudentOpen] = useState(false)
   const [editStudentTarget, setEditStudentTarget] = useState<StudentData | null>(null)
   const [editFormFields, setEditFormFields] = useState<Record<string, string>>({})
+  const [editMobileLocals, setEditMobileLocals] = useState<Record<string, string>>({})
   const [editClassId, setEditClassId] = useState("")
   const [editPhotoFile, setEditPhotoFile] = useState<File | null>(null)
   const [editPhotoPreview, setEditPhotoPreview] = useState("")
@@ -1164,6 +1240,7 @@ export default function SchoolDetailPage() {
   const openAddStudent = () => {
     setEditStudentTarget(null)
     setEditFormFields({})
+    setEditMobileLocals({})
     setEditClassId(classes[0]?.id || "")
     setEditPhotoFile(null)
     setEditPhotoPreview("")
@@ -1171,8 +1248,11 @@ export default function SchoolDetailPage() {
   }
 
   const openEditStudent = (s: StudentData) => {
+    const fd = { ...(s.formData as Record<string, string>) }
+    const hydrated = hydrateEditFormFromStudent(templateData, fd)
     setEditStudentTarget(s)
-    setEditFormFields({ ...(s.formData as Record<string, string>) })
+    setEditFormFields(hydrated.formFields)
+    setEditMobileLocals(hydrated.mobileLocals)
     setEditClassId(s.classId || s.class?.id || "")
     setEditPhotoFile(null)
     setEditPhotoPreview(getStudentPhotoUrl(s) || "")
@@ -1232,6 +1312,14 @@ export default function SchoolDetailPage() {
 
   const handleSaveStudent = async () => {
     if (!editClassId) { toast.error("Please select a class"); return }
+
+    const editFields = buildEditStudentFields(templateData)
+    const validation = validatePublicSubmissionDetails(editFormFields, editFields)
+    if (!validation.ok) {
+      toast.error(validation.error)
+      return
+    }
+
     setEditSaving(true)
     try {
       let photoUrl = editStudentTarget?.photoUrl || ""
@@ -3314,47 +3402,92 @@ export default function SchoolDetailPage() {
                   </div>
 
                   {/* Template fields */}
-                  {(() => {
-                    const mappings = (templateData?.fieldMappings || []) as any[]
-                    const textMappings = mappings.filter(m => m.type !== 'photo' && m.fieldKey !== 'class' && m.fieldKey !== 'classSection')
-                    if (textMappings.length === 0) {
-                      // Fallback: show basic fields when no template
-                      return [
-                        { fieldKey: 'fullName', label: 'Full Name' },
-                        { fieldKey: 'phone', label: 'Phone' },
-                        { fieldKey: 'address', label: 'Address' },
-                      ].map(f => (
-                        <div key={f.fieldKey} className="form-group">
-                          <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6, display: 'block' }}>{f.label}</label>
-                          <input type="text" value={editFormFields[f.fieldKey] || ''} onChange={e => setEditFormFields(prev => ({ ...prev, [f.fieldKey]: e.target.value }))} style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} />
-                        </div>
-                      ))
-                    }
-                    return textMappings.map((m: any) => (
-                      <div key={m.fieldKey} className="form-group">
-                        <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6, display: 'block' }}>
-                          {m.label} <span style={{ color: '#ef4444' }}>*</span>
-                        </label>
-                        {m.type === 'flag' ? (
-                          <select value={editFormFields[m.fieldKey] || ''} onChange={e => setEditFormFields(prev => ({ ...prev, [m.fieldKey]: e.target.value }))} style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14 }}>
-                            <option value="">— Select {m.label} —</option>
-                            {flagColors.map((c: string) => <option key={c} value={c}>{c}</option>)}
-                            <option value={editFormFields[m.fieldKey] || ''}>{editFormFields[m.fieldKey] && !flagColors.includes(editFormFields[m.fieldKey]) ? `Custom: ${editFormFields[m.fieldKey]}` : ''}</option>
-                          </select>
-                        ) : m.fieldKey.toLowerCase().includes('address') ? (
-                          <textarea value={editFormFields[m.fieldKey] || ''} onChange={e => setEditFormFields(prev => ({ ...prev, [m.fieldKey]: e.target.value }))} rows={3} style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14, resize: 'vertical', boxSizing: 'border-box' }} />
-                        ) : (
-                          <input
-                            type={m.fieldKey.toLowerCase().includes('phone') || m.fieldKey.toLowerCase().includes('mob') ? 'tel' : m.fieldKey.toLowerCase().includes('dob') || m.fieldKey.toLowerCase().includes('birth') ? 'date' : 'text'}
-                            value={editFormFields[m.fieldKey] || ''}
-                            onChange={e => setEditFormFields(prev => ({ ...prev, [m.fieldKey]: e.target.value }))}
-                            placeholder={`Enter ${m.label}`}
-                            style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }}
+                  {buildEditStudentFields(templateData).map((field) => (
+                    <div key={field.key} className="form-group">
+                      <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6, display: 'block' }}>
+                        {field.label} <span style={{ color: '#ef4444' }}>*</span>
+                      </label>
+                      {field.inputType === "flag" ? (
+                        <select
+                          value={editFormFields[field.key] || ''}
+                          onChange={e => setEditFormFields(prev => ({ ...prev, [field.key]: e.target.value }))}
+                          style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14 }}
+                        >
+                          <option value="">— Select {field.label} —</option>
+                          {flagColors.map((c: string) => <option key={c} value={c}>{c}</option>)}
+                          <option value={editFormFields[field.key] || ''}>{editFormFields[field.key] && !flagColors.includes(editFormFields[field.key]) ? `Custom: ${editFormFields[field.key]}` : ''}</option>
+                        </select>
+                      ) : field.inputType === "mobile" ? (
+                        <>
+                          <div style={{
+                            display: 'flex', alignItems: 'stretch',
+                            border: '1px solid #d1d5db', borderRadius: 8, overflow: 'hidden',
+                            background: '#fff',
+                          }}>
+                            <span style={{
+                              padding: '10px 12px', background: '#f1f5f9',
+                              color: '#475569', fontWeight: 700, fontSize: 14,
+                              display: 'flex', alignItems: 'center',
+                              borderRight: '1px solid #e2e8f0',
+                            }} aria-hidden>🇮🇳 +91</span>
+                            <input
+                              type="tel"
+                              inputMode="numeric"
+                              pattern="[0-9]{10}"
+                              maxLength={10}
+                              value={editMobileLocals[field.key] ?? stripIndianPrefix(editFormFields[field.key] || "")}
+                              onChange={e => {
+                                const onlyDigits = e.target.value.replace(/\D/g, "").slice(0, 10)
+                                setEditMobileLocals(prev => ({ ...prev, [field.key]: onlyDigits }))
+                                setEditFormFields(prev => ({
+                                  ...prev,
+                                  [field.key]: onlyDigits ? `+91 ${onlyDigits}` : "",
+                                }))
+                              }}
+                              placeholder="9876543210"
+                              style={{ flex: 1, border: 'none', outline: 'none', padding: '10px 12px', fontSize: 14, boxSizing: 'border-box' }}
+                            />
+                          </div>
+                          <span style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, display: 'block' }}>
+                            Type only the 10-digit number — country code is added automatically.
+                          </span>
+                        </>
+                      ) : field.inputType === "address" ? (
+                        <>
+                          <textarea
+                            value={editFormFields[field.key] || ''}
+                            onChange={e => setEditFormFields(prev => ({ ...prev, [field.key]: e.target.value }))}
+                            rows={3}
+                            placeholder="e.g. House No 12, MG Road, Kothrud, Pune, 411038"
+                            style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14, resize: 'vertical', boxSizing: 'border-box' }}
                           />
-                        )}
-                      </div>
-                    ))
-                  })()}
+                          <span style={{
+                            fontSize: 11,
+                            marginTop: 4,
+                            display: 'block',
+                            color: editFieldWordCount(editFormFields[field.key] || "") >= EDIT_ADDRESS_MIN_WORDS ? '#22c55e' : '#94a3b8',
+                          }}>
+                            {editFieldWordCount(editFormFields[field.key] || "")}/{EDIT_ADDRESS_MIN_WORDS} words minimum
+                          </span>
+                        </>
+                      ) : field.inputType === "textarea" ? (
+                        <textarea
+                          value={editFormFields[field.key] || ''}
+                          onChange={e => setEditFormFields(prev => ({ ...prev, [field.key]: e.target.value }))}
+                          rows={3}
+                          style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14, resize: 'vertical', boxSizing: 'border-box' }}
+                        />
+                      ) : (
+                        <input
+                          type={field.inputType === "dob" ? "date" : "text"}
+                          value={editFormFields[field.key] || ''}
+                          onChange={e => setEditFormFields(prev => ({ ...prev, [field.key]: e.target.value }))}
+                          placeholder={`Enter ${field.label}`}
+                          style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }}
+                        />
+                      )}
+                    </div>
+                  ))}
 
                 </div>
 

@@ -165,7 +165,7 @@ export async function getPublicSubmissionFields(schoolId: string, template: any)
   }))
 }
 
-function stripIndianPrefix(raw: string): string {
+export function stripIndianPrefix(raw: string): string {
   if (!raw) return ""
   const explicit = raw.match(/^\+?\s*91[\s-]*(\d{0,10})\s*$/)
   if (explicit) return explicit[1]

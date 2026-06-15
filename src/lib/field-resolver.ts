@@ -281,6 +281,69 @@ export function resolveFieldValue(fd: Record<string, string>, fieldKey: string):
   return ""
 }
 
+function mobileFieldIntent(fieldKey: string, label: string): "father" | "mother" | "generic" {
+  const hay = `${fieldKey} ${label}`.toLowerCase()
+  const hasFather = /\bfather\b/.test(hay) || fieldKey === "mob_father"
+  const hasMother = /\bmother\b/.test(hay) || fieldKey === "mother_phone"
+  if (hasFather && !hasMother) return "father"
+  if (hasMother && !hasFather) return "mother"
+  return "generic"
+}
+
+/**
+ * Resolve a value for the manufacturer Edit Student form. Unlike
+ * resolveFieldValue, this disambiguates father vs mother mobile fields
+ * and matches Excel/import column headers to template field keys.
+ */
+export function resolveEditFieldValue(
+  fd: Record<string, string>,
+  fieldKey: string,
+  label: string = "",
+  explicitRole?: string
+): string {
+  const directVal = fd[fieldKey]
+  if (directVal != null && String(directVal).trim()) return String(directVal).trim()
+
+  const fdNormalized = getNormalizedFd(fd)
+  const normKey = normalizeKey(fieldKey)
+  if (fdNormalized[normKey]) return fdNormalized[normKey]
+
+  const normLabel = normalizeKey(label)
+  if (normLabel) {
+    for (const [k, v] of Object.entries(fd)) {
+      if (v != null && String(v).trim() && normalizeKey(k) === normLabel) {
+        return String(v).trim()
+      }
+    }
+  }
+
+  const role = getFieldRole(fieldKey, label, explicitRole)
+  if (role === "mobile") {
+    const intent = mobileFieldIntent(fieldKey, label)
+    if (intent === "father" || intent === "mother") {
+      for (const [k, v] of Object.entries(fd)) {
+        if (v == null || !String(v).trim()) continue
+        const kl = k.toLowerCase()
+        const kn = normalizeKey(k)
+        if (intent === "father") {
+          if (/\bmother\b/.test(kl) && !/\bfather\b/.test(kl)) continue
+          if (/\bfather\b/.test(kl) || kn.includes("mobfather")) return String(v).trim()
+        } else if (/\bmother\b/.test(kl) || kn.includes("motherphone")) {
+          return String(v).trim()
+        }
+      }
+      if (intent === "father") {
+        for (const key of ["phone", "mobile", "mob", "MOBILE", "Phone", "MOB"]) {
+          const v = fd[key]
+          if (v != null && String(v).trim()) return String(v).trim()
+        }
+      }
+    }
+  }
+
+  return resolveFieldValue(fd, fieldKey)
+}
+
 const PREFIXED_ADDRESS_FIELDS: Record<string, string> = {
   addresswithlabel: "Address:",
   addresslabel: "Address:",

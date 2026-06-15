@@ -3,6 +3,7 @@ import {
   normalizeKey,
   resolveDisplayFieldValue,
   resolveFieldValue,
+  resolveEditFieldValue,
   FIELD_GROUPS,
   getFieldRole,
   computeDuplicateFingerprint,
@@ -257,6 +258,26 @@ describe("resolveFieldValue", () => {
 
     it("uses explicit role from template", () => {
       expect(getFieldRole("custom_key", "Custom", "address")).toBe("address")
+    })
+  })
+
+  describe("resolveEditFieldValue", () => {
+    it("maps template mob_father key to Mobile No- Father column data", () => {
+      const fd = {
+        "Mobile No- Father": "8794948994",
+        "Mobile no -Mother": "+91 8605589076",
+      }
+      expect(resolveEditFieldValue(fd, "mob_father", "Mobile No- Father")).toBe("8794948994")
+      expect(resolveEditFieldValue(fd, "mother_phone", "Mobile no -Mother")).toBe("+91 8605589076")
+    })
+
+    it("maps father mobile from generic phone key without stealing mother number", () => {
+      const fd = {
+        phone: "9823203293",
+        "Mobile no -Mother": "+91 8605589076",
+      }
+      expect(resolveEditFieldValue(fd, "mob_father", "Mobile No- Father")).toBe("9823203293")
+      expect(resolveEditFieldValue(fd, "Mobile no -Mother", "Mobile no -Mother")).toBe("+91 8605589076")
     })
   })
 
