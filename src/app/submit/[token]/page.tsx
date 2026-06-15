@@ -582,6 +582,41 @@ export default function SubmitPage() {
     try { window.localStorage.removeItem(DRAFT_KEY) } catch { /* ignore */ }
   }
 
+  const startNewStudentRegistration = () => {
+    clearDraft()
+    if (typeof window !== "undefined") {
+      try { window.localStorage.removeItem(SUBMITTED_KEY) } catch { /* ignore */ }
+    }
+
+    const freshBase: Record<string, string> = config?.className && !config.usesClassPicker
+      ? { class: config.className }
+      : {}
+    const nextFormData =
+      config?.fixedBranch
+        ? applyFixedBranchToFormData(freshBase, config.fixedBranch, config.fieldConfig)
+        : freshBase
+
+    setAlreadySubmitted(null)
+    setDuplicateBlocked(false)
+    setDuplicateInfo(null)
+    setDraftBanner(false)
+    setRestoredDraftRevision(config?.fieldConfig ? computeSubmitFormRevision(config.fixedBranch, config.fieldConfig) : null)
+    setFormData(nextFormData)
+    setMobileLocals({})
+    setPhotoFile(null)
+    setPhotoPreview("")
+    setCroppedPhoto("")
+    setPhotoVerified(false)
+    setPhotoBgStatus("")
+    setPhotoUploadWarning("")
+    setAlertMsg("")
+    setMissingFieldKey("")
+    setResult(null)
+    setPreviewDownloadStatus("")
+    previewDownloadAttemptedRef.current = false
+    setStep("form")
+  }
+
   useEffect(() => {
     fetch(`/api/submit/${token}`)
       .then(r => r.json())
@@ -1100,6 +1135,24 @@ export default function SubmitPage() {
             <p style={{ fontSize: 13, color: '#94a3b8', marginBottom: 24, lineHeight: 1.6 }}>
               Do not submit again. Contact support if you need changes.
             </p>
+            <button
+              type="button"
+              onClick={startNewStudentRegistration}
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                gap: 8, width: '100%', maxWidth: 320,
+                padding: '14px 20px', borderRadius: 12,
+                background: 'linear-gradient(135deg, #2563eb, #4f46e5)',
+                color: 'white',
+                fontSize: 15, fontWeight: 800,
+                border: 'none',
+                cursor: 'pointer',
+                marginBottom: 12,
+                boxShadow: '0 8px 18px rgba(37,99,235,0.22)',
+              }}
+            >
+              Enter New Student
+            </button>
             <a
               href={waUrl}
               target="_blank"
@@ -1180,6 +1233,25 @@ export default function SubmitPage() {
             <p style={{ fontSize: 13, color: '#94a3b8', marginBottom: 24, lineHeight: 1.6 }}>
               You cannot submit again. Contact support on WhatsApp if you need changes.
             </p>
+
+            <button
+              type="button"
+              onClick={startNewStudentRegistration}
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                gap: 8, width: '100%', maxWidth: 320,
+                padding: '14px 20px', borderRadius: 12,
+                background: 'linear-gradient(135deg, #2563eb, #4f46e5)',
+                color: 'white',
+                fontSize: 15, fontWeight: 800,
+                border: 'none',
+                cursor: 'pointer',
+                marginBottom: 12,
+                boxShadow: '0 8px 18px rgba(37,99,235,0.22)',
+              }}
+            >
+              Enter New Student
+            </button>
 
             <a
               href={waUrl}
