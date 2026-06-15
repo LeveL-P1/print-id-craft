@@ -1,7 +1,7 @@
 /**
- * Submit-form photo background — Remove.bg passthrough.
- * Remove.bg removes the background and applies the school colour on their servers.
- * Custom client compositing / quality checks are disabled for now.
+ * Submit-form photo background — free BiRefNet portrait (rembg service).
+ * Closest free alternative to Remove.bg for school ID portraits.
+ * Uses simple canvas compositing only (no custom mask heuristics).
  */
 
 // CUSTOM PIPELINE (disabled — re-enable later):
@@ -21,14 +21,9 @@
 export const SUBMIT_BG_JPEG_QUALITY = 0.88
 export const SUBMIT_BG_WORK_MAX_DIM = 768
 
-const REMOVEBG_MODEL = "removebg"
+/** Best free portrait model — BiRefNet portrait via rembg FastAPI (HF Space). */
+const SUBMIT_BG_MODEL = "birefnet-portrait"
 const SERVER_REMOVE_TIMEOUT_MS = 280_000
-
-// CUSTOM PIPELINE (disabled — re-enable later):
-// const MIN_FOREGROUND_RATIO = 0.06
-// const MIN_EDGE_MATCH_PERCENT = 72
-// const MIN_FINISHED_QUALITY_SCORE = 68
-// const MAX_SUBJECT_BACKGROUND_LEAK_PERCENT = 12
 
 export type SubmitBgProgress = (message: string, percent: number, previewDataUrl?: string) => void
 
@@ -48,20 +43,44 @@ async function photoUrlToBlob(url: string): Promise<Blob> {
   return response.blob()
 }
 
-async function blobToDataUrl(blob: Blob): Promise<string> {
+function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result))
-    reader.onerror = () => reject(new Error("Could not read processed photo"))
-    reader.readAsDataURL(blob)
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error("Could not load photo"))
+    img.src = url
   })
 }
 
-async function removeBackgroundWithRemoveBg(blob: Blob, bgColor: string): Promise<Blob> {
+/** Plain alpha composite: solid school colour + transparent cutout on top. */
+async function compositeCutoutOntoColor(
+  cutoutBlob: Blob,
+  bgColor: string,
+  jpegQuality: number
+): Promise<string> {
+  const objectUrl = URL.createObjectURL(cutoutBlob)
+  try {
+    const img = await loadImage(objectUrl)
+    const canvas = document.createElement("canvas")
+    canvas.width = img.naturalWidth
+    canvas.height = img.naturalHeight
+    const ctx = canvas.getContext("2d")
+    if (!ctx) throw new Error("Canvas unavailable")
+
+    ctx.fillStyle = bgColor
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL("image/jpeg", jpegQuality)
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
+async function removeBackgroundWithService(blob: Blob, bgColor: string): Promise<Blob> {
   const form = new FormData()
   form.append("image", blob, "photo.jpg")
   form.append("bgColor", bgColor)
-  form.append("model", REMOVEBG_MODEL)
+  form.append("model", SUBMIT_BG_MODEL)
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), SERVER_REMOVE_TIMEOUT_MS)
@@ -74,18 +93,20 @@ async function removeBackgroundWithRemoveBg(blob: Blob, bgColor: string): Promis
     })
 
     if (response.status === 503) {
-      throw new Error("Remove.bg is not configured — set REMOVEBG_API_KEY on the server")
+      throw new Error(
+        "Background removal service is not configured — set BG_REMOVAL_SERVICE_URL on the server"
+      )
     }
     if (!response.ok) {
       const detail = await response.text().catch(() => "")
-      throw new Error(detail || "Remove.bg background removal failed")
+      throw new Error(detail || "Background removal failed")
     }
 
     const contentType = response.headers.get("content-type") || ""
     if (contentType.includes("application/json")) {
       const json = await response.json()
       const dataUrl = json?.dataUrl || json?.image || ""
-      if (!dataUrl) throw new Error("Remove.bg returned no image")
+      if (!dataUrl) throw new Error("Background removal returned no image")
       return photoUrlToBlob(dataUrl)
     }
 
@@ -94,16 +115,6 @@ async function removeBackgroundWithRemoveBg(blob: Blob, bgColor: string): Promis
     clearTimeout(timer)
   }
 }
-
-// CUSTOM PIPELINE (disabled — re-enable later):
-// function finalizeCanvasToDataUrl(
-//   canvas: HTMLCanvasElement,
-//   ctx: CanvasRenderingContext2D,
-//   bgColor: string
-// ): string {
-//   cleanupBackgroundArtifacts(ctx, canvas.width, canvas.height, bgColor)
-//   return canvas.toDataURL("image/jpeg", SUBMIT_BG_JPEG_QUALITY)
-// }
 
 export async function processSubmitPhotoBackground(
   photoUrl: string,
@@ -114,72 +125,17 @@ export async function processSubmitPhotoBackground(
 
   const workBlob = await photoUrlToBlob(photoUrl)
 
-  onProgress?.("Removing background (Remove.bg)...", 25)
-  const resultBlob = await removeBackgroundWithRemoveBg(workBlob, bgColor)
+  onProgress?.("Connecting to background removal...", 15)
+  onProgress?.("Removing background (BiRefNet)...", 25)
+  const cutoutBlob = await removeBackgroundWithService(workBlob, bgColor)
 
-  const dataUrl = await blobToDataUrl(resultBlob)
+  onProgress?.("Applying school colour...", 85)
+  const dataUrl = await compositeCutoutOntoColor(cutoutBlob, bgColor, SUBMIT_BG_JPEG_QUALITY)
+
   onProgress?.("Done", 100, dataUrl)
   return { dataUrl, usedAi: true }
 
   /* CUSTOM PIPELINE (disabled — re-enable later):
-  const { canvas, ctx } = await loadImageToCanvas(photoUrl, SUBMIT_BG_WORK_MAX_DIM)
-  const edgeBg = analyzeEdgeBackground(ctx, canvas.width, canvas.height)
-
-  if (canUseFastRecolorOnly(edgeBg, bgColor)) {
-    const recolored = recolorPlainBackgroundOnCanvas(ctx, canvas.width, canvas.height, bgColor)
-    if (recolored) {
-      const edgeMatch = measureEdgeBackgroundMatch(ctx, canvas.width, canvas.height, bgColor)
-      if (edgeMatch >= MIN_EDGE_MATCH_PERCENT) {
-        const dataUrl = finalizeCanvasToDataUrl(canvas, ctx, bgColor)
-        onProgress?.("Background updated", 100, dataUrl)
-        return { dataUrl, usedAi: false }
-      }
-    }
-  }
-
-  onProgress?.("Sending to Remove.bg...", 12)
-  let workBlob = await photoUrlToBlob(photoUrl)
-  workBlob = await downscaleBlob(workBlob, SUBMIT_BG_WORK_MAX_DIM)
-
-  onProgress?.("Removing background (Remove.bg)...", 22)
-  const maskBlob = await removeBackgroundWithRemoveBg(workBlob, bgColor)
-
-  const fgRatio = await measureForegroundRatioInTransparentBlob(maskBlob)
-  if (fgRatio < MIN_FOREGROUND_RATIO) {
-    throw new Error("Could not detect the student clearly in the photo")
-  }
-
-  onProgress?.("Applying school background colour...", 78)
-  const livePreview = await finalizePlainBackgroundFromMaskBlobs(
-    workBlob,
-    maskBlob,
-    bgColor,
-    SUBMIT_BG_JPEG_QUALITY,
-    "removebg"
-  )
-  onProgress?.("Preview ready", 85, livePreview)
-
-  onProgress?.("Checking photo quality...", 88)
-  const quality = await scorePlainBackgroundFromMaskBlobs(workBlob, maskBlob, bgColor, "removebg")
-  if (
-    quality.score < MIN_FINISHED_QUALITY_SCORE ||
-    quality.subjectLeaks > MAX_SUBJECT_BACKGROUND_LEAK_PERCENT
-  ) {
-    throw new Error(
-      `Photo needs manual review (quality ${quality.score}/100). Use your original photo or try a clearer picture.`
-    )
-  }
-
-  onProgress?.("Finishing...", 94)
-  const dataUrl = await finalizePlainBackgroundFromMaskBlobs(
-    workBlob,
-    maskBlob,
-    bgColor,
-    SUBMIT_BG_JPEG_QUALITY,
-    "removebg"
-  )
-
-  onProgress?.("Done", 100, dataUrl)
-  return { dataUrl, usedAi: true }
+  ...
   */
 }

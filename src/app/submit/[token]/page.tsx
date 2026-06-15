@@ -2132,7 +2132,7 @@ export default function SubmitPage() {
             </div>
           )}
 
-          {/* BACKGROUND REMOVAL STEP — Remove.bg API + school colour composite */}
+          {/* BACKGROUND REMOVAL STEP — BiRefNet portrait (free) + simple colour composite */}
           {step === "bg" && croppedPhoto && (
             <div>
               <PhotoBgProcessor

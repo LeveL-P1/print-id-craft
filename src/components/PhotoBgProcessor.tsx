@@ -20,7 +20,7 @@ type Props = {
 
 const LIVE_STEPS = [
   { id: "prepare", label: "Preparing photo", match: /prepar/i },
-  { id: "service", label: "Connecting to server", match: /send|service|remove\.bg|connect/i },
+  { id: "service", label: "Connecting to server", match: /send|service|connect|birefnet|rembg/i },
   { id: "clean", label: "Removing background", match: /remov|clean|background/i },
   { id: "color", label: "Applying colour", match: /colour|color|apply|background updated|done|complete|finish|preview/i },
 ] as const
@@ -43,8 +43,8 @@ function formatProcessingError(err: unknown) {
   if (detail.includes("detect") && detail.includes("student")) {
     return "We couldn't detect you clearly in the photo. You can continue with your original upload or try a clearer photo."
   }
-  if (detail.includes("not configured")) {
-    return "Remove.bg is unavailable right now. You can continue with your original photo or try again later."
+  if (detail.includes("not configured") || detail.includes("not running")) {
+    return "Background removal is unavailable right now. You can continue with your original photo or try again later."
   }
   return "Photo preparation didn't work this time. You can continue with your original upload or retry."
 }
@@ -128,7 +128,7 @@ export default function PhotoBgProcessor({
   }, [processing])
 
   const removeBackground = useCallback(async () => {
-    // Use full-resolution cropped photo — Remove.bg handles everything server-side.
+    // Use full-resolution cropped photo for best free-model quality.
     const sourceUrl = photoUrl
     if (!sourceUrl || removalStartedRef.current) return
     removalStartedRef.current = true
@@ -231,7 +231,7 @@ export default function PhotoBgProcessor({
         Preparing Your Photo
       </div>
       <p style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>
-        Remove.bg is preparing your photo with school colour
+        Removing background and applying school colour
         {schoolBgColor && (
           <>
             {" "}
@@ -331,7 +331,7 @@ export default function PhotoBgProcessor({
           <p style={{ fontSize: 11, color: '#64748b', textAlign: 'center', marginTop: 14, marginBottom: livePreviewUrl ? 12 : 0, lineHeight: 1.5 }}>
             {livePreviewUrl
               ? "Preview is ready — you can keep your original photo or wait for the final version."
-              : "Remove.bg is preparing your photo. This usually takes a few seconds."}
+              : "AI is preparing your photo. The first run may take up to a minute while the server starts."}
           </p>
           <div style={{ textAlign: "center" }}>
             <button
