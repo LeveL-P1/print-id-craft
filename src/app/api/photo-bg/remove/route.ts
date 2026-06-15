@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import {
   configuredBgRemovalServiceUrl,
+  formatBgServiceError,
+  isRetryableBgServiceStatus,
   removeBackgroundViaService,
 } from "@/lib/bg-removal-service"
 import {
@@ -198,15 +200,37 @@ export async function POST(req: Request) {
 
       if (!response.ok) {
         const detail = await response.text().catch(() => "")
+
+        // Fallback to Remove.bg when HF Space is asleep/unavailable and API key is set.
+        if (isRetryableBgServiceStatus(response.status) && isRemoveBgConfigured()) {
+          console.warn("[photo-bg/remove] HF service failed, falling back to Remove.bg...")
+          try {
+            const result = await removeBackgroundWithRemoveBg(
+              image.buffer,
+              image.contentType,
+              image.fileName
+            )
+            return new NextResponse(new Uint8Array(result), {
+              headers: {
+                "content-type": "image/png",
+                "cache-control": "no-store",
+                "x-bg-removal-model": "removebg-fallback",
+              },
+            })
+          } catch (fallbackErr) {
+            console.error("[photo-bg/remove] Remove.bg fallback failed:", fallbackErr)
+          }
+        }
+
         return NextResponse.json(
           {
             error:
-              detail ||
+              formatBgServiceError(detail, response.status) ||
               (wokeService
-                ? "Professional background service is still starting — try again in a moment"
-                : "Professional background removal failed"),
+                ? "Background removal server is still starting — wait a moment and retry"
+                : "Background removal failed"),
           },
-          { status: response.status }
+          { status: response.status >= 400 && response.status < 600 ? response.status : 502 }
         )
       }
 

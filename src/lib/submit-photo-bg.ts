@@ -4,20 +4,6 @@
  * Uses simple canvas compositing only (no custom mask heuristics).
  */
 
-// CUSTOM PIPELINE (disabled — re-enable later):
-// import {
-//   analyzeEdgeBackground,
-//   canUseFastRecolorOnly,
-//   cleanupBackgroundArtifacts,
-//   downscaleBlob,
-//   finalizePlainBackgroundFromMaskBlobs,
-//   loadImageToCanvas,
-//   measureEdgeBackgroundMatch,
-//   measureForegroundRatioInTransparentBlob,
-//   recolorPlainBackgroundOnCanvas,
-//   scorePlainBackgroundFromMaskBlobs,
-// } from "@/lib/photo-background"
-
 export const SUBMIT_BG_JPEG_QUALITY = 0.88
 export const SUBMIT_BG_WORK_MAX_DIM = 768
 
@@ -26,6 +12,41 @@ const SUBMIT_BG_MODEL = "birefnet-portrait"
 const SERVER_REMOVE_TIMEOUT_MS = 280_000
 
 export type SubmitBgProgress = (message: string, percent: number, previewDataUrl?: string) => void
+
+/** Wake the HF rembg Space while the parent is cropping (best-effort). */
+export async function preloadSubmitBgService(): Promise<void> {
+  try {
+    await fetch("/api/photo-bg/health", { cache: "no-store" })
+  } catch {
+    /* ignore — remove step will retry wake */
+  }
+}
+
+function parseRemoveApiError(status: number, detail: string): string {
+  if (status === 503) {
+    return "Background removal is not configured on the server."
+  }
+  if (status === 502 || status === 504 || detail.includes("failed to respond")) {
+    return "Background removal server is waking up — wait 1–2 minutes and tap Retry."
+  }
+  try {
+    const outer = JSON.parse(detail) as { error?: string }
+    if (typeof outer.error === "string") {
+      if (outer.error.includes("failed to respond") || outer.error.includes('"code":502')) {
+        return "Background removal server is waking up — wait 1–2 minutes and tap Retry."
+      }
+      try {
+        const inner = JSON.parse(outer.error) as { message?: string }
+        if (inner.message) return inner.message
+      } catch {
+        return outer.error
+      }
+    }
+  } catch {
+    /* use raw detail */
+  }
+  return detail || "Background removal failed"
+}
 
 async function photoUrlToBlob(url: string): Promise<Blob> {
   if (url.startsWith("data:")) {
@@ -92,14 +113,9 @@ async function removeBackgroundWithService(blob: Blob, bgColor: string): Promise
       signal: controller.signal,
     })
 
-    if (response.status === 503) {
-      throw new Error(
-        "Background removal service is not configured — set BG_REMOVAL_SERVICE_URL on the server"
-      )
-    }
     if (!response.ok) {
       const detail = await response.text().catch(() => "")
-      throw new Error(detail || "Background removal failed")
+      throw new Error(parseRemoveApiError(response.status, detail))
     }
 
     const contentType = response.headers.get("content-type") || ""
@@ -125,7 +141,9 @@ export async function processSubmitPhotoBackground(
 
   const workBlob = await photoUrlToBlob(photoUrl)
 
-  onProgress?.("Connecting to background removal...", 15)
+  onProgress?.("Waking background removal server...", 12)
+  await preloadSubmitBgService()
+
   onProgress?.("Removing background (BiRefNet)...", 25)
   const cutoutBlob = await removeBackgroundWithService(workBlob, bgColor)
 
@@ -134,8 +152,4 @@ export async function processSubmitPhotoBackground(
 
   onProgress?.("Done", 100, dataUrl)
   return { dataUrl, usedAi: true }
-
-  /* CUSTOM PIPELINE (disabled — re-enable later):
-  ...
-  */
 }

@@ -2,6 +2,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react"
 import {
   processSubmitPhotoBackground,
+  preloadSubmitBgService,
   SUBMIT_BG_JPEG_QUALITY,
   SUBMIT_BG_WORK_MAX_DIM,
 } from "@/lib/submit-photo-bg"
@@ -46,6 +47,9 @@ function formatProcessingError(err: unknown) {
   if (detail.includes("not configured") || detail.includes("not running")) {
     return "Background removal is unavailable right now. You can continue with your original photo or try again later."
   }
+  if (detail.includes("waking up") || detail.includes("failed to respond") || detail.includes("502")) {
+    return "The background removal server is starting up. Wait 1–2 minutes, then tap Retry."
+  }
   return "Photo preparation didn't work this time. You can continue with your original upload or retry."
 }
 
@@ -84,6 +88,10 @@ export default function PhotoBgProcessor({
     lastBgStatusRef.current = status
     onStatus?.(status)
   }, [onStatus])
+
+  useEffect(() => {
+    void preloadSubmitBgService()
+  }, [])
 
   useEffect(() => {
     if (!photoUrl) {

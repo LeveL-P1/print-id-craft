@@ -20,6 +20,7 @@ import {
   parseSubmitDraft,
 } from "@/lib/submit-draft"
 import { uploadStudentPhotoResilient } from "@/lib/client-photo-upload"
+import { preloadSubmitBgService } from "@/lib/submit-photo-bg"
 import { PHOTO_BG_STATUS, type PhotoBgStatus } from "@/lib/photo-bg-status"
 
 const SUPPORT_PHONE_DISPLAY = "+91 98818 77607"
@@ -567,6 +568,13 @@ export default function SubmitPage() {
     setPhotoBgStatus("")
     setStep("bg")
   }, [])
+
+  // Wake the HF rembg Space while the parent adjusts the crop.
+  useEffect(() => {
+    if (step === "photo" || step === "crop") {
+      void preloadSubmitBgService()
+    }
+  }, [step])
 
   const clearDraft = () => {
     if (typeof window === "undefined") return

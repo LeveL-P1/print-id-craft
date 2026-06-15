@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import {
   configuredBgRemovalServiceUrl,
-  wakeBgRemovalService,
+  ensureBgRemovalServiceReady,
 } from "@/lib/bg-removal-service"
 
 export const runtime = "nodejs"
@@ -22,9 +22,9 @@ export async function GET() {
   }
 
   try {
-    const body = await wakeBgRemovalService(serviceUrl, 90_000)
+    const { ready, health: body } = await ensureBgRemovalServiceReady(serviceUrl, 8)
 
-    if (!body?.ok) {
+    if (!ready || !body?.ok) {
       return NextResponse.json(
         {
           ok: false,

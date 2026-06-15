@@ -33,6 +33,8 @@ export function isRetryableBgServiceStatus(status: number): boolean {
   return RETRYABLE_STATUS.has(status)
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
 async function fetchWithTimeout(
   url: string,
   init: RequestInit,
@@ -50,7 +52,7 @@ async function fetchWithTimeout(
 /** Ping /health - also wakes a sleeping Hugging Face Space. */
 export async function wakeBgRemovalService(
   serviceUrl: string,
-  timeoutMs = 90_000
+  timeoutMs = 120_000
 ): Promise<BgServiceHealth | null> {
   try {
     const response = await fetchWithTimeout(
@@ -58,10 +60,30 @@ export async function wakeBgRemovalService(
       { headers: bgRemovalServiceHeaders(), cache: "no-store" },
       timeoutMs
     )
-    return (await response.json().catch(() => null)) as BgServiceHealth | null
+    if (!response.ok) return null
+    const body = (await response.json().catch(() => null)) as BgServiceHealth | null
+    return body?.ok === true ? body : null
   } catch {
     return null
   }
+}
+
+/** Poll /health until the HF Space responds or attempts are exhausted. */
+export async function ensureBgRemovalServiceReady(
+  serviceUrl: string,
+  maxAttempts = 10
+): Promise<{ ready: boolean; health: BgServiceHealth | null }> {
+  let health: BgServiceHealth | null = null
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    health = await wakeBgRemovalService(serviceUrl, 120_000)
+    if (health?.ok === true) {
+      return { ready: true, health }
+    }
+    if (attempt < maxAttempts - 1) {
+      await sleep(8_000 + attempt * 4_000)
+    }
+  }
+  return { ready: false, health }
 }
 
 export async function postBgRemovalRemove(
@@ -84,20 +106,39 @@ export async function removeBackgroundViaService(
   serviceUrl: string,
   buildForm: () => FormData
 ): Promise<{ response: Response; wokeService: boolean }> {
-  let wokeService = false
-  let health = await wakeBgRemovalService(serviceUrl, 90_000)
-  if (health?.ok !== true) {
-    await new Promise((resolve) => setTimeout(resolve, 4_000))
-    health = await wakeBgRemovalService(serviceUrl, 90_000)
-    wokeService = true
-  }
+  const { ready } = await ensureBgRemovalServiceReady(serviceUrl)
+  let wokeService = !ready
 
+  const maxRemoveAttempts = 4
   let response = await postBgRemovalRemove(serviceUrl, buildForm(), 260_000)
-  if (response.ok || !isRetryableBgServiceStatus(response.status)) {
-    return { response, wokeService }
+
+  for (let attempt = 1; attempt < maxRemoveAttempts; attempt++) {
+    if (response.ok || !isRetryableBgServiceStatus(response.status)) {
+      return { response, wokeService }
+    }
+    wokeService = true
+    await ensureBgRemovalServiceReady(serviceUrl, 6)
+    await sleep(6_000)
+    response = await postBgRemovalRemove(serviceUrl, buildForm(), 260_000)
   }
 
-  await wakeBgRemovalService(serviceUrl, 60_000)
-  response = await postBgRemovalRemove(serviceUrl, buildForm(), 260_000)
-  return { response, wokeService: true }
+  return { response, wokeService }
+}
+
+export function formatBgServiceError(detail: string, status: number): string {
+  if (isRetryableBgServiceStatus(status)) {
+    try {
+      const outer = JSON.parse(detail) as { error?: string }
+      if (typeof outer.error === "string") {
+        const inner = JSON.parse(outer.error) as { code?: number; message?: string }
+        if (inner.code === 502 || inner.message?.toLowerCase().includes("failed to respond")) {
+          return "Background removal server is waking up — wait 1–2 minutes and tap Retry."
+        }
+      }
+    } catch {
+      /* use generic message */
+    }
+    return "Background removal server is waking up — wait 1–2 minutes and tap Retry."
+  }
+  return detail || "Background removal failed"
 }
