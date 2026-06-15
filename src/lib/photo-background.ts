@@ -872,12 +872,23 @@ export function recoverHairByColor(original: ImageData, mask: ImageData): ImageD
  *  7. Edge-aware alpha refinement (smooth transitions)
  *  8. Original RGB alignment
  */
-export function enhanceForegroundMask(original: ImageData, mask: ImageData): ImageData {
+export function enhanceForegroundMask(original: ImageData, mask: ImageData, model?: string): ImageData {
+  const isLocal = model === "isnet"
   const repaired = repairForegroundMaskHoles(original, mask, DEFAULT_MASK_ENHANCE)
-  const closed1 = closeMaskAlphaGaps(original, repaired)
-  const closed2 = closeMaskAlphaGaps(original, closed1)   // 2nd pass: fill wider hair gaps
-  const clothingProtected = protectClothingInMask(original, closed2)
-  const rescued = rescuePortraitEnvelope(original, clothingProtected)
+  
+  let current = repaired
+  if (isLocal) {
+    const closed1 = closeMaskAlphaGaps(original, current)
+    current = closeMaskAlphaGaps(original, closed1)   // 2nd pass: fill wider hair gaps
+  }
+  
+  const clothingProtected = protectClothingInMask(original, current)
+  
+  let rescued = clothingProtected
+  if (isLocal) {
+    rescued = rescuePortraitEnvelope(original, clothingProtected)
+  }
+  
   const hairRecovered = recoverHairByColor(original, rescued)
   const interiorFilled = floodFillInteriorHoles(original, hairRecovered)
   const edgeRefined = edgeAwareAlphaRefine(original, interiorFilled)
@@ -1072,13 +1083,15 @@ export function enforcePlainBackgroundEdges(
 export function compositeMaskImageDataOntoPlainColor(
   original: ImageData,
   mask: ImageData,
-  bgColor: string
+  bgColor: string,
+  model?: string
 ): ImageData {
   const target = parseHexColor(bgColor) || { r: 255, g: 255, b: 255 }
   const w = mask.width
   const h = mask.height
   const out = new Uint8ClampedArray(w * h * 4)
   const { r: tr, g: tg, b: tb } = target
+  const isLocal = model === "isnet"
 
   // --- Pass 1: Alpha composite (cutout sticker onto colour) ---
   for (let idx = 0; idx < w * h; idx++) {
@@ -1111,7 +1124,7 @@ export function compositeMaskImageDataOntoPlainColor(
 
     // In person zone, strongly favour original photo (0.92 min alpha, was 0.85).
     // This prevents the cutout from looking "ghostly" around hair edges.
-    const a = inPerson ? Math.max(sa / 255, 0.92) : sa / 255
+    const a = (isLocal && inPerson) ? Math.max(sa / 255, 0.92) : sa / 255
     const fr = original.data[p]
     const fg = original.data[p + 1]
     const fb = original.data[p + 2]
@@ -1239,10 +1252,11 @@ export function scorePlainBackgroundQuality(
 export function finalizePlainBackgroundFromMask(
   original: ImageData,
   mask: ImageData,
-  bgColor: string
+  bgColor: string,
+  model?: string
 ): ImageData {
-  const enhanced = enhanceForegroundMask(original, mask)
-  let composited = compositeMaskImageDataOntoPlainColor(original, enhanced, bgColor)
+  const enhanced = enhanceForegroundMask(original, mask, model)
+  let composited = compositeMaskImageDataOntoPlainColor(original, enhanced, bgColor, model)
 
   if (typeof document === "undefined") return composited
 
@@ -1274,7 +1288,8 @@ export async function finalizePlainBackgroundFromMaskBlobs(
   originalBlob: Blob,
   maskBlob: Blob,
   bgColor: string,
-  jpegQuality = 0.88
+  jpegQuality = 0.88,
+  model?: string
 ): Promise<string> {
   const [original, mask] = await Promise.all([
     loadBlobAsImageData(originalBlob),
@@ -1284,7 +1299,7 @@ export async function finalizePlainBackgroundFromMaskBlobs(
     throw new Error("Mask size does not match photo")
   }
 
-  const result = finalizePlainBackgroundFromMask(original, mask, bgColor)
+  const result = finalizePlainBackgroundFromMask(original, mask, bgColor, model)
   const canvas = document.createElement("canvas")
   canvas.width = result.width
   canvas.height = result.height
@@ -1297,13 +1312,14 @@ export async function finalizePlainBackgroundFromMaskBlobs(
 export async function scorePlainBackgroundFromMaskBlobs(
   originalBlob: Blob,
   maskBlob: Blob,
-  bgColor: string
+  bgColor: string,
+  model?: string
 ): Promise<PlainBackgroundQuality> {
   const [original, mask] = await Promise.all([
     loadBlobAsImageData(originalBlob),
     loadBlobAsImageData(maskBlob),
   ])
-  const result = finalizePlainBackgroundFromMask(original, mask, bgColor)
+  const result = finalizePlainBackgroundFromMask(original, mask, bgColor, model)
   const canvas = document.createElement("canvas")
   canvas.width = result.width
   canvas.height = result.height

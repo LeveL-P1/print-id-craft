@@ -1,6 +1,6 @@
 "use client"
 import { useState, useRef, useCallback, useEffect, useMemo } from "react"
-import { processPhotoBackgroundLocal } from "@/lib/photo-bg-composite-client"
+import { processPhotoBackgroundLocal, type BgModelChoice } from "@/lib/photo-bg-composite-client"
 import { PHOTO_BG_STATUS, type PhotoBgStatus } from "@/lib/photo-bg-status"
 
 type Props = {
@@ -12,6 +12,7 @@ type Props = {
   /** Milliseconds before auto-skip when autoConfirm is true; 0 disables auto-skip. */
   autoSkipAfterMs?: number
   onStatus?: (status: PhotoBgStatus) => void
+  model?: BgModelChoice
 }
 
 const BG_JPEG_QUALITY = 0.88
@@ -53,6 +54,7 @@ export default function PhotoBgProcessor({
   autoConfirm = false,
   autoSkipAfterMs = 8000,
   onStatus,
+  model = "gemini",
 }: Props) {
   const [processing, setProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -145,7 +147,7 @@ export default function PhotoBgProcessor({
           setProgress(pct)
           if (previewDataUrl) setLivePreviewUrl(previewDataUrl)
         },
-        "birefnet"
+        model
       )
       if (cancelledRef.current) return
       setBgStatus(usedAi ? PHOTO_BG_STATUS.PROCESSED : PHOTO_BG_STATUS.PLAIN)
@@ -164,7 +166,7 @@ export default function PhotoBgProcessor({
     } finally {
       if (!cancelledRef.current) setProcessing(false)
     }
-  }, [photoUrl, photoDataUrl, schoolBgColor, setBgStatus, autoConfirm, onSkip])
+  }, [photoUrl, photoDataUrl, schoolBgColor, setBgStatus, autoConfirm, onSkip, model])
 
   const handleUseOriginal = useCallback(() => {
     cancelledRef.current = true

@@ -287,12 +287,13 @@ export async function processPhotoBackgroundLocal(
     workBlob,
     maskBlob,
     bgColor,
-    BG_JPEG_QUALITY
+    BG_JPEG_QUALITY,
+    model
   )
   onProgress?.("AI preview ready", 85, livePreview)
 
   onProgress?.("Checking AI photo quality…", 88)
-  const quality = await scorePlainBackgroundFromMaskBlobs(workBlob, maskBlob, bgColor)
+  const quality = await scorePlainBackgroundFromMaskBlobs(workBlob, maskBlob, bgColor, model)
   if (
     quality.score < MIN_FINISHED_QUALITY_SCORE ||
     quality.subjectLeaks > MAX_SUBJECT_BACKGROUND_LEAK_PERCENT
@@ -307,7 +308,8 @@ export async function processPhotoBackgroundLocal(
     workBlob,
     maskBlob,
     bgColor,
-    BG_JPEG_QUALITY
+    BG_JPEG_QUALITY,
+    model
   )
 
   onProgress?.("Done", 100)
