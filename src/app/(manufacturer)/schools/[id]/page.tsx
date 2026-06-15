@@ -127,6 +127,8 @@ type StudentData = {
   serialNumber: string
   photoUrl: string
   photoPath?: string
+  originalPhotoUrl?: string
+  originalPhotoPath?: string
   photoUpdatedAt?: number
   updatedAt?: string
   photoBgStatus?: string
@@ -3215,9 +3217,9 @@ export default function SchoolDetailPage() {
                               {hasPhoto && (
                                 <a
                                   className="btn btn-outline"
-                                  href={`/api/media/student-photo/${s.id}?download=1`}
+                                  href={`/api/media/student-photo/${s.id}?variant=original&download=1`}
                                   style={{ fontSize: 10, padding: '4px 7px', borderColor: '#0ea5e9', color: '#0284c7', fontWeight: 700, minWidth: 32, textDecoration: 'none' }}
-                                  title="Download uploaded photo"
+                                  title="Download original uploaded photo"
                                 >
                                   DL
                                 </a>
@@ -4612,10 +4614,10 @@ export default function SchoolDetailPage() {
                   {studentHasPhoto(selectedStudent) && (
                     <a
                       className="btn btn-outline"
-                      href={`/api/media/student-photo/${selectedStudent.id}?download=1`}
+                      href={`/api/media/student-photo/${selectedStudent.id}?variant=original&download=1`}
                       style={{ fontSize: 13, borderColor: '#0ea5e9', color: '#0284c7', textDecoration: 'none' }}
                     >
-                      Download Photo
+                      Download Original
                     </a>
                   )}
                   <button className="btn btn-outline" style={{ fontSize: 13, borderColor: '#22c55e', color: '#16a34a' }} onClick={() => { handleStatusUpdate(selectedStudent.id, "APPROVED"); setSelectedStudent(null) }}>✓ Approve</button>

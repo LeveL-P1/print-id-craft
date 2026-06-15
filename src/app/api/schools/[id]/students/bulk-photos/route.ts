@@ -192,7 +192,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     const errors: Array<{ filename: string; error: string }> = []
     // Collected DB writes — applied in a single transactional chunked sweep
     // at the end of the request so we don't pay per-file round-trip latency.
-    const pendingUpdates: Array<{ id: string; photoUrl: string; photoPath: string }> = []
+    const pendingUpdates: Array<{ id: string; photoUrl: string; photoPath: string; originalPhotoUrl: string; originalPhotoPath: string }> = []
 
     // Storage uploads are I/O-bound, but unbounded parallelism can spike
     // memory and outbound connections on large requests. DB writes are deferred.
@@ -314,7 +314,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
           const arrayBuffer = await file.arrayBuffer()
           const buffer = Buffer.from(arrayBuffer)
           const ext = filename.split(".").pop()?.toLowerCase() || "jpg"
-          const filePath = `students/${schoolId}/${student.id}.${ext}`
+          const filePath = `students/${schoolId}/originals/${student.id}.${ext}`
 
           const { error: uploadError } = await storageUpload(BUCKET, filePath, buffer, {
             contentType: file.type,
@@ -329,7 +329,13 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
           const publicUrl = storagePublicUrl(BUCKET, filePath)
 
           // Queue DB write instead of running it inline — batched below.
-          pendingUpdates.push({ id: student.id, photoUrl: publicUrl, photoPath: filePath })
+          pendingUpdates.push({
+            id: student.id,
+            photoUrl: publicUrl,
+            photoPath: filePath,
+            originalPhotoUrl: publicUrl,
+            originalPhotoPath: filePath,
+          })
 
           const fd = student.formData as Record<string, string>
           matched.push({
@@ -355,7 +361,12 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
             chunk.map(u =>
               prisma.student.update({
                 where: { id: u.id },
-                data: { photoUrl: u.photoUrl, photoPath: u.photoPath },
+                data: {
+                  photoUrl: u.photoUrl,
+                  photoPath: u.photoPath,
+                  originalPhotoUrl: u.originalPhotoUrl,
+                  originalPhotoPath: u.originalPhotoPath,
+                },
               })
             )
           )
@@ -364,7 +375,15 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
           // bad row doesn't lose the whole chunk's progress.
           for (const u of chunk) {
             try {
-              await prisma.student.update({ where: { id: u.id }, data: { photoUrl: u.photoUrl, photoPath: u.photoPath } })
+              await prisma.student.update({
+                where: { id: u.id },
+                data: {
+                  photoUrl: u.photoUrl,
+                  photoPath: u.photoPath,
+                  originalPhotoUrl: u.originalPhotoUrl,
+                  originalPhotoPath: u.originalPhotoPath,
+                },
+              })
             } catch (rowErr: any) {
               errors.push({ filename: u.id, error: rowErr?.message || "DB update failed" })
             }

@@ -105,6 +105,8 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
           serialNumber: true,
           photoPath: true,
           photoUrl: true,
+          originalPhotoPath: true,
+          originalPhotoUrl: true,
           updatedAt: true,
           formData: true,
         },

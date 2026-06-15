@@ -186,6 +186,8 @@ export async function POST(req: Request, props: { params: Promise<{ token: strin
               formData: finalFormData,
               photoUrl: photoFields.photoUrl,
               photoPath: photoFields.photoPath,
+              originalPhotoUrl: photoFields.originalPhotoUrl,
+              originalPhotoPath: photoFields.originalPhotoPath,
               photoBgStatus: photoFields.photoBgStatus || validated.photoBgStatus || "",
               status: "SUBMITTED",
             },

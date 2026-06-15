@@ -15,6 +15,7 @@ import {
   recolorPlainBackgroundOnCanvas,
   removeBackgroundWithBestModel,
   loadImageToCanvas,
+  scorePlainBackgroundFromMaskBlobs,
 } from "@/lib/photo-background"
 
 export const BG_WORK_MAX_DIM = 1024
@@ -22,6 +23,8 @@ export const BG_JPEG_QUALITY = 0.88
 
 const MIN_FOREGROUND_RATIO = 0.06
 const MIN_EDGE_MATCH_PERCENT = 72
+const MIN_FINISHED_QUALITY_SCORE = 68
+const MAX_SUBJECT_BACKGROUND_LEAK_PERCENT = 12
 
 export async function photoUrlToBlob(url: string): Promise<Blob> {
   try {
@@ -143,6 +146,17 @@ export async function processPhotoBackgroundLocal(
   workBlob = await downscaleBlob(workBlob, BG_WORK_MAX_DIM)
 
   const maskBlob = await obtainBestAiMask(workBlob, bgColor, onProgress)
+
+  onProgress?.("Checking AI photo quality...", 84)
+  const quality = await scorePlainBackgroundFromMaskBlobs(workBlob, maskBlob, bgColor)
+  if (
+    quality.score < MIN_FINISHED_QUALITY_SCORE ||
+    quality.subjectLeaks > MAX_SUBJECT_BACKGROUND_LEAK_PERCENT
+  ) {
+    throw new Error(
+      `AI result needs manual review (quality ${quality.score}/100). Use original photo or try a clearer photo.`
+    )
+  }
 
   onProgress?.("Finishing plain background…", 88)
   const dataUrl = await finalizePlainBackgroundFromMaskBlobs(

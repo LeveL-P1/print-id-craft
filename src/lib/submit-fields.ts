@@ -540,14 +540,14 @@ async function normalizeSubmitPhoto(buffer: Buffer): Promise<Buffer> {
 async function persistStudentPhotoFromDataUrl(
   dataUrl: string,
   schoolId: string
-): Promise<{ photoUrl: string; photoPath: string }> {
-  const empty = { photoUrl: "", photoPath: "" }
+): Promise<{ photoUrl: string; photoPath: string; originalPhotoUrl: string; originalPhotoPath: string }> {
+  const empty = { photoUrl: "", photoPath: "", originalPhotoUrl: "", originalPhotoPath: "" }
   if (!dataUrl?.startsWith("data:image/")) return empty
   try {
     const raw = parsePhotoDataUrl(dataUrl)
     if (!raw) return empty
     const prepared = await normalizeSubmitPhoto(raw)
-    const filePath = `students/${schoolId}/${Date.now()}-${randomUUID()}.jpg`
+    const filePath = `students/${schoolId}/originals/${Date.now()}-${randomUUID()}.jpg`
     const { error } = await storageUpload(PHOTO_BUCKET, filePath, prepared, {
       contentType: "image/jpeg",
       upsert: true,
@@ -556,7 +556,8 @@ async function persistStudentPhotoFromDataUrl(
       console.error("persistStudentPhotoFromDataUrl failed:", error)
       return empty
     }
-    return { photoUrl: storagePublicUrl(PHOTO_BUCKET, filePath), photoPath: filePath }
+    const photoUrl = storagePublicUrl(PHOTO_BUCKET, filePath)
+    return { photoUrl, photoPath: filePath, originalPhotoUrl: photoUrl, originalPhotoPath: filePath }
   } catch (error) {
     console.error("persistStudentPhotoFromDataUrl error:", error)
     return empty
@@ -569,10 +570,16 @@ export async function resolveSubmitPhotoFields(options: {
   photoPath: string
   photoDataUrl: string
   schoolId: string
-}): Promise<{ photoUrl: string; photoPath: string; photoBgStatus: string }> {
+}): Promise<{ photoUrl: string; photoPath: string; originalPhotoUrl: string; originalPhotoPath: string; photoBgStatus: string }> {
   const pathOk = options.photoPath?.startsWith(`students/${options.schoolId}/`)
   if (options.photoUrl && pathOk) {
-    return { photoUrl: options.photoUrl, photoPath: options.photoPath, photoBgStatus: "" }
+    return {
+      photoUrl: options.photoUrl,
+      photoPath: options.photoPath,
+      originalPhotoUrl: options.photoUrl,
+      originalPhotoPath: options.photoPath,
+      photoBgStatus: "",
+    }
   }
   if (options.photoDataUrl) {
     const persisted = await persistStudentPhotoFromDataUrl(options.photoDataUrl, options.schoolId)
@@ -581,6 +588,8 @@ export async function resolveSubmitPhotoFields(options: {
   return {
     photoUrl: options.photoUrl || "",
     photoPath: pathOk ? options.photoPath : "",
+    originalPhotoUrl: options.photoUrl || "",
+    originalPhotoPath: pathOk ? options.photoPath : "",
     photoBgStatus: "SKIPPED",
   }
 }
@@ -590,7 +599,7 @@ export async function requireValidSubmitPhotoFields(options: {
   photoPath: string
   photoDataUrl: string
   schoolId: string
-}): Promise<{ photoUrl: string; photoPath: string; photoBgStatus: string }> {
+}): Promise<{ photoUrl: string; photoPath: string; originalPhotoUrl: string; originalPhotoPath: string; photoBgStatus: string }> {
   const photoFields = await resolveSubmitPhotoFields(options)
   if (!photoFields.photoUrl || !photoFields.photoPath) {
     throw new Error("A valid student photo is required. Please upload the photo again.")

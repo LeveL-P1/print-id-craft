@@ -135,6 +135,8 @@ model Student {
   formData      Json
   photoUrl      String        @default("")
   photoPath     String        @default("")
+  originalPhotoUrl  String    @default("")
+  originalPhotoPath String    @default("")
   // PLAIN | PROCESSED | SKIPPED | REPROCESSED — ID photo background pipeline
   photoBgStatus String        @default("")
   qrCodeUrl     String?
@@ -157,6 +159,7 @@ model Student {
   @@index([classId, normalizedName, normalizedFatherName, normalizedDob])
   @@index([status])
   @@index([photoPath])
+  @@index([originalPhotoPath])
   @@index([schoolId, photoBgStatus])
 }
 
