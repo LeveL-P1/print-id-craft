@@ -145,7 +145,7 @@ export default function PhotoBgProcessor({
           setProgress(pct)
           if (previewDataUrl) setLivePreviewUrl(previewDataUrl)
         },
-        "birefnet"
+        "gemini"
       )
       if (cancelledRef.current) return
       setBgStatus(usedAi ? PHOTO_BG_STATUS.PROCESSED : PHOTO_BG_STATUS.PLAIN)

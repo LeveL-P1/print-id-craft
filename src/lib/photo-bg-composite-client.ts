@@ -22,7 +22,7 @@ import {
   scorePlainBackgroundFromMaskBlobs,
 } from "@/lib/photo-background"
 
-export type BgModelChoice = "isnet" | "birefnet"
+export type BgModelChoice = "gemini" | "isnet" | "birefnet"
 
 export const BG_WORK_MAX_DIM = 1024
 export const BG_JPEG_QUALITY = 0.88
@@ -135,6 +135,45 @@ async function removeBackgroundWithServerBirefnet(blob: Blob, bgColor: string): 
   return response.blob()
 }
 
+/**
+ * Call the server-side Gemini endpoint.
+ * Returns a fully composited image (student on colored background) as a data URL.
+ */
+async function removeBackgroundWithServerGemini(
+  blob: Blob,
+  bgColor: string
+): Promise<string> {
+  const form = new FormData()
+  form.append("image", blob, "photo.jpg")
+  form.append("bgColor", bgColor)
+  form.append("model", "gemini")
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), SERVER_REMOVE_TIMEOUT_MS)
+  const response = await fetch("/api/photo-bg/remove", {
+    method: "POST",
+    body: form,
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timer))
+
+  if (response.status === 503) {
+    throw new Error("Google AI is not configured — set GEMINI_API_KEY")
+  }
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({ error: "" }))
+    throw new Error(detail?.error || "Google AI background removal failed")
+  }
+
+  // Gemini returns the fully composited image — convert to data URL
+  const resultBlob = await response.blob()
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(new Error("Failed to read Gemini result"))
+    reader.readAsDataURL(resultBlob)
+  })
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Mask obtainment — model-aware
 // ─────────────────────────────────────────────────────────────────────────────
@@ -148,10 +187,24 @@ async function obtainBestAiResult(
   bgColor: string,
   model: BgModelChoice,
   onProgress?: BgProcessProgress
-): Promise<{ type: "mask"; maskBlob: Blob }> {
+): Promise<{ type: "composited"; dataUrl: string } | { type: "mask"; maskBlob: Blob }> {
+
+  // ── Gemini: fully composited image from server ────────────────────────
+  if (model === "gemini") {
+    onProgress?.("Sending to Google AI…", 18)
+    try {
+      const dataUrl = await removeBackgroundWithServerGemini(workBlob, bgColor)
+      onProgress?.("Google AI processing complete", 90)
+      return { type: "composited", dataUrl }
+    } catch (err) {
+      console.error("[obtainBestAiResult] Gemini failed:", err)
+      // Fall through to local ISNet as ultimate fallback
+      onProgress?.("Google AI unavailable, using local model…", 50)
+    }
+  }
 
   // ── BiRefNet: transparent mask from server ────────────────────────────
-  if (model === "birefnet") {
+  if (model === "birefnet" || model === "gemini") {
     onProgress?.("Trying professional background model…", 18)
     try {
       const remoteMask = await removeBackgroundWithServerBirefnet(workBlob, bgColor)
@@ -191,8 +244,8 @@ export async function processPhotoBackgroundLocal(
   photoUrl: string,
   bgColor: string,
   onProgress?: BgProcessProgress,
-  /** Which AI model to use. Defaults to "birefnet". */
-  model: BgModelChoice = "birefnet",
+  /** Which AI model to use. Defaults to "gemini". */
+  model: BgModelChoice = "gemini",
   forceAi: boolean = false
 ): Promise<{ dataUrl: string; maskUrl: string | null; usedAi: boolean }> {
   onProgress?.("Preparing photo…", 5)
@@ -217,6 +270,12 @@ export async function processPhotoBackgroundLocal(
   workBlob = await downscaleBlob(workBlob, BG_WORK_MAX_DIM)
 
   const aiResult = await obtainBestAiResult(workBlob, bgColor, model, onProgress)
+
+  // ── Gemini returns a fully composited image — no further processing ──
+  if (aiResult.type === "composited") {
+    onProgress?.("Done", 100)
+    return { dataUrl: aiResult.dataUrl, maskUrl: null, usedAi: true }
+  }
 
   // ── Mask-based models (BiRefNet, ISNet) need client-side compositing ──
   const maskBlob = aiResult.maskBlob
