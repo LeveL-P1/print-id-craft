@@ -2,6 +2,8 @@
 
 FastAPI service used by `/api/photo-bg/remove` for professional ID photo background removal.
 
+Hugging Face Docker Spaces should listen on port `7860`; the included Dockerfile is already configured for that.
+
 ## Recommended model setup
 
 Use the portrait-first model chain for student photos:
@@ -30,4 +32,3 @@ BG_REMOVAL_SERVICE_TOKEN=your-shared-secret
 ```
 
 The service itself should use the same `BG_REMOVAL_SERVICE_TOKEN` if you want to protect the endpoint.
-
