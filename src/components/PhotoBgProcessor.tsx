@@ -49,11 +49,13 @@ export default function PhotoBgProcessor({
   const [elapsedSec, setElapsedSec] = useState(0)
   const schoolBgColor = defaultBgColor || "#FFFFFF"
   const [processedUrl, setProcessedUrl] = useState<string | null>(null)
+  const [livePreviewUrl, setLivePreviewUrl] = useState<string | null>(null)
   const [error, setError] = useState("")
   const [photoLoaded, setPhotoLoaded] = useState(false)
   const [photoDataUrl, setPhotoDataUrl] = useState<string>("")
   const autoConfirmedRef = useRef(false)
   const autoSkippedRef = useRef(false)
+  const cancelledRef = useRef(false)
   const removalStartedRef = useRef(false)
   const lastBgStatusRef = useRef<PhotoBgStatus>("")
   const processingStartedAtRef = useRef<number | null>(null)
@@ -115,6 +117,8 @@ export default function PhotoBgProcessor({
     if (!sourceUrl || removalStartedRef.current) return
     removalStartedRef.current = true
 
+    cancelledRef.current = false
+    setLivePreviewUrl(null)
     setProcessing(true)
     setProgress(5)
     setProgressMsg("Preparing your photo…")
@@ -124,27 +128,64 @@ export default function PhotoBgProcessor({
       const { dataUrl, usedAi } = await processPhotoBackgroundLocal(
         sourceUrl,
         schoolBgColor,
-        (msg, pct) => {
+        (msg, pct, previewDataUrl) => {
+          if (cancelledRef.current) return
           setProgressMsg(msg)
           setProgress(pct)
+          if (previewDataUrl) setLivePreviewUrl(previewDataUrl)
         },
         "birefnet"
       )
+      if (cancelledRef.current) return
       setBgStatus(usedAi ? PHOTO_BG_STATUS.PROCESSED : PHOTO_BG_STATUS.PLAIN)
       setProcessedUrl(dataUrl)
+      setLivePreviewUrl(dataUrl)
     } catch (err: unknown) {
+      if (cancelledRef.current) return
       removalStartedRef.current = false
       if (autoConfirm) {
         setBgStatus(PHOTO_BG_STATUS.SKIPPED)
         onSkip(PHOTO_BG_STATUS.SKIPPED)
         return
       }
-      setError("Could not clean the background. You can still continue with your photo.")
+      setError(formatProcessingError(err))
       console.error("Background removal failed:", err)
     } finally {
-      setProcessing(false)
+      if (!cancelledRef.current) setProcessing(false)
     }
   }, [photoUrl, photoDataUrl, schoolBgColor, setBgStatus, autoConfirm, onSkip])
+
+  const handleUseOriginal = useCallback(() => {
+    cancelledRef.current = true
+    setProcessing(false)
+    setLivePreviewUrl(null)
+    setProcessedUrl(null)
+    setError("")
+    setBgStatus(PHOTO_BG_STATUS.SKIPPED)
+    onSkip(PHOTO_BG_STATUS.SKIPPED)
+  }, [onSkip, setBgStatus])
+
+  const handleRetry = useCallback(() => {
+    cancelledRef.current = false
+    removalStartedRef.current = false
+    setProcessedUrl(null)
+    setLivePreviewUrl(null)
+    setError("")
+    setProgress(0)
+    setProgressMsg("")
+    void removeBackground()
+  }, [removeBackground])
+
+  const formatProcessingError = (err: unknown) => {
+    const detail = err instanceof Error ? err.message.trim() : ""
+    if (detail.includes("manual review") || detail.includes("quality")) {
+      return "AI couldn't prepare your photo to the required quality. You can continue with your original upload or retry."
+    }
+    if (detail.includes("detect the student")) {
+      return "AI couldn't detect you clearly in the photo. You can continue with your original upload or try a clearer photo."
+    }
+    return "AI photo preparation didn't work this time. You can continue with your original upload or retry."
+  }
 
   useEffect(() => {
     if (photoLoaded && photoDataUrl) removeBackground()
@@ -212,10 +253,40 @@ export default function PhotoBgProcessor({
           </div>
 
           {displayUrl && (
-            <div className="bg-live-photo-wrap" aria-hidden="true">
-              <img src={displayUrl} alt="" />
-              <div className="bg-live-scan" />
-              <div className="bg-live-shimmer" />
+            <div
+              style={{
+                display: "flex",
+                gap: 12,
+                justifyContent: "center",
+                alignItems: "center",
+                flexWrap: "wrap",
+                marginBottom: 20,
+              }}
+            >
+              <div style={{ flex: "1 1 120px", maxWidth: 160, textAlign: "center" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", marginBottom: 6 }}>Your Original</div>
+                <div
+                  className="bg-live-photo-wrap"
+                  style={{ margin: 0, borderColor: livePreviewUrl ? "#e2e8f0" : undefined }}
+                  aria-hidden="true"
+                >
+                  <img src={displayUrl} alt="" />
+                  {!livePreviewUrl && <div className="bg-live-scan" />}
+                  {!livePreviewUrl && <div className="bg-live-shimmer" />}
+                </div>
+              </div>
+              {livePreviewUrl ? (
+                <>
+                  <div style={{ fontSize: 18, color: "#94a3b8" }} aria-hidden="true">→</div>
+                  <div style={{ flex: "1 1 120px", maxWidth: 160, textAlign: "center" }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#1d4ed8", marginBottom: 6 }}>AI Live Preview</div>
+                    <div className="bg-live-photo-wrap bg-live-photo-wrap--ai" style={{ margin: 0 }} aria-hidden="true">
+                      <img src={livePreviewUrl} alt="" />
+                      <div className="bg-live-ai-badge">AI</div>
+                    </div>
+                  </div>
+                </>
+              ) : null}
             </div>
           )}
 
@@ -253,9 +324,29 @@ export default function PhotoBgProcessor({
             <div className="bg-live-progress-fill" style={{ width: `${Math.max(4, progress)}%` }} />
           </div>
 
-          <p style={{ fontSize: 11, color: '#64748b', textAlign: 'center', marginTop: 14, marginBottom: 0, lineHeight: 1.5 }}>
-            AI is working on the photo right now. First time may take up to a minute.
+          <p style={{ fontSize: 11, color: '#64748b', textAlign: 'center', marginTop: 14, marginBottom: livePreviewUrl ? 12 : 0, lineHeight: 1.5 }}>
+            {livePreviewUrl
+              ? "AI preview is ready — you can keep your original photo or wait for the final version."
+              : "AI is working on the photo right now. First time may take up to a minute."}
           </p>
+          <div style={{ textAlign: "center" }}>
+            <button
+              type="button"
+              onClick={handleUseOriginal}
+              style={{
+                fontSize: 12,
+                padding: "8px 16px",
+                background: "white",
+                color: "#475569",
+                border: "1px solid #cbd5e1",
+                borderRadius: 8,
+                cursor: "pointer",
+                fontWeight: 600,
+              }}
+            >
+              Keep My Original Photo
+            </button>
+          </div>
         </div>
       )}
 
@@ -264,31 +355,34 @@ export default function PhotoBgProcessor({
           <div style={{ fontSize: 13, color: '#dc2626', fontWeight: 600, marginBottom: 8 }}>{error}</div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={() => { removalStartedRef.current = false; removeBackground() }} style={{ fontSize: 12, padding: '8px 16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>Retry</button>
-            <button onClick={() => { setBgStatus(PHOTO_BG_STATUS.SKIPPED); onSkip(PHOTO_BG_STATUS.SKIPPED) }} style={{ fontSize: 12, padding: '8px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>Skip & Use Original</button>
+            <button onClick={handleUseOriginal} style={{ fontSize: 12, padding: '8px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>Keep My Original Photo</button>
           </div>
         </div>
       )}
 
       {!processing && processedUrl && !autoConfirm && (
         <>
+          <p style={{ fontSize: 13, color: "#475569", marginBottom: 16, lineHeight: 1.55, textAlign: "center" }}>
+            Compare your original upload with the AI-prepared photo and choose which one to use on your ID card.
+          </p>
           <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', justifyContent: 'center' }}>
             <div style={{ flex: '1 1 120px', maxWidth: 160, textAlign: 'center' }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', marginBottom: 6 }}>Before</div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', marginBottom: 6 }}>Your Original</div>
               <div style={{ borderRadius: 10, overflow: 'hidden', border: '2px solid #e2e8f0', aspectRatio: '3/4' }}>
-                <img src={displayUrl} alt="Original" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                <img src={displayUrl} alt="Original upload" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', fontSize: 20, color: '#94a3b8' }}>→</div>
+            <div style={{ display: 'flex', alignItems: 'center', fontSize: 20, color: '#94a3b8' }} aria-hidden="true">→</div>
             <div style={{ flex: '1 1 120px', maxWidth: 160, textAlign: 'center' }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#22c55e', marginBottom: 6 }}>After</div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#22c55e', marginBottom: 6 }}>AI Prepared</div>
               <div style={{ borderRadius: 10, overflow: 'hidden', border: '2px solid #22c55e', aspectRatio: '3/4' }}>
-                <img src={processedUrl} alt="Processed" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                <img src={processedUrl} alt="AI prepared photo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               </div>
             </div>
           </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button type="button" onClick={() => { setBgStatus(PHOTO_BG_STATUS.SKIPPED); onSkip(PHOTO_BG_STATUS.SKIPPED) }} className="btn btn-outline" style={{ flex: '1 1 140px', justifyContent: 'center' }}>Use Original Instead</button>
-            <button type="button" onClick={handleConfirm} className="btn btn-primary" style={{ flex: '2 1 180px', justifyContent: 'center', background: 'linear-gradient(135deg, #22c55e, #16a34a)' }}>Use Processed Photo</button>
+            <button type="button" onClick={handleUseOriginal} className="btn btn-outline" style={{ flex: '1 1 140px', justifyContent: 'center' }}>Keep Original Photo</button>
+            <button type="button" onClick={handleConfirm} className="btn btn-primary" style={{ flex: '2 1 180px', justifyContent: 'center', background: 'linear-gradient(135deg, #22c55e, #16a34a)' }}>Keep AI Photo</button>
           </div>
         </>
       )}

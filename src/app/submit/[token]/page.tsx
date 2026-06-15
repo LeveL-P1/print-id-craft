@@ -887,7 +887,8 @@ export default function SubmitPage() {
     if (
       config.photoBgColor &&
       photoBgStatus !== PHOTO_BG_STATUS.PROCESSED &&
-      photoBgStatus !== PHOTO_BG_STATUS.PLAIN
+      photoBgStatus !== PHOTO_BG_STATUS.PLAIN &&
+      photoBgStatus !== PHOTO_BG_STATUS.SKIPPED
     ) {
       setAlertMsg("Please wait while we prepare your photo background, then try again.")
       goToBgProcessing()
@@ -1351,6 +1352,8 @@ export default function SubmitPage() {
                 <strong style={{ display: 'block', marginBottom: 4 }}>Preview only — for reference</strong>
                 {photoBgStatus === PHOTO_BG_STATUS.PROCESSED || photoBgStatus === PHOTO_BG_STATUS.PLAIN ? (
                   <>Your photo background has been prepared{config?.photoBgColor ? <> ({config.photoBgColor})</> : null} for the ID card preview below.</>
+                ) : photoBgStatus === PHOTO_BG_STATUS.SKIPPED ? (
+                  <>You chose to keep your original uploaded photo for the ID card preview below.</>
                 ) : (
                   <>
                     This shows how your ID card may look.
@@ -2144,8 +2147,6 @@ export default function SubmitPage() {
               <PhotoBgProcessor
                 photoUrl={croppedPhoto}
                 defaultBgColor={config?.photoBgColor || "#FFFFFF"}
-                autoConfirm
-                autoSkipAfterMs={0}
                 onProcessed={(processedDataUrl, status) => {
                   setCroppedPhoto(processedDataUrl)
                   setPhotoBgStatus(status)

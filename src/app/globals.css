@@ -2072,6 +2072,26 @@ html {
   color: #16a34a;
 }
 
+.bg-live-photo-wrap--ai {
+  border-color: #22c55e;
+  animation: none;
+}
+
+.bg-live-ai-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  color: white;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  box-shadow: 0 2px 8px rgba(22, 163, 74, 0.35);
+  pointer-events: none;
+}
+
 .bg-live-progress-fill {
   height: 100%;
   border-radius: 4px;

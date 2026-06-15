@@ -81,7 +81,7 @@ export async function compositeTransparentOntoColor(
   return finalizePlainBackgroundFromMaskBlobs(originalBlob, maskBlob, bgColor, BG_JPEG_QUALITY)
 }
 
-export type BgProcessProgress = (message: string, percent: number) => void
+export type BgProcessProgress = (message: string, percent: number, previewDataUrl?: string) => void
 
 function finalizeCanvasToDataUrl(
   canvas: HTMLCanvasElement,
@@ -194,7 +194,7 @@ export async function processPhotoBackgroundLocal(
   /** Which AI model to use. Defaults to "birefnet". */
   model: BgModelChoice = "birefnet",
   forceAi: boolean = false
-): Promise<{ dataUrl: string; usedAi: boolean }> {
+): Promise<{ dataUrl: string; maskUrl: string | null; usedAi: boolean }> {
   onProgress?.("Preparing photo…", 5)
 
   const { canvas, ctx } = await loadImageToCanvas(photoUrl, BG_WORK_MAX_DIM)
@@ -205,8 +205,9 @@ export async function processPhotoBackgroundLocal(
     if (recolored) {
       const edgeMatch = measureEdgeBackgroundMatch(ctx, canvas.width, canvas.height, bgColor)
       if (edgeMatch >= MIN_EDGE_MATCH_PERCENT) {
-        onProgress?.("Background updated", 100)
-        return { dataUrl: finalizeCanvasToDataUrl(canvas, ctx, bgColor), usedAi: false }
+        const dataUrl = finalizeCanvasToDataUrl(canvas, ctx, bgColor)
+        onProgress?.("Background updated", 100, dataUrl)
+        return { dataUrl, maskUrl: null, usedAi: false }
       }
     }
   }
@@ -220,7 +221,16 @@ export async function processPhotoBackgroundLocal(
   // ── Mask-based models (BiRefNet, ISNet) need client-side compositing ──
   const maskBlob = aiResult.maskBlob
 
-  onProgress?.("Checking AI photo quality...", 84)
+  onProgress?.("Building AI preview…", 83)
+  const livePreview = await finalizePlainBackgroundFromMaskBlobs(
+    workBlob,
+    maskBlob,
+    bgColor,
+    BG_JPEG_QUALITY
+  )
+  onProgress?.("AI preview ready", 85, livePreview)
+
+  onProgress?.("Checking AI photo quality…", 88)
   const quality = await scorePlainBackgroundFromMaskBlobs(workBlob, maskBlob, bgColor)
   if (
     quality.score < MIN_FINISHED_QUALITY_SCORE ||
@@ -231,7 +241,7 @@ export async function processPhotoBackgroundLocal(
     )
   }
 
-  onProgress?.("Finishing plain background…", 88)
+  onProgress?.("Finishing plain background…", 92)
   const dataUrl = await finalizePlainBackgroundFromMaskBlobs(
     workBlob,
     maskBlob,
@@ -240,5 +250,5 @@ export async function processPhotoBackgroundLocal(
   )
 
   onProgress?.("Done", 100)
-  return { dataUrl, usedAi: true }
+  return { dataUrl, maskUrl: URL.createObjectURL(maskBlob), usedAi: true }
 }

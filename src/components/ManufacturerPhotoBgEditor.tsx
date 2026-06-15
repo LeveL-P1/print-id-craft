@@ -47,6 +47,7 @@ export default function ManufacturerPhotoBgEditor({
   const [progressMsg, setProgressMsg] = useState("")
   const [originalUrl, setOriginalUrl] = useState("")
   const [processedUrl, setProcessedUrl] = useState<string | null>(null)
+  const [maskUrl, setMaskUrl] = useState<string | null>(null)
   const [error, setError] = useState("")
   const [modelReady, setModelReady] = useState(false)
   const [colorSaved, setColorSaved] = useState(true)
@@ -62,6 +63,14 @@ export default function ManufacturerPhotoBgEditor({
     if (!photoUrl) return
     setOriginalUrl(photoUrl)
   }, [photoUrl])
+
+  useEffect(() => {
+    return () => {
+      if (maskUrl) {
+        URL.revokeObjectURL(maskUrl)
+      }
+    }
+  }, [maskUrl])
 
   const saveProcessedPhoto = useCallback(async (dataUrl: string) => {
     setSaving(true)
@@ -91,15 +100,19 @@ export default function ManufacturerPhotoBgEditor({
     }
   }, [bgColor, onBgColorCommit, onSaved, schoolId, studentId])
 
-  const runProcessing = useCallback(async (autoSave: boolean) => {
+  const runProcessing = useCallback(async () => {
     if (!photoUrl) return
     setProcessing(true)
     setError("")
     setProcessedUrl(null)
+    setMaskUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return null
+    })
     setProgress(0)
 
     try {
-      const { dataUrl } = await processPhotoBackgroundLocal(
+      const { dataUrl, maskUrl: newMaskUrl } = await processPhotoBackgroundLocal(
         cacheBustPhotoUrl(photoUrl),
         bgColor,
         (msg, pct) => {
@@ -110,21 +123,32 @@ export default function ManufacturerPhotoBgEditor({
         true // forceAi
       )
       setProcessedUrl(dataUrl)
-      if (autoSave) {
-        await saveProcessedPhoto(dataUrl)
-      }
+      setMaskUrl(newMaskUrl)
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Background removal failed"
       setError(message)
     } finally {
       setProcessing(false)
     }
-  }, [photoUrl, bgColor, saveProcessedPhoto, selectedModel])
+  }, [photoUrl, bgColor, selectedModel])
 
-  const handleColorChange = (color: string) => {
-    setBgColor(color.toUpperCase())
+  const handleColorChange = async (color: string) => {
+    const uppercaseColor = color.toUpperCase()
+    setBgColor(uppercaseColor)
     setColorSaved(false)
-    setProcessedUrl(null)
+
+    if (maskUrl && originalUrl) {
+      try {
+        const { compositeTransparentOntoColor } = await import("@/lib/photo-bg-composite-client")
+        const newComposite = await compositeTransparentOntoColor(maskUrl, uppercaseColor, originalUrl)
+        setProcessedUrl(newComposite)
+      } catch (err) {
+        console.error("Failed to recomcomposite background:", err)
+        setProcessedUrl(null)
+      }
+    } else {
+      setProcessedUrl(null)
+    }
   }
 
   const handleSaveColor = async (): Promise<boolean> => {
@@ -143,11 +167,7 @@ export default function ManufacturerPhotoBgEditor({
   }
 
   const handleRunAi = async () => {
-    if (!colorSaved) {
-      const saved = await handleSaveColor()
-      if (!saved) return
-    }
-    await runProcessing(true)
+    await runProcessing()
   }
 
   const handleSave = async () => {
@@ -180,7 +200,7 @@ export default function ManufacturerPhotoBgEditor({
           <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>
             {modelInfo?.desc || "Select a model below."}
             {selectedModel === "isnet" && (modelReady ? " Model ready." : " Preparing model...")}
-            {" "}Processed photos are saved automatically.
+            {" "}Preview the changes, and click "Apply & Save Photo" when satisfied.
           </p>
         </div>
 
@@ -192,7 +212,7 @@ export default function ManufacturerPhotoBgEditor({
             {MODEL_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
-                onClick={() => { setSelectedModel(opt.value); setProcessedUrl(null); setError("") }}
+                onClick={() => { setSelectedModel(opt.value); setProcessedUrl(null); setMaskUrl(null); setError("") }}
                 disabled={processing || saving}
                 style={{
                   flex: 1,
@@ -243,7 +263,7 @@ export default function ManufacturerPhotoBgEditor({
                 }}
               />
               <div style={{ marginTop: 6, fontSize: 11, color: colorSaved ? "#16a34a" : "#b45309", fontWeight: 600 }}>
-                {colorSaved ? "Colour saved. Ready to run AI." : "Save colour before processing."}
+                {colorSaved ? "Colour saved." : "Save colour or run AI to preview."}
               </div>
             </div>
           </div>
@@ -275,19 +295,26 @@ export default function ManufacturerPhotoBgEditor({
                 border: `2px solid ${processedUrl ? "#8b5cf6" : "#e2e8f0"}`,
                 aspectRatio: "3/4", background: bgColor,
               }}>
-                {processing || saving ? (
+                {processing ? (
                   <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 12 }}>
                     <div className="login-spinner" style={{
                       width: 32, height: 32, borderColor: "rgba(139,92,246,0.2)", borderTopColor: "#8b5cf6", marginBottom: 10,
                     }} />
                     <div style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>
-                      {saving ? "Saving processed photo…" : progressMsg}
+                      {progressMsg}
                     </div>
-                    {!saving && (
-                      <div style={{ width: "80%", height: 4, background: "#e2e8f0", borderRadius: 2, marginTop: 8 }}>
-                        <div style={{ height: "100%", width: `${progress}%`, background: "#8b5cf6", borderRadius: 2, transition: "width 0.3s" }} />
-                      </div>
-                    )}
+                    <div style={{ width: "80%", height: 4, background: "#e2e8f0", borderRadius: 2, marginTop: 8 }}>
+                      <div style={{ height: "100%", width: `${progress}%`, background: "#8b5cf6", borderRadius: 2, transition: "width 0.3s" }} />
+                    </div>
+                  </div>
+                ) : saving ? (
+                  <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 12 }}>
+                    <div className="login-spinner" style={{
+                      width: 32, height: 32, borderColor: "rgba(34,197,94,0.2)", borderTopColor: "#22c55e", marginBottom: 10,
+                    }} />
+                    <div style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>
+                      Saving photo…
+                    </div>
                   </div>
                 ) : processedUrl ? (
                   <img src={processedUrl} alt="Processed" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
@@ -319,7 +346,7 @@ export default function ManufacturerPhotoBgEditor({
               disabled={processing || saving}
               style={{ fontSize: 13, borderColor: "#0ea5e9", color: "#0284c7" }}
             >
-              {saving && !processedUrl ? "Saving..." : "Save Colour"}
+              {saving && !processedUrl ? "Saving..." : "Save Colour Only"}
             </button>
             <button
               className="btn btn-primary"
@@ -327,15 +354,15 @@ export default function ManufacturerPhotoBgEditor({
               disabled={processing || saving}
               style={{ fontSize: 13, background: "#8b5cf6", padding: "8px 20px" }}
             >
-              {processing || saving ? "Processing…" : processedUrl ? "Re-run & Save" : "Run AI & Save"}
+              {processing || saving ? "Processing…" : processedUrl ? "Re-run AI" : "Run AI Preview"}
             </button>
             {processedUrl && !processing && !saving && (
               <button
-                className="btn btn-outline"
+                className="btn btn-primary"
                 onClick={handleSave}
-                style={{ fontSize: 13, borderColor: "#8b5cf6", color: "#7c3aed" }}
+                style={{ fontSize: 13, background: "linear-gradient(135deg, #22c55e, #16a34a)", border: "none", color: "white", padding: "8px 20px" }}
               >
-                Save Again
+                Apply & Save Photo
               </button>
             )}
           </div>
