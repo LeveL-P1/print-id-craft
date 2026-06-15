@@ -613,7 +613,7 @@ export function protectClothingInMask(original: ImageData, mask: ImageData): Ima
       const b = original.data[idx + 2]
       
       const dist = colorDistance({ r, g, b }, edgeBg)
-      if (dist > 25) {
+      if (dist > 35) {
         out[idx] = r
         out[idx + 1] = g
         out[idx + 2] = b
@@ -1109,10 +1109,10 @@ export function compositeMaskImageDataOntoPlainColor(
     }
 
     const inPerson = isPersonZonePixel(x, y, w, h)
-    // Lower thresholds: treat more pixels as fully opaque original.
-    // Person zone: 56 (was 88) — aggressively preserve hair/face/shirt
-    // Outer zone: 96 (was 124) — still preserve clear foreground
-    const preserveThreshold = inPerson ? 56 : 96
+    // High thresholds: treat only very confident pixels as fully opaque original.
+    // Person zone: 180 (was 56) — only copy original directly for fully opaque parts
+    // Outer zone: 200 (was 96) — ensure proper blending at all edges
+    const preserveThreshold = inPerson ? 180 : 200
 
     if (sa >= preserveThreshold) {
       out[p] = original.data[p]
@@ -1122,9 +1122,8 @@ export function compositeMaskImageDataOntoPlainColor(
       continue
     }
 
-    // In person zone, strongly favour original photo (0.92 min alpha, was 0.85).
-    // This prevents the cutout from looking "ghostly" around hair edges.
-    const a = (isLocal && inPerson) ? Math.max(sa / 255, 0.92) : sa / 255
+    // Smooth blending using the mask alpha
+    const a = sa / 255
     const fr = original.data[p]
     const fg = original.data[p + 1]
     const fb = original.data[p + 2]

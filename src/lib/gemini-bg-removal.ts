@@ -83,7 +83,7 @@ export async function removeBackgroundWithGemini(
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash-exp",
+      model: "gemini-3.1-flash-image",
       contents: [
         {
           role: "user",
