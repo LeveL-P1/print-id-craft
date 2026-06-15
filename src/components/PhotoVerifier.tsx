@@ -1294,7 +1294,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
             </h3>
             <p style={{ fontSize: 13, color: '#64748b', lineHeight: 1.6, marginBottom: 16 }}>
               {cameraPermission === "denied"
-                ? "Chrome will not show the camera permission popup again while this site is blocked. First unblock Camera from the lock/settings icon near the address bar, then tap the button below."
+                ? "Camera permission is blocked for this site. Browsers do not allow this page to open the permission popup again until you unblock Camera from the address-bar lock/settings icon."
                 : "Tap Allow Camera below. Your browser will show a permission popup; choose Allow so you can take the student photo."}
             </p>
             {cameraPermission === "denied" && (
@@ -1309,7 +1309,18 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
                 lineHeight: 1.55,
                 marginBottom: 14,
               }}>
-                <strong>Chrome:</strong> tap the lock/settings icon beside the address, open Permissions, set Camera to Allow, then come back here.
+                <strong>Option 1 - allow camera:</strong>
+                <ol style={{ margin: '6px 0 10px 18px', padding: 0 }}>
+                  <li>Tap the lock/settings icon beside the website address.</li>
+                  <li>Open Site settings or Permissions.</li>
+                  <li>Set Camera to Allow, then come back and tap Ask Again.</li>
+                </ol>
+                <strong>Option 2 - easiest:</strong>
+                <ol style={{ margin: '6px 0 0 18px', padding: 0 }}>
+                  <li>Click a photo using your phone camera.</li>
+                  <li>Save it in Gallery or Photos.</li>
+                  <li>Tap Upload From Gallery below and select that photo.</li>
+                </ol>
               </div>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1347,7 +1358,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
                   cursor: 'pointer',
                 }}
               >
-                Take Photo from Phone Camera
+                Upload From Gallery / Phone Camera
               </button>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button
