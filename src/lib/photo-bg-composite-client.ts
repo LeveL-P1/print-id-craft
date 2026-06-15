@@ -161,10 +161,27 @@ export async function processPhotoBackgroundLocal(
   }
 
   onProgress?.("Loading AI model (first time may take a minute)…", 10)
-  await preloadBgRemovalModel()
-
   let blob = await photoUrlToBlob(photoUrl)
   blob = await downscaleBlob(blob, BG_WORK_MAX_DIM)
+
+  onProgress?.("Trying professional background model...", 15)
+  try {
+    const remoteTransparent = await removeBackgroundWithServerModel(blob, bgColor)
+    const remoteFgRatio = await measureForegroundRatioInTransparentBlob(remoteTransparent)
+    if (remoteFgRatio >= MIN_FOREGROUND_RATIO) {
+      onProgress?.("Applying background colour...", 85)
+      const remoteTransparentUrl = await blobToDataUrl(remoteTransparent)
+      const remoteDataUrl = await compositeTransparentOntoColor(remoteTransparentUrl, bgColor)
+      onProgress?.("Done", 100)
+      return { dataUrl: remoteDataUrl, usedAi: true }
+    }
+  } catch {
+    // Professional backend is optional. Fall back to the local browser model
+    // so parent submissions still work when the service is unavailable.
+  }
+
+  onProgress?.("Loading AI model (first time may take a minute)...", 20)
+  await preloadBgRemovalModel()
 
   onProgress?.("Removing background with AI…", 25)
   const transparentBlob = await removeBackgroundWithBestModel(blob, (msg, pct) => {
@@ -177,12 +194,7 @@ export async function processPhotoBackgroundLocal(
   }
 
   onProgress?.("Applying background colour…", 85)
-  const transparentUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = () => reject(new Error("Could not read AI result"))
-    reader.readAsDataURL(transparentBlob)
-  })
+  const transparentUrl = await blobToDataUrl(transparentBlob)
 
   let dataUrl = await compositeTransparentOntoColor(transparentUrl, bgColor)
 
@@ -207,4 +219,37 @@ export async function processPhotoBackgroundLocal(
 
   onProgress?.("Done", 100)
   return { dataUrl, usedAi: true }
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(new Error("Could not read AI result"))
+    reader.readAsDataURL(blob)
+  })
+}
+
+async function removeBackgroundWithServerModel(blob: Blob, bgColor: string): Promise<Blob> {
+  const form = new FormData()
+  form.append("image", blob, "photo.jpg")
+  form.append("bgColor", bgColor)
+
+  const response = await fetch("/api/photo-bg/remove", {
+    method: "POST",
+    body: form,
+  })
+  if (!response.ok) {
+    throw new Error("Professional background service unavailable")
+  }
+
+  const contentType = response.headers.get("content-type") || ""
+  if (contentType.includes("application/json")) {
+    const json = await response.json()
+    const dataUrl = json?.dataUrl || json?.image || ""
+    if (!dataUrl) throw new Error("Professional background service returned no image")
+    return photoUrlToBlob(dataUrl)
+  }
+
+  return response.blob()
 }

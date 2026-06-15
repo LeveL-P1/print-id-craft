@@ -12,7 +12,7 @@ import {
 } from "@/lib/field-resolver"
 import { formatClassSection } from "@/lib/section-class"
 import { APP_BUILD_ID } from "@/lib/app-build-id"
-import { applyFixedBranchToFormData } from "@/lib/submit-fields"
+import { applyFixedBranchToFormData } from "@/lib/fixed-branch"
 import {
   computeSubmitFormRevision,
   createSubmitDraftPayload,

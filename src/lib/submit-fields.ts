@@ -19,6 +19,7 @@ import {
   normalizeFormValue,
   resolveFieldValue,
 } from "@/lib/field-resolver"
+import { applyFixedBranchToFormData } from "@/lib/fixed-branch"
 import { buildStudentIndexData } from "@/lib/student-index"
 
 export type FormField = {
@@ -184,27 +185,6 @@ export function isHiddenFixedBranchField(
 ): boolean {
   if (!fixedBranch?.trim()) return false
   return getFieldRole(field.key, field.label, field.role) === "branch"
-}
-
-/** Inject the template's fixed branch into every branch-shaped form key. */
-export function applyFixedBranchToFormData(
-  formData: Record<string, unknown>,
-  fixedBranch: string | undefined,
-  fields: FormField[]
-): Record<string, string> {
-  const trimmed = (fixedBranch || "").trim()
-  const fd = Object.fromEntries(
-    Object.entries(formData || {}).map(([key, value]) => [key, String(value ?? "").trim()])
-  ) as Record<string, string>
-  if (!trimmed) return fd
-
-  const out: Record<string, string> = { ...fd, branch: trimmed }
-  for (const field of fields) {
-    if (getFieldRole(field.key, field.label, field.role) === "branch") {
-      out[field.key] = trimmed
-    }
-  }
-  return out
 }
 
 export function validatePublicSubmissionDetails(

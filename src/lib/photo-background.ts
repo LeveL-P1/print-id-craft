@@ -393,7 +393,7 @@ type BgRemovalDevice = "gpu" | "cpu"
  * download size (~80MB), and inference speed on parent phones. Full `isnet`
  * is slightly sharper but ~2× slower and more likely to feel stuck on CPU.
  */
-export const BG_REMOVAL_MODEL = "isnet_fp16" as const
+export const BG_REMOVAL_MODEL = "isnet" as const
 
 /** Abort inference if the device stalls — prevents an endless spinner. */
 export const BG_REMOVAL_INFERENCE_TIMEOUT_MS = 120_000

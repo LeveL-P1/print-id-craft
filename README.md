@@ -55,6 +55,9 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 CRON_SECRET=
 JOB_WORKER_URL=
+BG_REMOVAL_SERVICE_URL=
+BG_REMOVAL_SERVICE_TOKEN=
+BG_REMOVAL_MODEL=birefnet-portrait
 SENTRY_DSN=
 NEXT_PUBLIC_SENTRY_DSN=
 ```
@@ -62,6 +65,7 @@ NEXT_PUBLIC_SENTRY_DSN=
 Notes:
 - `CRON_SECRET` secures scheduled/maintenance routes and worker calls.
 - `JOB_WORKER_URL` is optional; set it when using a dedicated worker host.
+- `BG_REMOVAL_SERVICE_URL` is optional; set it to the Railway/FastAPI rembg service URL for professional BiRefNet portrait background removal. The browser falls back to local ISNet when it is not configured.
 - `NEXTAUTH_SECRET` is required for session security.
 
 ## Local Setup

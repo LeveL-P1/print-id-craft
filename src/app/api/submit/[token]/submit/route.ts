@@ -5,12 +5,12 @@ import { durableRateLimit, getClientIp } from "@/lib/rate-limit"
 import { storageUpload, storagePublicUrl } from "@/lib/storage"
 import QRCode from "qrcode"
 import {
-  applyFixedBranchToFormData,
   computeAutoAssignedFields,
   getPublicSubmissionFields,
   requireValidSubmitPhotoFields,
   validatePublicSubmissionDetails,
 } from "@/lib/submit-fields"
+import { applyFixedBranchToFormData } from "@/lib/fixed-branch"
 import { getNextStudentSerial } from "@/lib/student-serial"
 import { reportError, reportSlowOperation } from "@/lib/observability"
 import { checkDuplicateSubmission } from "@/lib/submit-fields"
