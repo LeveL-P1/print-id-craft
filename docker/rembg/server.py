@@ -3,6 +3,7 @@ import os
 import inspect
 from functools import lru_cache
 
+import numpy as np
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 from PIL import Image
@@ -20,16 +21,21 @@ DEFAULT_MODEL_CHAIN = [
     ).split(",")
     if name.strip()
 ]
+MERGE_MASK_MODEL = os.getenv("BG_REMOVAL_MERGE_MODEL", "u2net_human_seg").strip()
+MERGE_MASK_ENABLED = os.getenv("BG_REMOVAL_MERGE_MASK", "1").lower() not in {"0", "false", "no"}
+MERGE_ALPHA_SCALE = float(os.getenv("BG_REMOVAL_MERGE_ALPHA_SCALE", "0.94"))
+MERGE_HOLE_PRIMARY_MAX = int(os.getenv("BG_REMOVAL_MERGE_HOLE_PRIMARY_MAX", "84"))
+MERGE_HOLE_SECONDARY_MIN = int(os.getenv("BG_REMOVAL_MERGE_HOLE_SECONDARY_MIN", "112"))
 SERVICE_TOKEN = os.getenv("BG_REMOVAL_SERVICE_TOKEN", "")
 MAX_PIXELS = int(os.getenv("BG_REMOVAL_MAX_PIXELS", "3600000"))
 ALPHA_MATTING = os.getenv("BG_REMOVAL_ALPHA_MATTING", "1").lower() not in {"0", "false", "no"}
 ALPHA_FOREGROUND_THRESHOLD = int(os.getenv("BG_REMOVAL_ALPHA_FOREGROUND_THRESHOLD", "240"))
 ALPHA_BACKGROUND_THRESHOLD = int(os.getenv("BG_REMOVAL_ALPHA_BACKGROUND_THRESHOLD", "10"))
-ALPHA_ERODE_SIZE = int(os.getenv("BG_REMOVAL_ALPHA_ERODE_SIZE", "10"))
+ALPHA_ERODE_SIZE = int(os.getenv("BG_REMOVAL_ALPHA_ERODE_SIZE", "8"))
 REMOVE_SIGNATURE = inspect.signature(remove)
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=8)
 def get_session(model_name: str):
     return new_session(model_name)
 
@@ -62,9 +68,10 @@ def candidate_models(requested_model: str | None) -> list[str]:
     return models or [DEFAULT_MODEL]
 
 
-def supported_remove_kwargs() -> dict:
+def supported_remove_kwargs(*, alpha_matting: bool | None = None) -> dict:
+    use_matting = ALPHA_MATTING if alpha_matting is None else alpha_matting
     requested = {
-        "alpha_matting": ALPHA_MATTING,
+        "alpha_matting": use_matting,
         "alpha_matting_foreground_threshold": ALPHA_FOREGROUND_THRESHOLD,
         "alpha_matting_background_threshold": ALPHA_BACKGROUND_THRESHOLD,
         "alpha_matting_erode_size": ALPHA_ERODE_SIZE,
@@ -72,8 +79,88 @@ def supported_remove_kwargs() -> dict:
     }
     params = REMOVE_SIGNATURE.parameters
     if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()):
+        if not use_matting:
+            requested["alpha_matting"] = False
         return requested
-    return {key: value for key, value in requested.items() if key in params}
+    filtered = {key: value for key, value in requested.items() if key in params}
+    if not use_matting and "alpha_matting" in filtered:
+        filtered["alpha_matting"] = False
+    return filtered
+
+
+def to_rgba_image(result: Image.Image | bytes) -> Image.Image:
+    if isinstance(result, bytes):
+        return Image.open(io.BytesIO(result)).convert("RGBA")
+    return result.convert("RGBA")
+
+
+def run_remove(source: Image.Image, model_name: str, *, alpha_matting: bool | None = None) -> Image.Image:
+    session = get_session(model_name)
+    result = remove(
+        source,
+        session=session,
+        **supported_remove_kwargs(alpha_matting=alpha_matting),
+    )
+    return to_rgba_image(result)
+
+
+def merge_person_masks(
+    source: Image.Image,
+    primary: Image.Image,
+    secondary: Image.Image,
+) -> Image.Image:
+    """
+    Combine a precise portrait mask with a generous human-seg mask.
+    Uses original photo RGB so filled hair/shirt patches keep true colours.
+    """
+    source_rgba = np.array(source.convert("RGBA"), dtype=np.uint8)
+    primary_a = np.array(primary.convert("RGBA"), dtype=np.uint8)[..., 3]
+    secondary_rgba = secondary.convert("RGBA")
+    if secondary_rgba.size != source.size:
+        secondary_rgba = secondary_rgba.resize(source.size, Image.Resampling.LANCZOS)
+    secondary_a = np.array(secondary_rgba, dtype=np.uint8)[..., 3]
+
+    secondary_scaled = np.clip(
+        secondary_a.astype(np.float32) * MERGE_ALPHA_SCALE,
+        0,
+        255,
+    ).astype(np.uint8)
+
+    merged_a = primary_a.copy()
+
+    # Fill interior holes (hair patches) where human-seg is confident.
+    hole_fill = (primary_a < MERGE_HOLE_PRIMARY_MAX) & (secondary_scaled >= MERGE_HOLE_SECONDARY_MIN)
+    merged_a[hole_fill] = np.maximum(primary_a[hole_fill], secondary_scaled[hole_fill])
+
+    # Boost wispy strands still inside the human silhouette.
+    wispy = (
+        (secondary_scaled >= MERGE_HOLE_SECONDARY_MIN)
+        & (primary_a >= MERGE_HOLE_PRIMARY_MAX)
+        & (primary_a < 168)
+    )
+    merged_a[wispy] = np.maximum(merged_a[wispy], secondary_scaled[wispy])
+
+    out = source_rgba.copy()
+    out[..., 3] = merged_a
+    return Image.fromarray(out, "RGBA")
+
+
+def maybe_merge_with_person_mask(
+    source: Image.Image,
+    primary: Image.Image,
+    primary_model: str,
+) -> tuple[Image.Image, str]:
+    if not MERGE_MASK_ENABLED or not MERGE_MASK_MODEL:
+        return primary, primary_model
+    if MERGE_MASK_MODEL == primary_model:
+        return primary, primary_model
+
+    try:
+        secondary = run_remove(source, MERGE_MASK_MODEL, alpha_matting=False)
+        merged = merge_person_masks(source, primary, secondary)
+        return merged, f"{primary_model}+{MERGE_MASK_MODEL}"
+    except Exception:
+        return primary, primary_model
 
 
 @app.get("/health")
@@ -82,6 +169,8 @@ def health():
         "ok": True,
         "model": DEFAULT_MODEL,
         "modelChain": candidate_models(DEFAULT_MODEL),
+        "mergeMask": MERGE_MASK_ENABLED,
+        "mergeModel": MERGE_MASK_MODEL if MERGE_MASK_ENABLED else None,
         "alphaMatting": ALPHA_MATTING,
         "maxPixels": MAX_PIXELS,
     }
@@ -111,16 +200,11 @@ async def remove_background(
     try:
         source = prepare_image(raw)
         last_error: Exception | None = None
-        result: Image.Image | bytes | None = None
+        result: Image.Image | None = None
         used_model = ""
         for model_name in candidate_models(model):
             try:
-                session = get_session(model_name)
-                result = remove(
-                    source,
-                    session=session,
-                    **supported_remove_kwargs(),
-                )
+                result = run_remove(source, model_name)
                 used_model = model_name
                 break
             except Exception as exc:
@@ -129,10 +213,8 @@ async def remove_background(
 
         if result is None:
             raise last_error or RuntimeError("No background removal model could run")
-        if isinstance(result, bytes):
-            result = Image.open(io.BytesIO(result)).convert("RGBA")
-        else:
-            result = result.convert("RGBA")
+
+        result, used_model = maybe_merge_with_person_mask(source, result, used_model)
 
         output = io.BytesIO()
         result.save(output, format="PNG")

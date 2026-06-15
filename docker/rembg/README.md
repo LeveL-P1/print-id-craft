@@ -17,8 +17,29 @@ Use the portrait-first model chain for student photos:
 BG_REMOVAL_MODEL=birefnet-portrait
 BG_REMOVAL_MODEL_CHAIN=birefnet-portrait,birefnet-general,isnet-general-use,u2net_human_seg
 BG_REMOVAL_ALPHA_MATTING=1
+BG_REMOVAL_ALPHA_ERODE_SIZE=8
+BG_REMOVAL_MERGE_MASK=1
+BG_REMOVAL_MERGE_MODEL=u2net_human_seg
 BG_REMOVAL_MAX_PIXELS=3600000
 ```
+
+## Dual-mask merge (hair + shirt holes)
+
+When `BG_REMOVAL_MERGE_MASK=1` (default), every successful primary removal is merged with `u2net_human_seg`:
+
+- **Primary** (`birefnet-portrait`): precise edges, hair strands, shoulders.
+- **Merge** (`u2net_human_seg`): generous whole-person silhouette — fills gaps the portrait model punches in hair or light shirts.
+- Output RGB comes from the **original photo**; only the alpha channel is merged.
+
+Optional tuning:
+
+```bash
+BG_REMOVAL_MERGE_ALPHA_SCALE=0.94
+BG_REMOVAL_MERGE_HOLE_PRIMARY_MAX=84
+BG_REMOVAL_MERGE_HOLE_SECONDARY_MIN=112
+```
+
+Set `BG_REMOVAL_MERGE_MASK=0` to disable merge and use the primary model only.
 
 Why this order:
 

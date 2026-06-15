@@ -2,9 +2,16 @@
 import {
   canUseFastRecolorOnly,
   colorDistance,
+  enhanceForegroundMask,
+  isBackgroundLikePixel,
+  isHeadHairZonePixel,
   isPlainBackground,
+  isSubjectInteriorPixel,
+  markExteriorBackgroundMask,
   matchesSchoolColor,
   parseHexColor,
+  repairForegroundMaskHoles,
+  scoreRawMaskQuality,
   type BgUniformity,
 } from "@/lib/photo-background"
 
@@ -40,5 +47,107 @@ describe("photo-background fast recolor gate", () => {
     const red = parseHexColor("#DA0B0B")
     expect(red).toEqual({ r: 218, g: 11, b: 11 })
     expect(colorDistance(plainRed.dominantRgb, red!)).toBeLessThan(10)
+  })
+})
+
+describe("photo-background shirt-safe cleanup rules", () => {
+  const schoolRed = parseHexColor("#DA0B0B")!
+  const whiteShirt = { r: 248, g: 246, b: 242 }
+  const navyShirt = { r: 28, g: 42, b: 92 }
+  const lightBlueShirt = { r: 168, g: 198, b: 228 }
+
+  it("does not treat white shirts as replaceable on a red background", () => {
+    expect(isBackgroundLikePixel(whiteShirt.r, whiteShirt.g, whiteShirt.b, schoolRed, true)).toBe(false)
+    expect(isBackgroundLikePixel(whiteShirt.r, whiteShirt.g, whiteShirt.b, schoolRed, false)).toBe(false)
+  })
+
+  it("does not treat coloured uniforms as replaceable when they differ from the target", () => {
+    expect(isBackgroundLikePixel(navyShirt.r, navyShirt.g, navyShirt.b, schoolRed, true)).toBe(false)
+    expect(isBackgroundLikePixel(lightBlueShirt.r, lightBlueShirt.g, lightBlueShirt.b, schoolRed, true)).toBe(false)
+  })
+
+  it("still replaces pixels that match the chosen background colour", () => {
+    expect(isBackgroundLikePixel(218, 11, 11, schoolRed, false)).toBe(true)
+    expect(isBackgroundLikePixel(255, 255, 255, parseHexColor("#FFFFFF")!, false)).toBe(true)
+  })
+
+  it("protects the centre torso region from edge flood cleanup", () => {
+    expect(isSubjectInteriorPixel(100, 200, 200, 400)).toBe(true)
+    expect(isSubjectInteriorPixel(5, 200, 200, 400)).toBe(false)
+  })
+})
+
+describe("photo-background hair hole repair", () => {
+  function makeImage(w: number, h: number, paint: (x: number, y: number) => [number, number, number, number]) {
+    const data = new Uint8ClampedArray(w * h * 4)
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4
+        const [r, g, b, a] = paint(x, y)
+        data[i] = r
+        data[i + 1] = g
+        data[i + 2] = b
+        data[i + 3] = a
+      }
+    }
+    return { data, width: w, height: h } as ImageData
+  }
+
+  it("fills interior transparent holes surrounded by hair", () => {
+    const original = makeImage(9, 9, (x, y) => {
+      if (x === 4 && y === 4) return [42, 28, 18, 255]
+      return [42, 28, 18, 255]
+    })
+    const mask = makeImage(9, 9, (x, y) => {
+      if (x === 4 && y === 4) return [0, 0, 0, 0]
+      if (Math.abs(x - 4) <= 1 && Math.abs(y - 4) <= 1) return [0, 0, 0, 255]
+      return [0, 0, 0, 0]
+    })
+
+    const repaired = repairForegroundMaskHoles(original, mask)
+    expect(repaired.data[(4 * 9 + 4) * 4 + 3]).toBe(255)
+    expect(repaired.data[(4 * 9 + 4) * 4]).toBe(42)
+  })
+
+  it("does not fill background holes connected to the border", () => {
+    const original = makeImage(5, 5, () => [250, 250, 250, 255])
+    const mask = makeImage(5, 5, (x, y) => {
+      if (x === 0 || y === 0) return [0, 0, 0, 0]
+      return [0, 0, 0, 255]
+    })
+    const exterior = markExteriorBackgroundMask(mask.data, 5, 5, 72)
+    expect(exterior[0]).toBe(1)
+    expect(exterior[2 * 5 + 2]).toBe(0)
+  })
+
+  it("targets the head band for hair repair", () => {
+    expect(isHeadHairZonePixel(50, 40, 100, 200)).toBe(true)
+    expect(isHeadHairZonePixel(50, 150, 100, 200)).toBe(false)
+  })
+
+  it("scores masks with fewer person-zone holes higher", () => {
+    const original = makeImage(7, 7, () => [40, 30, 20, 255])
+    const good = makeImage(7, 7, (x, y) => {
+      if (x >= 2 && x <= 4 && y >= 1 && y <= 5) return [0, 0, 0, 255]
+      return [0, 0, 0, 0]
+    })
+    const holey = makeImage(7, 7, (x, y) => {
+      if (x === 3 && y === 3) return [0, 0, 0, 0]
+      if (x >= 2 && x <= 4 && y >= 1 && y <= 5) return [0, 0, 0, 255]
+      return [0, 0, 0, 0]
+    })
+    expect(scoreRawMaskQuality(original, good)).toBeGreaterThan(scoreRawMaskQuality(original, holey))
+  })
+
+  it("enhanceForegroundMask restores original colours on foreground", () => {
+    const original = makeImage(5, 5, () => [90, 60, 40, 255])
+    const mask = makeImage(5, 5, (x, y) => {
+      if (x === 2 && y === 2) return [200, 200, 200, 255]
+      if (x >= 1 && x <= 3 && y >= 1 && y <= 3) return [0, 0, 0, 255]
+      return [0, 0, 0, 0]
+    })
+    const enhanced = enhanceForegroundMask(original, mask)
+    expect(enhanced.data[(2 * 5 + 2) * 4]).toBe(90)
+    expect(enhanced.data[(2 * 5 + 2) * 4 + 1]).toBe(60)
   })
 })

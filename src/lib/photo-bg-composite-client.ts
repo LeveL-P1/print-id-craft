@@ -1,5 +1,6 @@
 /**
- * Client-side compositing: AI transparent PNG to solid background JPEG.
+ * Client-side compositing: AI transparent PNG → plain selected background JPEG.
+ * Uses one unified finish pipeline for every photo (hair, shirts, boys, girls).
  */
 
 import {
@@ -7,13 +8,15 @@ import {
   canUseFastRecolorOnly,
   cleanupBackgroundArtifacts,
   downscaleBlob,
+  finalizePlainBackgroundFromMaskBlobs,
+  loadBlobAsImageData,
   measureEdgeBackgroundMatch,
   measureForegroundRatioInTransparentBlob,
-  parseHexColor,
   preloadBgRemovalModel,
   recolorPlainBackgroundOnCanvas,
   removeBackgroundWithBestModel,
   loadImageToCanvas,
+  scoreRawMaskQuality,
 } from "@/lib/photo-background"
 
 export const BG_WORK_MAX_DIM = 768
@@ -21,7 +24,6 @@ export const BG_JPEG_QUALITY = 0.88
 
 const MIN_FOREGROUND_RATIO = 0.06
 const MIN_EDGE_MATCH_PERCENT = 72
-const BG_ALPHA_CUTOFF = 48
 
 export async function photoUrlToBlob(url: string): Promise<Blob> {
   try {
@@ -59,73 +61,17 @@ export async function photoUrlToBlob(url: string): Promise<Blob> {
   })
 }
 
-export function compositeTransparentOntoColor(
+/** @deprecated Use processPhotoBackgroundLocal — kept for any direct imports */
+export async function compositeTransparentOntoColor(
   transparentDataUrl: string,
-  bgColor: string
+  bgColor: string,
+  originalDataUrl?: string
 ): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const targetRgb = parseHexColor(bgColor) || { r: 255, g: 255, b: 255 }
-    const img = new Image()
-    img.onload = () => {
-      const w = img.naturalWidth
-      const h = img.naturalHeight
-      const canvas = document.createElement("canvas")
-      canvas.width = w
-      canvas.height = h
-      const ctx = canvas.getContext("2d")
-      if (!ctx) { reject(new Error("Canvas unavailable")); return }
-
-      ctx.drawImage(img, 0, 0)
-      const src = ctx.getImageData(0, 0, w, h)
-      const out = ctx.createImageData(w, h)
-      const { r: tr, g: tg, b: tb } = targetRgb
-
-      for (let i = 0; i < src.data.length; i += 4) {
-        const sr = src.data[i]
-        const sg = src.data[i + 1]
-        const sb = src.data[i + 2]
-        const sa = src.data[i + 3]
-
-        if (sa < BG_ALPHA_CUTOFF) {
-          out.data[i] = tr
-          out.data[i + 1] = tg
-          out.data[i + 2] = tb
-          out.data[i + 3] = 255
-          continue
-        }
-
-        const isWhiteFringe = sr > 210 && sg > 210 && sb > 210 && sa < 200
-        if (isWhiteFringe) {
-          const a = Math.min(sa / 255, 0.3)
-          out.data[i] = Math.round(sr * a + tr * (1 - a))
-          out.data[i + 1] = Math.round(sg * a + tg * (1 - a))
-          out.data[i + 2] = Math.round(sb * a + tb * (1 - a))
-          out.data[i + 3] = 255
-          continue
-        }
-
-        if (sa >= 245) {
-          out.data[i] = sr
-          out.data[i + 1] = sg
-          out.data[i + 2] = sb
-          out.data[i + 3] = 255
-          continue
-        }
-
-        const a = sa / 255
-        out.data[i] = Math.round(sr * a + tr * (1 - a))
-        out.data[i + 1] = Math.round(sg * a + tg * (1 - a))
-        out.data[i + 2] = Math.round(sb * a + tb * (1 - a))
-        out.data[i + 3] = 255
-      }
-
-      ctx.putImageData(out, 0, 0)
-      cleanupBackgroundArtifacts(ctx, w, h, bgColor)
-      resolve(canvas.toDataURL("image/jpeg", BG_JPEG_QUALITY))
-    }
-    img.onerror = () => reject(new Error("Transparent image load failed"))
-    img.src = transparentDataUrl
-  })
+  const maskBlob = await photoUrlToBlob(transparentDataUrl)
+  const originalBlob = originalDataUrl
+    ? await photoUrlToBlob(originalDataUrl)
+    : maskBlob
+  return finalizePlainBackgroundFromMaskBlobs(originalBlob, maskBlob, bgColor, BG_JPEG_QUALITY)
 }
 
 export type BgProcessProgress = (message: string, percent: number) => void
@@ -137,6 +83,59 @@ function finalizeCanvasToDataUrl(
 ): string {
   cleanupBackgroundArtifacts(ctx, canvas.width, canvas.height, bgColor)
   return canvas.toDataURL("image/jpeg", BG_JPEG_QUALITY)
+}
+
+async function obtainBestAiMask(
+  workBlob: Blob,
+  bgColor: string,
+  onProgress?: BgProcessProgress
+): Promise<Blob> {
+  const original = await loadBlobAsImageData(workBlob)
+  let bestMask: Blob | null = null
+  let bestScore = 0
+
+  onProgress?.("Trying professional background model…", 18)
+  try {
+    const remoteMask = await removeBackgroundWithServerModel(workBlob, bgColor)
+    const remoteMaskData = await loadBlobAsImageData(remoteMask)
+    const remoteFg = await measureForegroundRatioInTransparentBlob(remoteMask)
+    if (remoteFg >= MIN_FOREGROUND_RATIO) {
+      bestScore = scoreRawMaskQuality(original, remoteMaskData)
+      bestMask = remoteMask
+      onProgress?.("Professional model ready", 52)
+      if (bestScore >= 78) {
+        onProgress?.("Using professional AI result", 82)
+        return bestMask
+      }
+    }
+  } catch {
+    /* server optional */
+  }
+
+  onProgress?.("Loading local AI model (first use ~170MB)…", 55)
+  await preloadBgRemovalModel()
+
+  onProgress?.("Removing background with local AI…", 60)
+  const localMask = await removeBackgroundWithBestModel(workBlob, (msg, pct) => {
+    onProgress?.(msg, 60 + pct * 0.2)
+  })
+
+  const localFg = await measureForegroundRatioInTransparentBlob(localMask)
+  if (localFg < MIN_FOREGROUND_RATIO) {
+    if (bestMask) return bestMask
+    throw new Error("Background removal failed — could not detect the student in the photo")
+  }
+
+  const localMaskData = await loadBlobAsImageData(localMask)
+  const localScore = scoreRawMaskQuality(original, localMaskData)
+
+  if (!bestMask || localScore > bestScore + 3) {
+    onProgress?.("Using local AI result", 82)
+    return localMask
+  }
+
+  onProgress?.("Using professional AI result", 82)
+  return bestMask!
 }
 
 export async function processPhotoBackgroundLocal(
@@ -160,74 +159,22 @@ export async function processPhotoBackgroundLocal(
     }
   }
 
-  onProgress?.("Loading AI model (first time may take a minute)…", 10)
-  let blob = await photoUrlToBlob(photoUrl)
-  blob = await downscaleBlob(blob, BG_WORK_MAX_DIM)
+  onProgress?.("Preparing photo for AI…", 10)
+  let workBlob = await photoUrlToBlob(photoUrl)
+  workBlob = await downscaleBlob(workBlob, BG_WORK_MAX_DIM)
 
-  onProgress?.("Trying professional background model...", 15)
-  try {
-    const remoteTransparent = await removeBackgroundWithServerModel(blob, bgColor)
-    const remoteFgRatio = await measureForegroundRatioInTransparentBlob(remoteTransparent)
-    if (remoteFgRatio >= MIN_FOREGROUND_RATIO) {
-      onProgress?.("Applying background colour...", 85)
-      const remoteTransparentUrl = await blobToDataUrl(remoteTransparent)
-      const remoteDataUrl = await compositeTransparentOntoColor(remoteTransparentUrl, bgColor)
-      onProgress?.("Done", 100)
-      return { dataUrl: remoteDataUrl, usedAi: true }
-    }
-  } catch {
-    // Professional backend is optional. Fall back to the local browser model
-    // so parent submissions still work when the service is unavailable.
-  }
+  const maskBlob = await obtainBestAiMask(workBlob, bgColor, onProgress)
 
-  onProgress?.("Loading AI model (first time may take a minute)...", 20)
-  await preloadBgRemovalModel()
-
-  onProgress?.("Removing background with AI…", 25)
-  const transparentBlob = await removeBackgroundWithBestModel(blob, (msg, pct) => {
-    onProgress?.(msg, 25 + pct * 0.55)
-  })
-
-  const fgRatio = await measureForegroundRatioInTransparentBlob(transparentBlob)
-  if (fgRatio < MIN_FOREGROUND_RATIO) {
-    throw new Error("Background removal failed — could not detect the student in the photo")
-  }
-
-  onProgress?.("Applying background colour…", 85)
-  const transparentUrl = await blobToDataUrl(transparentBlob)
-
-  let dataUrl = await compositeTransparentOntoColor(transparentUrl, bgColor)
-
-  const checkCanvas = document.createElement("canvas")
-  const checkImg = new Image()
-  await new Promise<void>((resolve, reject) => {
-    checkImg.onload = () => resolve()
-    checkImg.onerror = () => reject(new Error("Could not verify processed photo"))
-    checkImg.src = dataUrl
-  })
-  checkCanvas.width = checkImg.naturalWidth
-  checkCanvas.height = checkImg.naturalHeight
-  const checkCtx = checkCanvas.getContext("2d")
-  if (checkCtx) {
-    checkCtx.drawImage(checkImg, 0, 0)
-    const edgeMatch = measureEdgeBackgroundMatch(checkCtx, checkCanvas.width, checkCanvas.height, bgColor)
-    if (edgeMatch < MIN_EDGE_MATCH_PERCENT) {
-      cleanupBackgroundArtifacts(checkCtx, checkCanvas.width, checkCanvas.height, bgColor)
-      dataUrl = checkCanvas.toDataURL("image/jpeg", BG_JPEG_QUALITY)
-    }
-  }
+  onProgress?.("Finishing plain background…", 88)
+  const dataUrl = await finalizePlainBackgroundFromMaskBlobs(
+    workBlob,
+    maskBlob,
+    bgColor,
+    BG_JPEG_QUALITY
+  )
 
   onProgress?.("Done", 100)
   return { dataUrl, usedAi: true }
-}
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = () => reject(new Error("Could not read AI result"))
-    reader.readAsDataURL(blob)
-  })
 }
 
 async function removeBackgroundWithServerModel(blob: Blob, bgColor: string): Promise<Blob> {

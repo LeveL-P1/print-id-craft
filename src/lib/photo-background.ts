@@ -183,7 +183,616 @@ export async function measureForegroundRatioInTransparentBlob(blob: Blob): Promi
   })
 }
 
-/** Flood from edges: remove white halos and uneven shades outside the subject. */
+/** True when a pixel looks like the chosen plain background (not shirt/uniform). */
+export function isBackgroundLikePixel(
+  r: number,
+  g: number,
+  b: number,
+  target: { r: number; g: number; b: number },
+  inSubjectZone = false
+): boolean {
+  const tolerance = inSubjectZone ? 22 : 42
+  return colorDistance({ r, g, b }, target) < tolerance
+}
+
+export function isSubjectInteriorPixel(x: number, y: number, w: number, h: number): boolean {
+  const xRatio = x / w
+  const yRatio = y / h
+  return xRatio > 0.08 && xRatio < 0.92 && yRatio > 0.14 && yRatio < 0.98
+}
+
+/** Head/ hair band — slightly more aggressive hole fill than torso. */
+export function isHeadHairZonePixel(x: number, y: number, w: number, h: number): boolean {
+  const xRatio = x / w
+  const yRatio = y / h
+  return xRatio > 0.1 && xRatio < 0.9 && yRatio > 0.04 && yRatio < 0.58
+}
+
+export type MaskHoleRepairOptions = {
+  holeAlphaMax?: number
+  solidNeighborAlpha?: number
+  minSolidNeighbors?: number
+  wispyAlphaMax?: number
+  wispyMinSolidNeighbors?: number
+  iterations?: number
+}
+
+function readAlpha(data: Uint8ClampedArray, idx: number): number {
+  return data[idx * 4 + 3]
+}
+
+function countSolidNeighbors(
+  alphaAt: (idx: number) => number,
+  idx: number,
+  w: number,
+  h: number,
+  minAlpha: number
+): number {
+  const x = idx % w
+  const y = (idx / w) | 0
+  const offsets = [
+    [-1, -1], [0, -1], [1, -1],
+    [-1, 0], [1, 0],
+    [-1, 1], [0, 1], [1, 1],
+  ]
+  let count = 0
+  for (const [dx, dy] of offsets) {
+    const nx = x + dx
+    const ny = y + dy
+    if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
+    if (alphaAt(ny * w + nx) >= minAlpha) count++
+  }
+  return count
+}
+
+/** Pixels reachable from the border through low-alpha regions (true background). */
+export function markExteriorBackgroundMask(
+  maskData: Uint8ClampedArray,
+  w: number,
+  h: number,
+  holeAlphaMax: number
+): Uint8Array {
+  const total = w * h
+  const exterior = new Uint8Array(total)
+  const queue = new Int32Array(total)
+  let head = 0
+  let tail = 0
+
+  const alphaAt = (idx: number) => readAlpha(maskData, idx)
+
+  const trySeed = (idx: number) => {
+    if (idx < 0 || idx >= total || exterior[idx]) return
+    if (alphaAt(idx) >= holeAlphaMax) return
+    exterior[idx] = 1
+    queue[tail++] = idx
+  }
+
+  for (let x = 0; x < w; x++) {
+    trySeed(x)
+    trySeed((h - 1) * w + x)
+  }
+  for (let y = 0; y < h; y++) {
+    trySeed(y * w)
+    trySeed(y * w + (w - 1))
+  }
+
+  while (head < tail) {
+    const idx = queue[head++]
+    const x = idx % w
+    const y = (idx / w) | 0
+    const neighbours = [
+      x > 0 ? idx - 1 : -1,
+      x < w - 1 ? idx + 1 : -1,
+      y > 0 ? idx - w : -1,
+      y < h - 1 ? idx + w : -1,
+      x > 0 && y > 0 ? idx - w - 1 : -1,
+      x < w - 1 && y > 0 ? idx - w + 1 : -1,
+      x > 0 && y < h - 1 ? idx + w - 1 : -1,
+      x < w - 1 && y < h - 1 ? idx + w + 1 : -1,
+    ]
+    for (const n of neighbours) {
+      if (n < 0 || exterior[n] || alphaAt(n) >= holeAlphaMax) continue
+      exterior[n] = 1
+      queue[tail++] = n
+    }
+  }
+
+  return exterior
+}
+
+/**
+ * Fill transparent patches inside hair/subject using the original photo colours.
+ * Fixes Swiss-cheese hair without touching true background outside the silhouette.
+ */
+export function repairForegroundMaskHoles(
+  original: ImageData,
+  mask: ImageData,
+  options?: MaskHoleRepairOptions
+): ImageData {
+  const w = mask.width
+  const h = mask.height
+  if (original.width !== w || original.height !== h) return mask
+
+  const holeAlphaMax = options?.holeAlphaMax ?? 72
+  const solidNeighborAlpha = options?.solidNeighborAlpha ?? 118
+  const minSolidNeighbors = options?.minSolidNeighbors ?? 4
+  const wispyAlphaMax = options?.wispyAlphaMax ?? 132
+  const wispyMinSolidNeighbors = options?.wispyMinSolidNeighbors ?? 5
+  const iterations = options?.iterations ?? 2
+
+  const outData = new Uint8ClampedArray(mask.data)
+  const orig = original.data
+  const total = w * h
+
+  for (let pass = 0; pass < iterations; pass++) {
+    const alphaAt = (idx: number) => readAlpha(outData, idx)
+    const exterior = markExteriorBackgroundMask(outData, w, h, holeAlphaMax)
+
+    for (let idx = 0; idx < total; idx++) {
+      const alpha = alphaAt(idx)
+      const x = idx % w
+      const y = (idx / w) | 0
+      const inHead = isHeadHairZonePixel(x, y, w, h)
+      const p = idx * 4
+
+      const solidNeighbors = countSolidNeighbors(
+        alphaAt,
+        idx,
+        w,
+        h,
+        solidNeighborAlpha
+      )
+      const headMinNeighbors = Math.max(3, minSolidNeighbors - 1)
+      const requiredSolid = inHead ? headMinNeighbors : minSolidNeighbors
+
+      const isInteriorHole = alpha < holeAlphaMax && !exterior[idx]
+      const isWispyStrand =
+        alpha >= holeAlphaMax &&
+        alpha < wispyAlphaMax &&
+        solidNeighbors >= (inHead ? wispyMinSolidNeighbors - 1 : wispyMinSolidNeighbors)
+
+      if (!isInteriorHole && !isWispyStrand) continue
+      if (isInteriorHole && solidNeighbors < requiredSolid) continue
+
+      outData[p] = orig[p]
+      outData[p + 1] = orig[p + 1]
+      outData[p + 2] = orig[p + 2]
+      outData[p + 3] = 255
+    }
+  }
+
+  return { data: outData, width: w, height: h } as ImageData
+}
+
+export async function loadBlobAsImageData(blob: Blob): Promise<ImageData> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const url = URL.createObjectURL(blob)
+    img.onload = () => {
+      const canvas = document.createElement("canvas")
+      canvas.width = img.naturalWidth
+      canvas.height = img.naturalHeight
+      const ctx = canvas.getContext("2d")
+      if (!ctx) {
+        URL.revokeObjectURL(url)
+        reject(new Error("Canvas unavailable"))
+        return
+      }
+      ctx.drawImage(img, 0, 0)
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      URL.revokeObjectURL(url)
+      resolve(data)
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error("Image load failed"))
+    }
+    img.src = url
+  })
+}
+
+export async function imageDataToPngBlob(image: ImageData): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const canvas = document.createElement("canvas")
+    canvas.width = image.width
+    canvas.height = image.height
+    const ctx = canvas.getContext("2d")
+    if (!ctx) {
+      reject(new Error("Canvas unavailable"))
+      return
+    }
+    ctx.putImageData(image, 0, 0)
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob)
+      else reject(new Error("Could not encode repaired mask"))
+    }, "image/png")
+  })
+}
+
+export async function repairTransparentBlobHoles(
+  originalBlob: Blob,
+  maskBlob: Blob
+): Promise<Blob> {
+  const [original, mask] = await Promise.all([
+    loadBlobAsImageData(originalBlob),
+    loadBlobAsImageData(maskBlob),
+  ])
+  if (original.width !== mask.width || original.height !== mask.height) {
+    return maskBlob
+  }
+  const repaired = enhanceForegroundMask(original, mask)
+  return imageDataToPngBlob(repaired)
+}
+
+/** Alpha below this is treated as background when compositing. */
+export const BG_ALPHA_CUTOFF = 48
+
+const DEFAULT_MASK_ENHANCE: MaskHoleRepairOptions = {
+  iterations: 3,
+  holeAlphaMax: 80,
+  solidNeighborAlpha: 108,
+  minSolidNeighbors: 3,
+  wispyAlphaMax: 142,
+  wispyMinSolidNeighbors: 4,
+}
+
+/** Use true photo colours anywhere the mask says foreground. */
+export function alignMaskWithOriginalColors(original: ImageData, mask: ImageData): ImageData {
+  const out = new Uint8ClampedArray(mask.data)
+  for (let i = 0; i < out.length; i += 4) {
+    if (out[i + 3] < BG_ALPHA_CUTOFF) continue
+    out[i] = original.data[i]
+    out[i + 1] = original.data[i + 1]
+    out[i + 2] = original.data[i + 2]
+  }
+  return { data: out, width: mask.width, height: mask.height } as ImageData
+}
+
+/** Close tiny alpha gaps (hair strands, shirt folds) using original colours. */
+export function closeMaskAlphaGaps(original: ImageData, mask: ImageData): ImageData {
+  const w = mask.width
+  const h = mask.height
+  const out = new Uint8ClampedArray(mask.data)
+  const alphas = new Uint8Array(w * h)
+  for (let idx = 0; idx < w * h; idx++) {
+    alphas[idx] = out[idx * 4 + 3]
+  }
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = y * w + x
+      let maxAlpha = alphas[idx]
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx
+          const ny = y + dy
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
+          maxAlpha = Math.max(maxAlpha, alphas[ny * w + nx])
+        }
+      }
+      if (maxAlpha <= alphas[idx] || maxAlpha < 88) continue
+      const p = idx * 4
+      out[p] = original.data[p]
+      out[p + 1] = original.data[p + 1]
+      out[p + 2] = original.data[p + 2]
+      out[p + 3] = Math.min(255, Math.max(maxAlpha, alphas[idx] + 24))
+    }
+  }
+
+  return { data: out, width: w, height: h } as ImageData
+}
+
+/** Full mask prep: hole fill → alpha close → original RGB alignment. */
+export function enhanceForegroundMask(original: ImageData, mask: ImageData): ImageData {
+  const repaired = repairForegroundMaskHoles(original, mask, DEFAULT_MASK_ENHANCE)
+  const closed = closeMaskAlphaGaps(original, repaired)
+  return alignMaskWithOriginalColors(original, closed)
+}
+
+export function isPersonZonePixel(x: number, y: number, w: number, h: number): boolean {
+  return isHeadHairZonePixel(x, y, w, h) || isSubjectInteriorPixel(x, y, w, h)
+}
+
+function countNonBackgroundNeighbors(
+  data: Uint8ClampedArray,
+  idx: number,
+  w: number,
+  h: number,
+  target: { r: number; g: number; b: number },
+  tolerance: number
+): number {
+  const x = idx % w
+  const y = (idx / w) | 0
+  let count = 0
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue
+      const nx = x + dx
+      const ny = y + dy
+      if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
+      const ni = (ny * w + nx) * 4
+      if (colorDistance({ r: data[ni], g: data[ni + 1], b: data[ni + 2] }, target) >= tolerance) {
+        count++
+      }
+    }
+  }
+  return count
+}
+
+/** Restore hair/shirt patches that wrongly received the plain background colour. */
+export function repairCompositedSubjectHoles(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  original: ImageData,
+  targetHex: string
+): void {
+  const target = parseHexColor(targetHex)
+  if (!target) return
+
+  const imageData = ctx.getImageData(0, 0, w, h)
+  const data = imageData.data
+  const total = w * h
+  const bgTolerance = 36
+
+  for (let idx = 0; idx < total; idx++) {
+    const x = idx % w
+    const y = (idx / w) | 0
+    if (!isPersonZonePixel(x, y, w, h)) continue
+
+    const p = idx * 4
+    const pixel = { r: data[p], g: data[p + 1], b: data[p + 2] }
+    if (colorDistance(pixel, target) >= bgTolerance) continue
+    if (countNonBackgroundNeighbors(data, idx, w, h, target, bgTolerance) < 4) continue
+
+    data[p] = original.data[p]
+    data[p + 1] = original.data[p + 1]
+    data[p + 2] = original.data[p + 2]
+    data[p + 3] = 255
+  }
+
+  ctx.putImageData(imageData, 0, 0)
+}
+
+/** Force edge/side bands to the selected plain colour (never touches person core). */
+export function enforcePlainBackgroundEdges(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  targetHex: string
+): void {
+  const target = parseHexColor(targetHex)
+  if (!target) return
+
+  const imageData = ctx.getImageData(0, 0, w, h)
+  const data = imageData.data
+  const topBand = Math.max(12, Math.floor(h * 0.14))
+  const sideBand = Math.max(12, Math.floor(w * 0.11))
+  const bottomBand = Math.max(8, Math.floor(h * 0.06))
+
+  const paint = (idx: number) => {
+    const x = idx % w
+    const y = (idx / w) | 0
+    if (isPersonZonePixel(x, y, w, h)) {
+      const p = idx * 4
+      const dist = colorDistance({ r: data[p], g: data[p + 1], b: data[p + 2] }, target)
+      if (dist > 28) return
+    }
+    const p = idx * 4
+    data[p] = target.r
+    data[p + 1] = target.g
+    data[p + 2] = target.b
+    data[p + 3] = 255
+  }
+
+  for (let y = 0; y < topBand; y++) {
+    for (let x = 0; x < w; x++) paint(y * w + x)
+  }
+  for (let y = h - bottomBand; y < h; y++) {
+    for (let x = 0; x < w; x++) paint(y * w + x)
+  }
+  for (let y = topBand; y < h - bottomBand; y++) {
+    for (let x = 0; x < sideBand; x++) paint(y * w + x)
+    for (let x = w - sideBand; x < w; x++) paint(y * w + x)
+  }
+
+  ctx.putImageData(imageData, 0, 0)
+}
+
+export function compositeMaskImageDataOntoPlainColor(
+  original: ImageData,
+  mask: ImageData,
+  bgColor: string
+): ImageData {
+  const target = parseHexColor(bgColor) || { r: 255, g: 255, b: 255 }
+  const w = mask.width
+  const h = mask.height
+  const out = new Uint8ClampedArray(w * h * 4)
+  const { r: tr, g: tg, b: tb } = target
+
+  for (let idx = 0; idx < w * h; idx++) {
+    const p = idx * 4
+    const x = idx % w
+    const y = (idx / w) | 0
+    const sa = mask.data[p + 3]
+
+    if (sa < BG_ALPHA_CUTOFF) {
+      out[p] = tr
+      out[p + 1] = tg
+      out[p + 2] = tb
+      out[p + 3] = 255
+      continue
+    }
+
+    const inPerson = isPersonZonePixel(x, y, w, h)
+    const preserveThreshold = inPerson ? 88 : 124
+
+    if (sa >= preserveThreshold) {
+      out[p] = original.data[p]
+      out[p + 1] = original.data[p + 1]
+      out[p + 2] = original.data[p + 2]
+      out[p + 3] = 255
+      continue
+    }
+
+    const a = inPerson ? Math.max(sa / 255, 0.85) : sa / 255
+    const fr = original.data[p]
+    const fg = original.data[p + 1]
+    const fb = original.data[p + 2]
+    out[p] = Math.round(fr * a + tr * (1 - a))
+    out[p + 1] = Math.round(fg * a + tg * (1 - a))
+    out[p + 2] = Math.round(fb * a + tb * (1 - a))
+    out[p + 3] = 255
+  }
+
+  return { data: out, width: w, height: h } as ImageData
+}
+
+export function scoreRawMaskQuality(original: ImageData, mask: ImageData): number {
+  const w = mask.width
+  const h = mask.height
+  if (original.width !== w || original.height !== h) return 0
+
+  const data = mask.data
+  const total = w * h
+  const exterior = markExteriorBackgroundMask(data, w, h, 80)
+  let foreground = 0
+  let personSamples = 0
+  let personHoles = 0
+
+  for (let idx = 0; idx < total; idx++) {
+    const alpha = data[idx * 4 + 3]
+    if (alpha >= 64) foreground++
+
+    const x = idx % w
+    const y = (idx / w) | 0
+    if (!isPersonZonePixel(x, y, w, h)) continue
+    personSamples++
+    if (alpha < 64 && !exterior[idx]) personHoles++
+  }
+
+  const fgRatio = foreground / total
+  const holeRatio = personSamples > 0 ? personHoles / personSamples : 1
+  if (fgRatio < 0.06) return 0
+  return Math.round(Math.min(100, fgRatio * 140 + (1 - holeRatio) * 60))
+}
+
+export type PlainBackgroundQuality = {
+  edgeMatch: number
+  subjectLeaks: number
+  score: number
+}
+
+export function scorePlainBackgroundQuality(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  targetHex: string
+): PlainBackgroundQuality {
+  const target = parseHexColor(targetHex)
+  const edgeMatch = measureEdgeBackgroundMatch(ctx, w, h, targetHex)
+  if (!target) return { edgeMatch, subjectLeaks: 100, score: edgeMatch }
+
+  const data = ctx.getImageData(0, 0, w, h).data
+  let leaks = 0
+  let samples = 0
+  const bgTol = 34
+
+  for (let idx = 0; idx < w * h; idx++) {
+    const x = idx % w
+    const y = (idx / w) | 0
+    if (!isPersonZonePixel(x, y, w, h)) continue
+    samples++
+    const p = idx * 4
+    if (colorDistance({ r: data[p], g: data[p + 1], b: data[p + 2] }, target) >= bgTol) continue
+    if (countNonBackgroundNeighbors(data, idx, w, h, target, bgTol) >= 3) leaks++
+  }
+
+  const subjectLeaks = samples > 0 ? Math.round((leaks / samples) * 100) : 0
+  const score = Math.round(edgeMatch * 0.55 + Math.max(0, 100 - subjectLeaks * 4) * 0.45)
+  return { edgeMatch, subjectLeaks, score }
+}
+
+/**
+ * Best-effort finish for every portrait: preserve hair/shirt/uniform,
+ * then enforce a perfectly plain selected background colour.
+ */
+export function finalizePlainBackgroundFromMask(
+  original: ImageData,
+  mask: ImageData,
+  bgColor: string
+): ImageData {
+  const enhanced = enhanceForegroundMask(original, mask)
+  let composited = compositeMaskImageDataOntoPlainColor(original, enhanced, bgColor)
+
+  if (typeof document === "undefined") return composited
+
+  const canvas = document.createElement("canvas")
+  canvas.width = composited.width
+  canvas.height = composited.height
+  const ctx = canvas.getContext("2d")
+  if (!ctx) return composited
+
+  ctx.putImageData(composited, 0, 0)
+  repairCompositedSubjectHoles(ctx, composited.width, composited.height, original, bgColor)
+  cleanupBackgroundArtifacts(ctx, composited.width, composited.height, bgColor)
+  enforcePlainBackgroundEdges(ctx, composited.width, composited.height, bgColor)
+
+  let quality = scorePlainBackgroundQuality(ctx, composited.width, composited.height, bgColor)
+  if (quality.edgeMatch < 72) {
+    cleanupBackgroundArtifacts(ctx, composited.width, composited.height, bgColor)
+    enforcePlainBackgroundEdges(ctx, composited.width, composited.height, bgColor)
+    repairCompositedSubjectHoles(ctx, composited.width, composited.height, original, bgColor)
+    quality = scorePlainBackgroundQuality(ctx, composited.width, composited.height, bgColor)
+  }
+
+  return ctx.getImageData(0, 0, composited.width, composited.height)
+}
+
+export async function finalizePlainBackgroundFromMaskBlobs(
+  originalBlob: Blob,
+  maskBlob: Blob,
+  bgColor: string,
+  jpegQuality = 0.88
+): Promise<string> {
+  const [original, mask] = await Promise.all([
+    loadBlobAsImageData(originalBlob),
+    loadBlobAsImageData(maskBlob),
+  ])
+  if (original.width !== mask.width || original.height !== mask.height) {
+    throw new Error("Mask size does not match photo")
+  }
+
+  const result = finalizePlainBackgroundFromMask(original, mask, bgColor)
+  const canvas = document.createElement("canvas")
+  canvas.width = result.width
+  canvas.height = result.height
+  const ctx = canvas.getContext("2d")
+  if (!ctx) throw new Error("Canvas unavailable")
+  ctx.putImageData(result, 0, 0)
+  return canvas.toDataURL("image/jpeg", jpegQuality)
+}
+
+export async function scorePlainBackgroundFromMaskBlobs(
+  originalBlob: Blob,
+  maskBlob: Blob,
+  bgColor: string
+): Promise<PlainBackgroundQuality> {
+  const [original, mask] = await Promise.all([
+    loadBlobAsImageData(originalBlob),
+    loadBlobAsImageData(maskBlob),
+  ])
+  const result = finalizePlainBackgroundFromMask(original, mask, bgColor)
+  const canvas = document.createElement("canvas")
+  canvas.width = result.width
+  canvas.height = result.height
+  const ctx = canvas.getContext("2d")
+  if (!ctx) return { edgeMatch: 0, subjectLeaks: 100, score: 0 }
+  ctx.putImageData(result, 0, 0)
+  return scorePlainBackgroundQuality(ctx, result.width, result.height, bgColor)
+}
+
+/** Flood from edges: remove halos outside the subject without eating white/coloured shirts. */
 export function cleanupBackgroundArtifacts(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -197,13 +806,10 @@ export function cleanupBackgroundArtifacts(
   const data = imageData.data
   const total = w * h
 
-  const isReplaceable = (r: number, g: number, b: number) => {
-    if (r > 195 && g > 195 && b > 195) return true
-    if (colorDistance({ r, g, b }, target) < 55) return true
-    const max = Math.max(r, g, b)
-    const min = Math.min(r, g, b)
-    if (max - min < 28 && max > 150) return true
-    return false
+  const isReplaceable = (idx: number, r: number, g: number, b: number) => {
+    const x = idx % w
+    const y = (idx / w) | 0
+    return isBackgroundLikePixel(r, g, b, target, isSubjectInteriorPixel(x, y, w, h))
   }
 
   const isProtectedSubject = (r: number, g: number, b: number) => {
@@ -229,7 +835,7 @@ export function cleanupBackgroundArtifacts(
       visited[idx] = 1
       return
     }
-    if (!isReplaceable(r, g, b)) {
+    if (!isReplaceable(idx, r, g, b)) {
       visited[idx] = 1
       return
     }
@@ -267,7 +873,7 @@ export function cleanupBackgroundArtifacts(
         visited[n] = 1
         continue
       }
-      if (!isReplaceable(r, g, b)) {
+      if (!isReplaceable(n, r, g, b)) {
         visited[n] = 1
         continue
       }
