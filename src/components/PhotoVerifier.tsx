@@ -1246,6 +1246,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
   const passedChecks = result?.checks.filter(c => c.passed) || []
   const failedChecks = result?.checks.filter(c => !c.passed) || []
   const criticalFails = failedChecks.filter(c => c.severity === "critical")
+  const canUsePhotoAnyway = Boolean(result && !result.valid && preview && lastAdjustedFileRef.current)
 
   return (
     <div>
@@ -1712,7 +1713,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
                           ⚠️ Minor issues detected — they may affect ID card quality. Consider re-uploading a better photo.
                         </div>
                       )}
-                      {result.canOverride && (
+                      {canUsePhotoAnyway && (
                         <div style={{
                           padding: '10px 12px',
                           borderRadius: 10,
@@ -1723,7 +1724,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
                           color: '#1e40af',
                           lineHeight: 1.5
                         }}>
-                          If this is the only available student photo, you can continue with it. The checks above will stay visible for review.
+                          If this is the only available student photo, you can continue with it using the button below. The checks above will stay visible for review.
                         </div>
                       )}
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1741,7 +1742,7 @@ export default function PhotoVerifier({ onPhotoAccepted, currentPhotoUrl, school
                         >
                           📷 {criticalFails.length > 0 ? "Upload a Proper ID Photo" : "Re-upload Photo"}
                         </button>
-                        {result.canOverride && (
+                        {canUsePhotoAnyway && (
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); handleForceAccept() }}

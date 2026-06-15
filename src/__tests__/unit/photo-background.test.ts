@@ -10,6 +10,7 @@ import {
   isBackgroundLikePixel,
   isHeadHairZonePixel,
   isPlainBackground,
+  isProtectedPortraitCorePixel,
   isSubjectInteriorPixel,
   markExteriorBackgroundMask,
   matchesSchoolColor,
@@ -78,6 +79,13 @@ describe("photo-background shirt-safe cleanup rules", () => {
   it("protects the centre torso region from edge flood cleanup", () => {
     expect(isSubjectInteriorPixel(100, 200, 200, 400)).toBe(true)
     expect(isSubjectInteriorPixel(5, 200, 200, 400)).toBe(false)
+  })
+
+  it("protects eye, face, collar, and shirt zones from neutral cleanup", () => {
+    expect(isProtectedPortraitCorePixel(100, 140, 200, 400)).toBe(true)
+    expect(isProtectedPortraitCorePixel(100, 210, 200, 400)).toBe(true)
+    expect(isProtectedPortraitCorePixel(100, 300, 200, 400)).toBe(true)
+    expect(isProtectedPortraitCorePixel(10, 140, 200, 400)).toBe(false)
   })
 })
 

@@ -565,6 +565,25 @@ export function isPersonZonePixel(x: number, y: number, w: number, h: number): b
   return isHeadHairZonePixel(x, y, w, h) || isSubjectInteriorPixel(x, y, w, h)
 }
 
+export function isProtectedPortraitCorePixel(x: number, y: number, w: number, h: number): boolean {
+  const xRatio = x / w
+  const yRatio = y / h
+
+  const faceAndNeckCore =
+    xRatio > 0.26 &&
+    xRatio < 0.74 &&
+    yRatio > 0.12 &&
+    yRatio < 0.56
+
+  const shirtAndHandsCore =
+    xRatio > 0.16 &&
+    xRatio < 0.84 &&
+    yRatio >= 0.48 &&
+    yRatio < 0.98
+
+  return faceAndNeckCore || shirtAndHandsCore
+}
+
 function countNonBackgroundNeighbors(
   data: Uint8ClampedArray,
   idx: number,
@@ -648,6 +667,8 @@ export function removeUpperNeutralBackgroundIslands(
     const yRatio = y / h
     for (let x = 0; x < w; x++) {
       const xRatio = x / w
+      if (isProtectedPortraitCorePixel(x, y, w, h)) continue
+
       const inLowerShirtSafeZone = yRatio > 0.48 && xRatio > 0.22 && xRatio < 0.78
       if (inLowerShirtSafeZone) continue
 
