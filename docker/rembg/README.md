@@ -1,3 +1,8 @@
+---
+sdk: docker
+app_port: 7860
+---
+
 # WiseMelon background removal service
 
 FastAPI service used by `/api/photo-bg/remove` for professional ID photo background removal.
