@@ -81,3 +81,42 @@ BG_REMOVAL_SERVICE_TOKEN=your-shared-secret
 ```
 
 The service itself should use the same `BG_REMOVAL_SERVICE_TOKEN` if you want to protect the endpoint.
+
+## rembg version
+
+Uses **[rembg v2.0.76](https://github.com/danielgatis/rembg)** (latest). Rebuild the Space after pulling this change so models reload.
+
+Submit-form fallback (when Remove.bg / Poof.bg fail) tries models in order:
+
+1. **`inspyrenet`** — InSPyReNet via [transparent-background](https://github.com/plemeri/transparent-background) (best free quality)
+2. **`isnet-general-use`** — rembg ISNet fallback
+
+Override the chain:
+
+```bash
+BG_REMOVAL_SUBMIT_FALLBACK_MODELS=inspyrenet,isnet-general-use
+```
+
+InSPyReNet tuning (on the HF Space):
+
+```bash
+INSPYRENET_DEVICE=cpu          # or cuda:0 on GPU Spaces
+INSPYRENET_MODE=base           # base | fast | base-nightly
+INSPYRENET_JIT=0               # 1 to enable torchscript JIT (slower init, faster infer)
+```
+
+After deploy, `/health` should show `"inspyrenetAvailable": true`.
+
+## remove.bg-compatible API (self-hosted, no per-photo fees)
+
+The same service exposes **`POST /v1.0/removebg`** — a drop-in replacement for the official remove.bg API using open-source models (BiRefNet-portrait + u2net merge). See [`../removebg-replica/README.md`](../removebg-replica/README.md).
+
+Point the Next.js app at your Space instead of paying remove.bg:
+
+```bash
+REMOVEBG_API_URL=https://teamsasd-wisemelon-bg-removal.hf.space/v1.0/removebg
+BG_REMOVAL_SERVICE_TOKEN=your-shared-secret
+# Unset REMOVEBG_API_KEY to use the replica
+```
+
+After deploy, `/health` should include `"removebgCompatible": true`.

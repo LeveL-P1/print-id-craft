@@ -9,8 +9,8 @@ import {
   removeBackgroundWithGemini,
 } from "@/lib/gemini-bg-removal"
 import {
-  isRemoveBgConfigured,
-  removeBackgroundWithRemoveBg,
+  isSubmitPhotoBgConfigured,
+  removeBackgroundForSubmit,
 } from "@/lib/removebg-api"
 
 export const runtime = "nodejs"
@@ -140,15 +140,15 @@ export async function POST(req: Request) {
 
     // ─── remove.bg API (submit form) ─────────────────────────────────
     if (requestedModel === "removebg" || requestedModel === "remove.bg") {
-      if (!isRemoveBgConfigured()) {
+      if (!isSubmitPhotoBgConfigured()) {
         return NextResponse.json(
-          { error: "Remove.bg is not configured — set REMOVEBG_API_KEY" },
+          { error: "Background removal is not configured — set REMOVEBG_API_KEY, POOFBG_API_KEY, or BG_REMOVAL_SERVICE_URL" },
           { status: 503 }
         )
       }
 
       try {
-        const result = await removeBackgroundWithRemoveBg(
+        const { buffer: result, provider } = await removeBackgroundForSubmit(
           image.buffer,
           image.contentType,
           image.fileName,
@@ -159,19 +159,23 @@ export async function POST(req: Request) {
           headers: {
             "content-type": withBgColor ? "image/jpeg" : "image/png",
             "cache-control": "no-store",
-            "x-bg-removal-model": "removebg",
+            "x-bg-removal-model": provider,
           },
         })
       } catch (removeBgErr) {
-        console.error("[photo-bg/remove] remove.bg failed:", removeBgErr)
+        console.error("[photo-bg/remove] paid API failed:", removeBgErr)
+        const status =
+          removeBgErr && typeof removeBgErr === "object" && "status" in removeBgErr
+            ? Number((removeBgErr as { status?: number }).status)
+            : 500
         return NextResponse.json(
           {
             error:
               removeBgErr instanceof Error
                 ? removeBgErr.message
-                : "Remove.bg background removal failed",
+                : "Background removal failed",
           },
-          { status: 500 }
+          { status: status === 402 ? 402 : 500 }
         )
       }
     }

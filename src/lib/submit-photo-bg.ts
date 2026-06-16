@@ -1,8 +1,8 @@
 /**
- * Submit photo background — Remove.bg API passthrough.
+ * Submit photo background — Remove.bg API passthrough (official or self-hosted replica).
  *
  *   cropped photo → POST /api/photo-bg/remove (removebg)
- *                 → Remove.bg applies school colour server-side → JPEG
+ *                 → server applies school colour → JPEG
  */
 
 export const SUBMIT_BG_JPEG_QUALITY = 0.88
@@ -38,10 +38,10 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
 
 function friendlyApiError(status: number, body: string): string {
   if (status === 503) {
-    return "Remove.bg is not configured — set REMOVEBG_API_KEY on the server."
+    return "Background removal is not configured — set REMOVEBG_API_KEY, POOFBG_API_KEY, or BG_REMOVAL_SERVICE_URL on the server."
   }
   if (status === 402) {
-    return "Remove.bg credits exhausted — add credits to your account."
+    return "Background removal credits exhausted — add credits or wait for rembg fallback."
   }
   try {
     const { error } = JSON.parse(body) as { error?: string }
@@ -49,7 +49,7 @@ function friendlyApiError(status: number, body: string): string {
   } catch {
     /* use body */
   }
-  return body || "Remove.bg background removal failed"
+  return body || "Background removal failed"
 }
 
 async function callRemoveBg(image: Blob, bgColor: string): Promise<Blob> {
@@ -81,7 +81,7 @@ export async function processSubmitPhotoBackground(
   onProgress?: SubmitBgProgress
 ): Promise<{ dataUrl: string; usedAi: boolean }> {
   onProgress?.("Preparing photo...", 5)
-  onProgress?.("Removing background (Remove.bg)...", 25)
+  onProgress?.("Removing background...", 25)
 
   const result = await callRemoveBg(await photoUrlToBlob(photoUrl), bgColor)
   const dataUrl = await blobToDataUrl(result)
