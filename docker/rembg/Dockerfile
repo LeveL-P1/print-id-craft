@@ -1,5 +1,4 @@
-# PyTorch base — avoids OOM installing torch on HF free builders
-FROM pytorch/pytorch:2.3.1-cpu
+FROM python:3.11-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -16,12 +15,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements-base.txt requirements-inspyrenet.txt ./
+COPY requirements-base.txt ./
 
+# rembg + ISNet only — fits HF free CPU builder.
+# InSPyReNet (transparent-background) needs GPU / larger builder; enable via Dockerfile.gpu later.
 RUN pip install --upgrade pip setuptools wheel \
     && pip install --prefer-binary -r requirements-base.txt
-
-RUN pip install --prefer-binary -r requirements-inspyrenet.txt
 
 COPY server.py .
 

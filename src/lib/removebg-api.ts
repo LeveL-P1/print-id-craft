@@ -19,7 +19,7 @@ import {
 
 const POOFBG_API_URL = "https://api.poof.bg/v1/remove"
 const REMBG_SUBMIT_FALLBACK_MODELS = (
-  process.env.BG_REMOVAL_SUBMIT_FALLBACK_MODELS || "inspyrenet,isnet-general-use"
+  process.env.BG_REMOVAL_SUBMIT_FALLBACK_MODELS || "isnet-general-use"
 )
   .split(",")
   .map((name) => name.trim())
