@@ -1,4 +1,5 @@
-FROM python:3.11-slim-bookworm
+# PyTorch base — avoids OOM installing torch on HF free builders
+FROM pytorch/pytorch:2.3.1-cpu
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -17,12 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements-base.txt requirements-inspyrenet.txt ./
 
-# Split pip steps — HF free builders OOM if torch + rembg + InSPyReNet install together
 RUN pip install --upgrade pip setuptools wheel \
     && pip install --prefer-binary -r requirements-base.txt
-
-RUN pip install --prefer-binary torch torchvision \
-    --index-url https://download.pytorch.org/whl/cpu
 
 RUN pip install --prefer-binary -r requirements-inspyrenet.txt
 
