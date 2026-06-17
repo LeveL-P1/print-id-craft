@@ -568,6 +568,21 @@ export default function SubmitPage() {
     setStep("bg")
   }, [])
 
+  const isPhotoBackgroundReady = useCallback(() => {
+    return (
+      !!croppedPhoto &&
+      (photoBgStatus === PHOTO_BG_STATUS.PROCESSED ||
+        photoBgStatus === PHOTO_BG_STATUS.PLAIN ||
+        photoBgStatus === PHOTO_BG_STATUS.SKIPPED)
+    )
+  }, [croppedPhoto, photoBgStatus])
+
+  const handleEditDetailsFromReview = () => {
+    setAlertMsg("")
+    setMissingFieldKey("")
+    setStep("form")
+  }
+
   const clearDraft = () => {
     if (typeof window === "undefined") return
     try { window.localStorage.removeItem(DRAFT_KEY) } catch { /* ignore */ }
@@ -864,6 +879,10 @@ export default function SubmitPage() {
     }
     setAlertMsg("")
     setMissingFieldKey("")
+    if (isPhotoBackgroundReady()) {
+      setStep("review")
+      return
+    }
     goToBgProcessing()
   }
 
@@ -1411,7 +1430,7 @@ export default function SubmitPage() {
               }}>
                 <span style={{ fontSize: 14, marginTop: 1, flexShrink: 0 }}>ℹ️</span>
                 <span style={{ fontSize: 12, color: '#1e40af', lineHeight: 1.5 }}>
-                  Please verify all details carefully. Once submitted, changes cannot be made without contacting the school.
+                  Please verify all details carefully. Use <strong>Edit Details</strong> if something needs changing — your photo will stay the same. Once submitted, changes require contacting the school.
                 </span>
               </div>
             </div>
@@ -1446,23 +1465,45 @@ export default function SubmitPage() {
 
           {/* Action Buttons */}
           <div style={{ display: 'flex', gap: 12 }}>
-            <button 
-              className="btn btn-outline" 
-              style={{ flex: 1, padding: '14px', fontSize: 14, fontWeight: 600 }} 
-              onClick={() => setStep("photo")}
+            <button
+              type="button"
+              className="btn btn-outline"
+              style={{ flex: 1, padding: '14px', fontSize: 14, fontWeight: 600 }}
+              onClick={handleEditDetailsFromReview}
               disabled={submitting}
             >
-              ← Back
+              ✎ Edit Details
             </button>
-            <button 
-              className="btn btn-primary" 
-              style={{ flex: 2, padding: '14px', fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em' }} 
-              disabled={submitting} 
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ flex: 2, padding: '14px', fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em' }}
+              disabled={submitting}
               onClick={handleSubmit}
             >
               {submitting ? "Submitting..." : "✓ Submit Registration"}
             </button>
           </div>
+          <button
+            type="button"
+            onClick={() => setStep("photo")}
+            disabled={submitting}
+            style={{
+              width: '100%',
+              marginTop: 10,
+              padding: '10px',
+              background: 'transparent',
+              border: 'none',
+              color: '#64748b',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: submitting ? 'not-allowed' : 'pointer',
+              textDecoration: 'underline',
+              textUnderlineOffset: 3,
+            }}
+          >
+            Need to change your photo?
+          </button>
         </div>
       </div>
     </div>
@@ -1518,6 +1559,15 @@ export default function SubmitPage() {
               {/* Draft-restored banner — shown when we successfully restored
                   the parent's previous progress after an accidental back /
                   refresh / tab close. They can opt out by clicking "Start fresh". */}
+              {isPhotoBackgroundReady() && (
+                <div style={{
+                  padding: '10px 14px', background: '#eff6ff', border: '1px solid #bfdbfe',
+                  borderRadius: 10, fontSize: 13, color: '#1e40af', marginBottom: 16,
+                }}>
+                  <strong>Editing your details.</strong>{" "}
+                  Your photo is already prepared — change any field below and tap Save & Preview. We will not process your photo again.
+                </div>
+              )}
               {draftBanner && (
                 <div style={{
                   padding: '10px 14px', background: '#ecfdf5', border: '1px solid #a7f3d0',
@@ -1962,7 +2012,7 @@ export default function SubmitPage() {
                 onClick={handleFormSubmit}
                 style={{ width: '100%', marginTop: 24, padding: '14px', fontSize: 15 }}
               >
-                Next: Upload Photo →
+                {isPhotoBackgroundReady() ? "Save & Preview →" : "Next: Upload Photo →"}
               </button>
             </form>
           )}

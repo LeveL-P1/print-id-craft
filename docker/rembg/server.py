@@ -26,7 +26,7 @@ except ImportError:
 
 app = FastAPI(title="WiseMelon Professional Background Removal")
 
-SERVICE_VERSION = "2026-06-15-rembg-inspyrenet-v1"
+SERVICE_VERSION = "2026-06-15-rembg-isnet-v2"
 REMOVEBG_COMPAT_API_KEY = os.getenv("REMOVEBG_COMPAT_API_KEY", os.getenv("BG_REMOVAL_SERVICE_TOKEN", ""))
 JPEG_QUALITY = int(os.getenv("BG_REMOVAL_JPEG_QUALITY", "92"))
 DEFAULT_MODEL = os.getenv("BG_REMOVAL_MODEL", "birefnet-portrait")
