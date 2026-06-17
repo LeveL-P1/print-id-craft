@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs"
 import { columnWidthsFromRows } from "@/lib/excel"
+import { resolveFieldValue } from "@/lib/field-resolver"
 import { sanitizeWorksheetData } from "@/lib/spreadsheet-safety"
 
 export type StudentFormData = Record<string, string>
@@ -102,6 +103,117 @@ export const STUDENT_EXPORT_HEADERS = [
   "Submitted At",
 ] as const
 
+/** Keys that are system-internal and should not appear as formData columns. */
+export const EXPORT_SKIP_KEYS = new Set(["class", "classSection", "photoUrl", "photoPath"])
+
+export type ExportFieldConfig = { key: string; label?: string }
+
+export type ExportDataColumn = { key: string; header: string }
+
+export function isUsableExportDataKey(key: string): boolean {
+  const normalized = key.trim().toLowerCase()
+  if (!normalized) return false
+  if (EXPORT_SKIP_KEYS.has(key)) return false
+  if (normalized.startsWith("__empty")) return false
+  if (normalized === "empty" || normalized === "undefined" || normalized === "null") return false
+  return true
+}
+
+/** Prettify a camelCase / snake_case formData key into a readable column header. */
+export function prettifyExportKey(key: string): string {
+  if (/\s/.test(key)) {
+    return key
+      .replace(/[_-]+/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+  }
+  return key
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+/**
+ * Collect all formData columns for export — uses school fieldConfig order when
+ * available, then any extra keys found in student records.
+ */
+export function collectExportDataColumns(
+  students: Array<{ formData: StudentFormData }>,
+  fieldConfig?: ExportFieldConfig[]
+): ExportDataColumn[] {
+  const allKeys = new Set<string>()
+
+  if (fieldConfig) {
+    for (const field of fieldConfig) {
+      if (isUsableExportDataKey(field.key)) allKeys.add(field.key)
+    }
+  }
+
+  for (const student of students) {
+    const fd = student.formData || {}
+    for (const key of Object.keys(fd)) {
+      if (isUsableExportDataKey(key)) allKeys.add(key)
+    }
+  }
+
+  const ordered: ExportDataColumn[] = []
+  const seen = new Set<string>()
+
+  if (fieldConfig) {
+    for (const field of fieldConfig) {
+      if (allKeys.has(field.key) && !seen.has(field.key)) {
+        ordered.push({
+          key: field.key,
+          header: field.label || prettifyExportKey(field.key),
+        })
+        seen.add(field.key)
+      }
+    }
+  }
+
+  for (const key of Array.from(allKeys).sort((a, b) => a.localeCompare(b))) {
+    if (!seen.has(key)) {
+      ordered.push({ key, header: prettifyExportKey(key) })
+    }
+  }
+
+  return ordered
+}
+
+export const DYNAMIC_EXPORT_TAIL_HEADERS = [
+  "Class",
+  "Photo File",
+  "Photo URL",
+  "Status",
+  "Submitted At",
+] as const
+
+export function buildDynamicExportHeaders(dataColumns: ExportDataColumn[]): string[] {
+  return [
+    "School Name",
+    "Serial Number",
+    ...dataColumns.map((col) => col.header),
+    ...DYNAMIC_EXPORT_TAIL_HEADERS,
+  ]
+}
+
+export function buildDynamicStudentExportRow(
+  student: StudentExportRecord,
+  dataColumns: ExportDataColumn[],
+  photoFile: string
+): unknown[] {
+  const fd = student.formData || {}
+  return [
+    student.schoolName,
+    student.serialNumber,
+    ...dataColumns.map((col) => fd[col.key] || ""),
+    student.className,
+    photoFile ? `photos/${photoFile}` : "",
+    student.photoUrl || "",
+    student.status,
+    student.submittedAt ? new Date(student.submittedAt).toLocaleDateString() : "",
+  ]
+}
+
 export type StudentExportRecord = {
   id: string
   serialNumber: string
@@ -128,15 +240,15 @@ export function buildStudentExportRow(student: StudentExportRecord, photoFile: s
   return [
     student.schoolName,
     student.serialNumber,
-    getStudentFullName(fd),
+    getStudentFullName(fd) || resolveFieldValue(fd, "name"),
     student.className,
-    getStudentRollNo(fd),
-    getStudentField(fd, "dob", "Date of Birth", "DOB"),
-    getStudentField(fd, "bloodGroup", "Blood Group"),
-    getStudentField(fd, "fatherName", "Father Name", "Father"),
-    getStudentField(fd, "motherName", "Mother Name", "Mother"),
-    getStudentField(fd, "phone", "Phone", "Mobile"),
-    getStudentField(fd, "address", "Address"),
+    getStudentRollNo(fd) || resolveFieldValue(fd, "rollno"),
+    resolveFieldValue(fd, "dateofbirth") || getStudentField(fd, "dob", "Date of Birth", "DOB"),
+    resolveFieldValue(fd, "bloodgroup") || getStudentField(fd, "bloodGroup", "Blood Group"),
+    resolveFieldValue(fd, "father") || getStudentField(fd, "fatherName", "Father Name", "Father"),
+    resolveFieldValue(fd, "mother") || getStudentField(fd, "motherName", "Mother Name", "Mother"),
+    resolveFieldValue(fd, "phone") || resolveFieldValue(fd, "mobile") || getStudentField(fd, "phone", "Phone", "Mobile"),
+    resolveFieldValue(fd, "address") || getStudentField(fd, "address", "Address"),
     photoFile ? `photos/${photoFile}` : "",
     student.photoUrl || "",
     student.status,
@@ -147,10 +259,16 @@ export function buildStudentExportRow(student: StudentExportRecord, photoFile: s
 export async function buildStudentExcelBuffer(
   schoolName: string,
   students: Array<{ row: unknown[]; photoUrl?: string | null }>,
-  meta?: { exportDate?: string; totalStudents?: number; schoolAddress?: string | null }
+  meta?: {
+    exportDate?: string
+    totalStudents?: number
+    schoolAddress?: string | null
+    headers?: readonly string[]
+  }
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook()
   const sheet = workbook.addWorksheet("Students")
+  const headers = meta?.headers ? [...meta.headers] : [...STUDENT_EXPORT_HEADERS]
 
   const exportDate = meta?.exportDate || new Date().toLocaleDateString()
   sheet.addRow([schoolName])
@@ -160,13 +278,13 @@ export async function buildStudentExcelBuffer(
   sheet.addRow([])
 
   const headerRowIndex = sheet.rowCount + 1
-  sheet.addRow([...STUDENT_EXPORT_HEADERS])
+  sheet.addRow(headers)
 
-  const photoUrlCol = STUDENT_EXPORT_HEADERS.indexOf("Photo URL") + 1
+  const photoUrlCol = headers.indexOf("Photo URL") + 1
 
   for (const student of students) {
     const row = sheet.addRow(sanitizeWorksheetData([student.row])[0])
-    if (student.photoUrl) {
+    if (student.photoUrl && photoUrlCol > 0) {
       const cell = row.getCell(photoUrlCol)
       cell.value = { text: student.photoUrl, hyperlink: student.photoUrl }
       cell.font = { color: { argb: "FF0563C1" }, underline: true }
@@ -175,7 +293,7 @@ export async function buildStudentExcelBuffer(
 
   const widths = columnWidthsFromRows(
     [
-      [...STUDENT_EXPORT_HEADERS],
+      headers,
       ...students.map((s) => s.row),
     ],
     0

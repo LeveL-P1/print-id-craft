@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest"
 import {
   PhotoFileNameAllocator,
+  buildDynamicExportHeaders,
+  buildDynamicStudentExportRow,
+  collectExportDataColumns,
   getStudentFullName,
   safePhotoBaseName,
 } from "@/lib/export/student-export"
@@ -58,5 +61,80 @@ describe("safePhotoBaseName", () => {
   it("keeps spaces and removes invalid path characters", () => {
     expect(safePhotoBaseName('Rahul/Kumar:Test')).toBe("RahulKumarTest")
     expect(safePhotoBaseName("  Priya Sharma  ")).toBe("Priya Sharma")
+  })
+})
+
+describe("collectExportDataColumns", () => {
+  it("includes every formData key and preserves fieldConfig order", () => {
+    const students = [
+      {
+        formData: {
+          Name: "PE",
+          Father: "+91 1323223232",
+          "Address With Label": "dapodi road pune",
+          Date_of_birth: "15/10/2009",
+        },
+      },
+      {
+        formData: {
+          Name: "Rahul",
+          Mother: "+91 9999999999",
+        },
+      },
+    ]
+    const fieldConfig = [
+      { key: "Name", label: "Name" },
+      { key: "Father", label: "Father" },
+      { key: "Mother", label: "Mother" },
+      { key: "Date_of_birth", label: "Date of Birth" },
+      { key: "Address With Label", label: "Address With Label" },
+    ]
+
+    const columns = collectExportDataColumns(students, fieldConfig)
+    expect(columns.map((c) => c.key)).toEqual([
+      "Name",
+      "Father",
+      "Mother",
+      "Date_of_birth",
+      "Address With Label",
+    ])
+  })
+
+  it("builds dynamic rows with all student fields", () => {
+    const dataColumns = collectExportDataColumns([
+      {
+        formData: {
+          Name: "PE",
+          Father: "+91 1323223232",
+          "Address With Label": "dapodi road pune",
+          Date_of_birth: "15/10/2009",
+        },
+      },
+    ])
+
+    const row = buildDynamicStudentExportRow(
+      {
+        id: "stu-1",
+        serialNumber: "AARWOR-0035",
+        status: "APPROVED",
+        formData: {
+          Name: "PE",
+          Father: "+91 1323223232",
+          "Address With Label": "dapodi road pune",
+          Date_of_birth: "15/10/2009",
+        },
+        className: "VI - D",
+        schoolName: "Aaryans World School",
+      },
+      dataColumns,
+      "PE.jpg"
+    )
+
+    const headers = buildDynamicExportHeaders(dataColumns)
+    expect(headers).toContain("Address With Label")
+    expect(headers).toContain("Father")
+    expect(row[headers.indexOf("Father")]).toBe("+91 1323223232")
+    expect(row[headers.indexOf("Address With Label")]).toBe("dapodi road pune")
+    expect(row[headers.indexOf("Date Of Birth")]).toBe("15/10/2009")
   })
 })

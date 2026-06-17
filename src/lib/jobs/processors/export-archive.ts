@@ -14,10 +14,14 @@ import {
 } from "@/lib/export/constants"
 import { uploadExportZip } from "@/lib/export/zip-upload"
 import {
+  buildDynamicExportHeaders,
+  buildDynamicStudentExportRow,
   buildStudentExcelBuffer,
+  collectExportDataColumns,
   PhotoFileNameAllocator,
   safeExportFileName,
-  STUDENT_EXPORT_HEADERS,
+  type ExportFieldConfig,
+  type StudentExportRecord,
   type StudentPhotoMapping,
 } from "@/lib/export/student-export"
 
@@ -73,7 +77,16 @@ export async function processExportArchive(
   const school = await prisma.school.findUnique({
     where: { id: schoolId },
     select: isExcelExport
-      ? { id: true, name: true, address: true }
+      ? {
+          id: true,
+          name: true,
+          address: true,
+          templates: {
+            orderBy: { createdAt: "asc" as const },
+            take: 1,
+            select: { fieldConfig: true },
+          },
+        }
       : {
           id: true,
           name: true,
@@ -116,8 +129,11 @@ export async function processExportArchive(
     warnings: [] as string[],
   }
 
-  const csvRows: string[] = [[...STUDENT_EXPORT_HEADERS].map(csvCell).join(",")]
-  const excelRows: Array<{ row: unknown[]; photoUrl?: string | null }> = []
+  const exportEntries: Array<{
+    exportRecord: StudentExportRecord
+    photoFile: string
+    photoUrl?: string | null
+  }> = []
   const photoAllocator = new PhotoFileNameAllocator()
   const photoMappings: StudentPhotoMapping[] = []
   const completeRecords: Record<string, unknown>[] = []
@@ -152,8 +168,11 @@ export async function processExportArchive(
         photoAllocator
       )
 
-      csvRows.push(entry.row.map(csvCell).join(","))
-      excelRows.push({ row: entry.row, photoUrl: student.photoUrl })
+      exportEntries.push({
+        exportRecord: entry.exportRecord,
+        photoFile: entry.photoFile,
+        photoUrl: student.photoUrl,
+      })
       photoMappings.push(entry.mapping)
       completeRecords.push(entry.completeRecord)
 
@@ -216,10 +235,24 @@ export async function processExportArchive(
   ;(manifest.counts as Record<string, number>).students = allStudents.length
 
   if (isExcelExport) {
+    const fieldConfig = (
+      school.templates?.[0]?.fieldConfig as ExportFieldConfig[] | null | undefined
+    ) ?? undefined
+    const dataColumns = collectExportDataColumns(
+      exportEntries.map((entry) => ({ formData: entry.exportRecord.formData })),
+      fieldConfig
+    )
+    const dynamicHeaders = buildDynamicExportHeaders(dataColumns)
+    const excelRows = exportEntries.map((entry) => ({
+      row: buildDynamicStudentExportRow(entry.exportRecord, dataColumns, entry.photoFile),
+      photoUrl: entry.photoUrl,
+    }))
+
     const excelBuffer = await buildStudentExcelBuffer(school.name, excelRows, {
       exportDate: new Date().toLocaleDateString(),
       totalStudents: allStudents.length,
       schoolAddress: school.address,
+      headers: dynamicHeaders,
     })
     zip.file(`${safeExportFileName(school.name)}-students.xlsx`, excelBuffer, {
       compression: "DEFLATE",
@@ -246,7 +279,24 @@ export async function processExportArchive(
       { compression: "DEFLATE", compressionOptions: { level: 1 } }
     )
   } else {
-    studentsFolder?.file("students.csv", csvRows.join("\n"), {
+    const fieldConfig = (
+      school.templates?.[0]?.fieldConfig as ExportFieldConfig[] | null | undefined
+    ) ?? undefined
+    const dataColumns = collectExportDataColumns(
+      exportEntries.map((entry) => ({ formData: entry.exportRecord.formData })),
+      fieldConfig
+    )
+    const dynamicHeaders = buildDynamicExportHeaders(dataColumns)
+    const dynamicCsvRows = [
+      dynamicHeaders.map(csvCell).join(","),
+      ...exportEntries.map((entry) =>
+        buildDynamicStudentExportRow(entry.exportRecord, dataColumns, entry.photoFile)
+          .map(csvCell)
+          .join(",")
+      ),
+    ]
+
+    studentsFolder?.file("students.csv", dynamicCsvRows.join("\n"), {
       compression: "DEFLATE",
       compressionOptions: { level: 1 },
     })
