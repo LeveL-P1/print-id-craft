@@ -2000,6 +2000,16 @@ export default function SubmitPage() {
           {/* PHOTO STEP */}
           {step === "photo" && (
             <div>
+              <div style={{
+                padding: '12px 14px', marginBottom: 16, borderRadius: 10,
+                background: '#fffbeb', border: '1px solid #fde68a',
+                fontSize: 13, color: '#92400e', lineHeight: 1.55,
+              }}>
+                <strong style={{ display: 'block', marginBottom: 4 }}>Important — read before uploading</strong>
+                Upload your photo <strong>only once</strong>. Choose the exact photo you want printed on the ID card.
+                After you submit, the photo cannot be changed from this form.
+                Our system <strong>does not allow duplicate registration</strong> for the same student.
+              </div>
               <p style={{ fontSize: 15, color: '#0f172a', marginBottom: 8, fontWeight: 600, textAlign: 'center' }}>
                 Take one photo — we handle the rest
               </p>

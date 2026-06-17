@@ -2,13 +2,14 @@
  * Paid background removal APIs — server-side only (never expose keys to the browser).
  *
  * Submit fallback chain:
- *   1. Poof.bg (primary — supports POOFBG_API_KEYS rotation)
+ *   1. Poof.bg — all free keys first, then paid (see buildPoofApiKeyOrder)
  *   2. Remove.bg (REMOVEBG_API_KEYS rotation)
  *   3. rembg + InSPyReNet, then isnet-general-use (BG_REMOVAL_SERVICE_URL)
  *
- * Multi-key env (comma or newline separated, tried in order until credits run out):
- *   POOFBG_API_KEYS=key1,key2,key3
- *   REMOVEBG_API_KEYS=key1,key2,key3
+ * Poof env (free keys are always tried before paid):
+ *   POOFBG_FREE_API_KEYS=free1,free2,free3
+ *   POOFBG_PAID_API_KEY=your-mega-plan-key
+ *   (legacy: POOFBG_API_KEYS = free list, POOFBG_API_KEY = paid — paid is appended last)
  *
  * @see https://www.remove.bg/api
  * @see https://github.com/danielgatis/rembg
@@ -43,8 +44,29 @@ export function parseApiKeys(singleEnv?: string, listEnv?: string): string[] {
   return single ? [single] : []
 }
 
+export function buildPoofApiKeyOrder(options: {
+  freeList?: string
+  legacyList?: string
+  paidSingle?: string
+}): string[] {
+  const paidKey = options.paidSingle?.trim() || ""
+  const freeKeys = [
+    ...parseApiKeys(undefined, options.freeList),
+    ...parseApiKeys(undefined, options.legacyList).filter((key) => key !== paidKey),
+  ]
+  const uniqueFree = [...new Set(freeKeys)]
+  if (uniqueFree.length > 0 || paidKey) {
+    return paidKey ? [...uniqueFree, paidKey] : uniqueFree
+  }
+  return []
+}
+
 function getPoofBgApiKeys(): string[] {
-  return parseApiKeys(process.env.POOFBG_API_KEY, process.env.POOFBG_API_KEYS)
+  return buildPoofApiKeyOrder({
+    freeList: process.env.POOFBG_FREE_API_KEYS,
+    legacyList: process.env.POOFBG_API_KEYS,
+    paidSingle: process.env.POOFBG_PAID_API_KEY || process.env.POOFBG_API_KEY,
+  })
 }
 
 function getRemoveBgApiKeys(): string[] {
@@ -69,7 +91,7 @@ export async function removeBackgroundWithPoofBg(
 ): Promise<Buffer> {
   const key = apiKey?.trim() || getPoofBgApiKeys()[0]
   if (!key) {
-    throw new Error("POOFBG_API_KEY is not configured")
+    throw new Error("Poof.bg is not configured — set POOFBG_FREE_API_KEYS and/or POOFBG_PAID_API_KEY")
   }
 
   const bg = poofBgColorValue(bgColor)
@@ -248,7 +270,7 @@ async function tryPoofBgWithKeyRotation(
 ): Promise<Buffer> {
   const keys = getPoofBgApiKeys()
   if (!keys.length) {
-    throw new Error("POOFBG_API_KEY is not configured")
+    throw new Error("Poof.bg is not configured — set POOFBG_FREE_API_KEYS and/or POOFBG_PAID_API_KEY")
   }
 
   let lastError: unknown = null

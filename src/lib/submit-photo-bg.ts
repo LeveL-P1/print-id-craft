@@ -38,7 +38,7 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
 
 function friendlyApiError(status: number, body: string): string {
   if (status === 503) {
-    return "Background removal is not configured — set POOFBG_API_KEY, REMOVEBG_API_KEY, or BG_REMOVAL_SERVICE_URL on the server."
+    return "Background removal is not configured — set POOFBG_FREE_API_KEYS, POOFBG_PAID_API_KEY, REMOVEBG_API_KEY, or BG_REMOVAL_SERVICE_URL on the server."
   }
   if (status === 402) {
     return "Background removal credits exhausted — add credits or wait for rembg fallback."
