@@ -175,9 +175,35 @@ function isPaidApiCreditsExhausted(status: number, detail: string): boolean {
   )
 }
 
+function isImageValidationError(status: number, detail: string): boolean {
+  if (status !== 400 && status !== 422) return false
+  const lower = detail.toLowerCase()
+  return (
+    lower.includes("image") ||
+    lower.includes("file") ||
+    lower.includes("format") ||
+    lower.includes("size") ||
+    lower.includes("invalid") ||
+    lower.includes("too large")
+  )
+}
+
 function shouldTryNextApiKey(status: number, detail: string): boolean {
+  if (isImageValidationError(status, detail)) return false
   if (isPaidApiCreditsExhausted(status, detail)) return true
-  return status === 401 || status === 403
+  if (status === 401 || status === 403 || status === 429) return true
+  const lower = detail.toLowerCase()
+  if (
+    lower.includes("quota") ||
+    lower.includes("monthly") ||
+    lower.includes("rate limit") ||
+    lower.includes("too many requests")
+  ) {
+    return true
+  }
+  // Transient provider errors — try the next key silently before surfacing to the user.
+  if (status >= 500 && status < 600) return true
+  return false
 }
 
 function usesOfficialRemoveBg(): boolean {

@@ -9,7 +9,7 @@ export const SUBMIT_BG_JPEG_QUALITY = 0.88
 export const SUBMIT_BG_WORK_MAX_DIM = 768
 
 const REMOVEBG_MODEL = "removebg"
-const API_TIMEOUT_MS = 90_000
+const API_TIMEOUT_MS = 180_000
 
 export type SubmitBgProgress = (message: string, percent: number, previewDataUrl?: string) => void
 
@@ -52,7 +52,11 @@ function friendlyApiError(status: number, body: string): string {
   return body || "Background removal failed"
 }
 
-async function callRemoveBg(image: Blob, bgColor: string): Promise<Blob> {
+async function callRemoveBg(
+  image: Blob,
+  bgColor: string,
+  onProgress?: SubmitBgProgress
+): Promise<Blob> {
   const form = new FormData()
   form.append("image", image, "photo.jpg")
   form.append("bgColor", bgColor)
@@ -60,7 +64,11 @@ async function callRemoveBg(image: Blob, bgColor: string): Promise<Blob> {
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS)
+  const heartbeat = setInterval(() => {
+    onProgress?.("Preparing your photo — please wait…", 45)
+  }, 10_000)
   try {
+    onProgress?.("Removing background...", 25)
     const res = await fetch("/api/photo-bg/remove", {
       method: "POST",
       body: form,
@@ -71,6 +79,7 @@ async function callRemoveBg(image: Blob, bgColor: string): Promise<Blob> {
     }
     return res.blob()
   } finally {
+    clearInterval(heartbeat)
     clearTimeout(timer)
   }
 }
@@ -81,9 +90,8 @@ export async function processSubmitPhotoBackground(
   onProgress?: SubmitBgProgress
 ): Promise<{ dataUrl: string; usedAi: boolean }> {
   onProgress?.("Preparing photo...", 5)
-  onProgress?.("Removing background...", 25)
 
-  const result = await callRemoveBg(await photoUrlToBlob(photoUrl), bgColor)
+  const result = await callRemoveBg(await photoUrlToBlob(photoUrl), bgColor, onProgress)
   const dataUrl = await blobToDataUrl(result)
 
   onProgress?.("Done", 100, dataUrl)
