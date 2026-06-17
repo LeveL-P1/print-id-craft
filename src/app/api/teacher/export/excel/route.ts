@@ -7,6 +7,36 @@ import { buildExcelBuffer, columnWidthsFromRows } from "@/lib/excel"
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
 
+/**
+ * Prettify a camelCase / snake_case formData key into a readable column header.
+ * e.g. "fatherName" → "Father Name", "mob_father" → "Mob Father",
+ *      "Mobile no -Mother" stays as-is (already readable).
+ */
+function prettifyKey(key: string): string {
+  // If already contains spaces, just title-case it
+  if (/\s/.test(key)) {
+    return key
+      .replace(/[_-]+/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+  }
+  return key
+    .replace(/([a-z])([A-Z])/g, "$1 $2") // camelCase → words
+    .replace(/[_-]+/g, " ")              // snake_case → words
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+/** Keys that are system-internal and should not appear as data columns. */
+const SKIP_KEYS = new Set(["class", "classSection", "photoUrl", "photoPath"])
+
+function isUsableDataKey(key: string): boolean {
+  const normalized = key.trim().toLowerCase()
+  if (!normalized) return false
+  if (SKIP_KEYS.has(key)) return false
+  if (normalized.startsWith("__empty")) return false
+  if (normalized === "empty" || normalized === "undefined" || normalized === "null") return false
+  return true
+}
+
 export async function GET(req: Request) {
   try {
     const session = await getServerSession(authOptions)
@@ -21,6 +51,7 @@ export async function GET(req: Request) {
 
     const url = new URL(req.url)
     const classId = url.searchParams.get("classId")
+    const gradeClass = url.searchParams.get("gradeClass")
     const where: Record<string, unknown> = { schoolId }
     if (classId) where.classId = classId
 
@@ -29,35 +60,24 @@ export async function GET(req: Request) {
       select: { name: true },
     })
 
-    const [totalStudents, classes] = await Promise.all([
-      prisma.student.count({ where }),
-      prisma.class.findMany({ where: { schoolId }, orderBy: { name: "asc" } }),
-    ])
+    const classes = await prisma.class.findMany({
+      where: { schoolId },
+      orderBy: { name: "asc" },
+    })
 
-    const wsData: unknown[][] = [
-      [school?.name || "School Export"],
-      [`Export Date: ${new Date().toLocaleDateString()}`],
-      [`Total Students: ${totalStudents}`],
-      [],
-      [
-        "Serial Number",
-        "Full Name",
-        "Class",
-        "Roll No.",
-        "Date of Birth",
-        "Blood Group",
-        "Father Name",
-        "Mother Name",
-        "Phone",
-        "Address",
-        "Status",
-        "Submitted At",
-      ],
-    ]
+    // First pass: fetch all students and collect all unique formData keys
+    const allStudents: Array<{
+      serialNumber: string
+      status: string
+      formData: Record<string, string>
+      className: string
+      submittedAt: Date | null
+      photoUrl: string | null
+    }> = []
 
+    const allKeys = new Set<string>()
     let cursor: string | undefined
     let hasMore = true
-    const statusCounts: Record<string, Record<string, number>> = {}
 
     while (hasMore) {
       const students = await prisma.student.findMany({
@@ -75,40 +95,86 @@ export async function GET(req: Request) {
       }
 
       for (const s of students) {
-        const fd = s.formData as Record<string, string>
+        const fd = (s.formData || {}) as Record<string, string>
         const className = s.class?.name || "Unknown"
-        if (!statusCounts[className]) {
-          statusCounts[className] = {
-            total: 0,
-            SUBMITTED: 0,
-            APPROVED: 0,
-            FLAGGED: 0,
-            PENDING: 0,
-            PRINTED: 0,
+
+        // Apply grade/class filter if specified
+        if (gradeClass) {
+          const studentGrade = fd.classgrade || fd.classGrade || fd.ClassGrade || fd.class || fd.Class || ""
+          if (studentGrade !== gradeClass) continue
+        }
+
+        // Collect all usable keys
+        for (const key of Object.keys(fd)) {
+          if (isUsableDataKey(key) && String(fd[key]).trim() !== "") {
+            allKeys.add(key)
           }
         }
-        statusCounts[className].total++
-        statusCounts[className][s.status] = (statusCounts[className][s.status] || 0) + 1
 
-        wsData.push([
-          s.serialNumber,
-          fd.fullName || "",
+        allStudents.push({
+          serialNumber: s.serialNumber,
+          status: s.status,
+          formData: fd,
           className,
-          fd.rollNo || "",
-          fd.dob || "",
-          fd.bloodGroup || "",
-          fd.fatherName || "",
-          fd.motherName || "",
-          fd.phone || "",
-          fd.address || "",
-          s.status,
-          s.submittedAt ? new Date(s.submittedAt).toLocaleDateString() : "",
-        ])
+          submittedAt: s.submittedAt,
+          photoUrl: s.photoUrl,
+        })
       }
 
       cursor = students[students.length - 1].id
     }
 
+    // Build ordered list of formData columns
+    const dataColumns = Array.from(allKeys)
+
+    // Fixed system columns + dynamic formData columns
+    const headers = [
+      "Serial Number",
+      ...dataColumns.map(prettifyKey),
+      "Class / Section",
+      "Photo URL",
+      "Status",
+      "Submitted At",
+    ]
+
+    const wsData: unknown[][] = [
+      [school?.name || "School Export"],
+      [`Export Date: ${new Date().toLocaleDateString()}`],
+      [`Total Students: ${allStudents.length}`],
+      [],
+      headers,
+    ]
+
+    // Status counts for summary sheet
+    const statusCounts: Record<string, Record<string, number>> = {}
+
+    for (const s of allStudents) {
+      const fd = s.formData
+
+      if (!statusCounts[s.className]) {
+        statusCounts[s.className] = {
+          total: 0,
+          SUBMITTED: 0,
+          APPROVED: 0,
+          FLAGGED: 0,
+          PENDING: 0,
+          PRINTED: 0,
+        }
+      }
+      statusCounts[s.className].total++
+      statusCounts[s.className][s.status] = (statusCounts[s.className][s.status] || 0) + 1
+
+      wsData.push([
+        s.serialNumber,
+        ...dataColumns.map((key) => fd[key] || ""),
+        s.className,
+        s.photoUrl || "",
+        s.status,
+        s.submittedAt ? new Date(s.submittedAt).toLocaleDateString() : "",
+      ])
+    }
+
+    // Summary sheet
     const summaryData: unknown[][] = [
       ["Class Summary"],
       [],

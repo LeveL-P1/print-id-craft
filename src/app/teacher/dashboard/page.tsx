@@ -88,6 +88,10 @@ export default function TeacherDashboard() {
   const [newClassName, setNewClassName] = useState("")
   const [addingClass, setAddingClass] = useState(false)
 
+  // Download Data + Photos state
+  const [exportingFormat, setExportingFormat] = useState<string | null>(null)
+  const [gradeClassFilter, setGradeClassFilter] = useState("")
+
   const fetchData = useCallback(async (retries = 3) => {
     setFetchError(false)
     for (let attempt = 1; attempt <= retries; attempt++) {
@@ -313,13 +317,98 @@ export default function TeacherDashboard() {
 
   const getSchoolId = () => session?.user?.schoolId || ""
 
+  // --- Download Data + Photos (archive export) ---
+  const pollExportJob = async (jobId: string, successLabel: string, totalStudents?: number) => {
+    const maxAttempts = 450
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise((r) => setTimeout(r, 2000))
+      const statusRes = await fetch(`/api/jobs/${jobId}`)
+      const statusData = await statusRes.json()
+      const job = statusData.data
+      if (job?.status === "COMPLETED") {
+        window.open(`/api/jobs/${jobId}/download`, "_blank")
+        toast.success(successLabel)
+        return true
+      }
+      if (job?.status === "FAILED") {
+        toast.error(job.error || "Export failed")
+        return false
+      }
+      if (job?.status === "RUNNING" && attempt > 0 && attempt % 15 === 0) {
+        const countLabel = totalStudents ? `${totalStudents.toLocaleString()} students` : "large export"
+        toast.message(`Still preparing ${countLabel}… (${Math.round((attempt * 2) / 60)} min)`)
+      }
+    }
+    toast.error("Export still running — please try downloading again shortly.")
+    return false
+  }
+
+  const handleTeacherExport = async (format: "excel") => {
+    setExportingFormat(format)
+    try {
+      const params = new URLSearchParams()
+      if (classFilter) {
+        const cls = data?.classes.find((c) => c.name === classFilter)
+        if (cls) params.set("classId", cls.id)
+      }
+      if (statusFilter) params.set("status", statusFilter)
+      params.set("format", "excel")
+
+      const selectedClassName = classFilter || ""
+      const scopeLabel = selectedClassName ? `${selectedClassName} class` : "school"
+      toast.message(`Preparing ${scopeLabel} backup with named photos...`)
+
+      const res = await fetch(`/api/teacher/export/archive?${params}`)
+      const responseData = await res.json()
+      if (!res.ok) {
+        toast.error(responseData.error || "Export failed")
+        setExportingFormat(null)
+        return
+      }
+      const jobId = responseData.data?.jobId
+      if (!jobId) {
+        toast.error("Export did not return a job id")
+        setExportingFormat(null)
+        return
+      }
+      await pollExportJob(
+        jobId,
+        "Backup ZIP ready — data and named photos downloaded",
+        responseData.data?.totalStudents
+      )
+    } catch {
+      toast.error("Export failed")
+    } finally {
+      setExportingFormat(null)
+    }
+  }
+
   const filtered = useMemo(() => {
     return data?.students?.filter(s => {
       if (classFilter && s.class?.name !== classFilter) return false
       if (statusFilter && s.status !== statusFilter) return false
+      if (gradeClassFilter) {
+        const fd = s.formData as any
+        const studentGrade = fd?.classgrade || fd?.classGrade || fd?.ClassGrade || fd?.class || fd?.Class || ""
+        if (studentGrade !== gradeClassFilter) return false
+      }
       return true
     }) || []
-  }, [data?.students, classFilter, statusFilter])
+  }, [data?.students, classFilter, statusFilter, gradeClassFilter])
+
+  // Unique grade/class values for the grade dropdown filter
+  const uniqueGrades = useMemo(() => {
+    const grades = new Set<string>()
+    const studentsInSection = classFilter
+      ? (data?.students || []).filter(s => s.class?.name === classFilter)
+      : (data?.students || [])
+    for (const s of studentsInSection) {
+      const fd = s.formData as any
+      const grade = fd?.classgrade || fd?.classGrade || fd?.ClassGrade || fd?.class || fd?.Class || ""
+      if (grade) grades.add(grade)
+    }
+    return Array.from(grades).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+  }, [data?.students, classFilter])
 
   const classStatusCounts = useMemo(() => {
     const counts = new Map<string, { total: number; approved: number; flagged: number }>()
@@ -496,7 +585,7 @@ export default function TeacherDashboard() {
               <div style={{ background: 'white', borderRadius: 12, padding: 16, marginBottom: 24, border: '1px solid #e2e8f0' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
                   <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>📊 Class Breakdown</h3>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                     <button className="btn btn-outline" style={{ fontSize: 12, padding: '6px 14px' }} onClick={() => {
                       const params = new URLSearchParams()
                       if (classFilter) {
@@ -516,6 +605,15 @@ export default function TeacherDashboard() {
                       window.open(`/api/teacher/export/excel?${params}`, '_blank')
                     }}>
                       📊 Excel
+                    </button>
+                    <button
+                      className="btn btn-outline"
+                      onClick={() => handleTeacherExport("excel")}
+                      disabled={exportingFormat !== null || (data?.stats.total || 0) === 0}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '6px 14px', borderColor: '#0ea5e9', color: '#0369a1', opacity: exportingFormat !== null || (data?.stats.total || 0) === 0 ? 0.6 : 1, cursor: exportingFormat !== null || (data?.stats.total || 0) === 0 ? 'not-allowed' : 'pointer' }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 8v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8"/><path d="M3 8l9 6 9-6"/><path d="M21 8l-9-5-9 5"/><path d="M12 14v7"/></svg>
+                      {exportingFormat === "excel" ? 'Preparing Backup...' : classFilter ? 'Download Class Backup' : 'Download Data + Photos'}
                     </button>
                   </div>
                 </div>
@@ -556,21 +654,51 @@ export default function TeacherDashboard() {
         {activeTab === "students" && (
           <div className="fade-in">
             {/* Filters */}
-            <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
               {isMain && (
-                <select value={classFilter} onChange={e => setClassFilter(e.target.value)} style={{ height: 38, padding: '0 12px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 13 }}>
-                  <option value="">All Classes</option>
-                  {data?.classes.map(c => <option key={c.id} value={c.name}>{c.name} ({c._count.students})</option>)}
-                </select>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 }}>Section</label>
+                  <select value={classFilter} onChange={e => { setClassFilter(e.target.value); setGradeClassFilter("") }} style={{ height: 38, padding: '0 12px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 13, minWidth: 160 }}>
+                    <option value="">All Sections</option>
+                    {data?.classes.map(c => <option key={c.id} value={c.name}>{c.name} ({c._count.students})</option>)}
+                  </select>
+                </div>
               )}
-              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ height: 38, padding: '0 12px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 13 }}>
-                <option value="">All Status</option>
-                <option value="SUBMITTED">Submitted</option>
-                <option value="APPROVED">Approved</option>
-                <option value="FLAGGED">Flagged / Disapproved</option>
-                <option value="PRINTED">Printed</option>
-              </select>
-              <span style={{ fontSize: 13, color: '#64748b', padding: '10px 0' }}>{filtered.length} students</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 }}>Class</label>
+                <select
+                  value={gradeClassFilter}
+                  onChange={e => setGradeClassFilter(e.target.value)}
+                  style={{ height: 38, padding: '0 12px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 13, minWidth: 160 }}
+                >
+                  <option value="">All Classes</option>
+                  {uniqueGrades.map(g => <option key={g} value={g}>{g}</option>)}
+                </select>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 }}>Status</label>
+                <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ height: 38, padding: '0 12px', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 13, minWidth: 140 }}>
+                  <option value="">All Status</option>
+                  <option value="SUBMITTED">Submitted</option>
+                  <option value="APPROVED">Approved</option>
+                  <option value="FLAGGED">Flagged / Disapproved</option>
+                  <option value="PRINTED">Printed</option>
+                </select>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, justifyContent: 'flex-end' }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'transparent' }}>.</label>
+                <button
+                  className="btn btn-outline"
+                  onClick={() => handleTeacherExport("excel")}
+                  disabled={exportingFormat !== null || filtered.length === 0}
+                  title={classFilter ? "Download this class data with photos" : "Download all student data with photos"}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38, padding: '0 16px', borderColor: '#0ea5e9', color: '#0369a1', fontSize: 13, opacity: exportingFormat !== null || filtered.length === 0 ? 0.6 : 1, cursor: exportingFormat !== null || filtered.length === 0 ? 'not-allowed' : 'pointer' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 8v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8"/><path d="M3 8l9 6 9-6"/><path d="M21 8l-9-5-9 5"/><path d="M12 14v7"/></svg>
+                  {exportingFormat === "excel" ? 'Preparing Backup...' : classFilter ? 'Download Class Backup' : 'Download Data + Photos'}
+                </button>
+              </div>
+              <span style={{ fontSize: 13, color: '#64748b', padding: '10px 0', marginLeft: 'auto' }}>{filtered.length} students</span>
             </div>
 
             {/* Student Table */}
