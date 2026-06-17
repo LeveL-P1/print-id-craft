@@ -57,7 +57,7 @@ export default withAuth(
     }
 
     if (path.startsWith("/api/jobs/") && !path.startsWith("/api/jobs/process")) {
-      if (token?.role !== "MANUFACTURER") {
+      if (token?.role !== "MANUFACTURER" && token?.role !== "TEACHER") {
         return addSecurityHeaders(NextResponse.json({ error: "Forbidden" }, { status: 403 }))
       }
     }
