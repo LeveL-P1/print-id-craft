@@ -71,6 +71,7 @@ export default function PhotoBgProcessor({
   const [error, setError] = useState("")
   const [photoLoaded, setPhotoLoaded] = useState(false)
   const [photoDataUrl, setPhotoDataUrl] = useState<string>("")
+  const [showOriginalChoice, setShowOriginalChoice] = useState(false)
   const autoConfirmedRef = useRef(false)
   const autoSkippedRef = useRef(false)
   const cancelledRef = useRef(false)
@@ -173,7 +174,12 @@ export default function PhotoBgProcessor({
     }
   }, [photoUrl, schoolBgColor, setBgStatus, autoConfirm, onSkip])
 
-  const handleUseOriginal = useCallback(() => {
+  const handleUseOriginalClick = useCallback(() => {
+    setShowOriginalChoice(true)
+  }, [])
+
+  const confirmUseOriginal = useCallback(() => {
+    setShowOriginalChoice(false)
     cancelledRef.current = true
     setProcessing(false)
     setLivePreviewUrl(null)
@@ -182,6 +188,13 @@ export default function PhotoBgProcessor({
     setBgStatus(PHOTO_BG_STATUS.SKIPPED)
     onSkip(PHOTO_BG_STATUS.SKIPPED)
   }, [onSkip, setBgStatus])
+
+  const dismissOriginalChoice = useCallback(() => {
+    setShowOriginalChoice(false)
+    if (processedUrl && !processing) {
+      onProcessed(processedUrl, lastBgStatusRef.current || PHOTO_BG_STATUS.PROCESSED)
+    }
+  }, [processedUrl, processing, onProcessed])
 
   const handleRetry = useCallback(() => {
     cancelledRef.current = false
@@ -226,9 +239,10 @@ export default function PhotoBgProcessor({
 
   const displayUrl = photoDataUrl || photoUrl
   const isWorking = processing || (!processedUrl && photoLoaded && !error)
+  const aiStillRunning = processing
 
   return (
-    <div style={{ padding: 0 }}>
+    <div style={{ padding: 0, position: "relative" }}>
       <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ width: 28, height: 28, borderRadius: 8, background: 'linear-gradient(135deg, #8b5cf6, #6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: 'white' }}>🎨</span>
         Preparing Your Photo
@@ -339,7 +353,7 @@ export default function PhotoBgProcessor({
           <div style={{ textAlign: "center" }}>
             <button
               type="button"
-              onClick={handleUseOriginal}
+              onClick={handleUseOriginalClick}
               style={{
                 fontSize: 12,
                 padding: "8px 16px",
@@ -351,7 +365,7 @@ export default function PhotoBgProcessor({
                 fontWeight: 600,
               }}
             >
-              Keep My Original Photo
+              Use Original Photo
             </button>
           </div>
         </div>
@@ -371,7 +385,7 @@ export default function PhotoBgProcessor({
           )}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" onClick={handleRetry} style={{ flex: '1 1 140px', fontSize: 12, padding: '10px 16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>Retry</button>
-            <button type="button" onClick={handleUseOriginal} style={{ flex: '1 1 180px', fontSize: 12, padding: '10px 16px', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>Continue with Original Photo</button>
+            <button type="button" onClick={handleUseOriginalClick} style={{ flex: '1 1 180px', fontSize: 12, padding: '10px 16px', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>Continue with Original Photo</button>
           </div>
         </div>
       )}
@@ -397,7 +411,7 @@ export default function PhotoBgProcessor({
             </div>
           </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button type="button" onClick={handleUseOriginal} className="btn btn-outline" style={{ flex: '1 1 140px', justifyContent: 'center' }}>Keep Original Photo</button>
+            <button type="button" onClick={handleUseOriginalClick} className="btn btn-outline" style={{ flex: '1 1 140px', justifyContent: 'center' }}>Keep Original Photo</button>
             <button type="button" onClick={handleConfirm} className="btn btn-primary" style={{ flex: '2 1 180px', justifyContent: 'center', background: 'linear-gradient(135deg, #22c55e, #16a34a)' }}>Keep Prepared Photo</button>
           </div>
         </>
@@ -414,6 +428,99 @@ export default function PhotoBgProcessor({
           </div>
           <div className="login-spinner" style={{ width: 28, height: 28, borderColor: 'rgba(34,197,94,0.2)', borderTopColor: '#22c55e', margin: '0 auto 10px' }} />
           <div style={{ fontSize: 13, fontWeight: 600, color: '#16a34a' }}>Continuing to review…</div>
+        </div>
+      )}
+
+      {showOriginalChoice && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="original-photo-choice-title"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            background: "rgba(15, 23, 42, 0.45)",
+          }}
+          onClick={() => setShowOriginalChoice(false)}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 360,
+              background: "white",
+              borderRadius: 14,
+              padding: 20,
+              boxShadow: "0 20px 50px rgba(15, 23, 42, 0.25)",
+              border: "1px solid #e2e8f0",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div id="original-photo-choice-title" style={{ fontSize: 16, fontWeight: 700, color: "#0f172a", marginBottom: 8 }}>
+              Use your original photo?
+            </div>
+            <p style={{ fontSize: 13, color: "#64748b", lineHeight: 1.55, marginBottom: 16 }}>
+              {aiStillRunning
+                ? `You can continue with your original uploaded photo, or let AI keep cleaning the background and applying the school colour${schoolBgColor ? ` (${schoolBgColor.toUpperCase()})` : ""}.`
+                : "You can continue with your original uploaded photo, or keep the AI-prepared version with the cleaned background."}
+            </p>
+            {aiStillRunning && (
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "#1d4ed8",
+                  background: "#eff6ff",
+                  border: "1px solid #bfdbfe",
+                  borderRadius: 8,
+                  padding: "8px 10px",
+                  marginBottom: 16,
+                  lineHeight: 1.45,
+                }}
+              >
+                AI is still preparing your photo in the background — it will not restart.
+              </div>
+            )}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button
+                type="button"
+                onClick={confirmUseOriginal}
+                style={{
+                  fontSize: 13,
+                  padding: "11px 14px",
+                  background: "#f8fafc",
+                  color: "#334155",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                Continue with Original Photo
+              </button>
+              <button
+                type="button"
+                onClick={dismissOriginalChoice}
+                style={{
+                  fontSize: 13,
+                  padding: "11px 14px",
+                  background: "linear-gradient(135deg, #3b82f6, #2563eb)",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                {aiStillRunning
+                  ? "Let AI Clean Background"
+                  : "Keep Prepared Photo"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
