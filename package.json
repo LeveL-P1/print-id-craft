@@ -23,7 +23,7 @@
     "db:query-health": "ts-node -r tsconfig-paths/register --project tsconfig.seed.json scripts/query-health.ts",
     "db:prepare-live": "prisma db push && prisma generate && npm run db:backfill-student-indexes",
     "preflight:live": "ts-node -r tsconfig-paths/register --project tsconfig.seed.json scripts/preflight-live.ts",
-    "test:bg-service": "node scripts/test-bg-removal-service.mjs https://teamsasd-wisemelon-bg-removal.hf.space",
+    "test:poof-keys": "node scripts/test-poof-keys.cjs",
     "rembg:dev": "docker compose up rembg --build",
     "db:reset": "prisma db push --force-reset && prisma db seed",
     "db:use:mysql": "node scripts/set-db.js mysql && prisma generate",

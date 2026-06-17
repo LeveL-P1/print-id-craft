@@ -95,6 +95,14 @@ function poofBgColorValue(bgColor?: string): string | undefined {
   return hex ? `#${hex}` : undefined
 }
 
+function poofBgSize(): string {
+  const configured = process.env.POOFBG_SIZE?.trim()
+  if (configured && ["preview", "medium", "hd", "full"].includes(configured)) {
+    return configured
+  }
+  return "full"
+}
+
 export async function removeBackgroundWithPoofBg(
   buffer: Buffer,
   contentType: string,
@@ -115,15 +123,12 @@ export async function removeBackgroundWithPoofBg(
     new Blob([new Uint8Array(buffer)], { type: contentType || "image/jpeg" }),
     fileName || "photo.jpg"
   )
-  form.append("size", "auto")
-  form.append("crop", "false")
+  form.append("size", poofBgSize())
   if (bg) {
     form.append("format", "jpg")
-    form.append("channels", "rgb")
     form.append("bg_color", bg)
   } else {
     form.append("format", "png")
-    form.append("channels", "rgba")
   }
 
   const response = await fetch(POOFBG_API_URL, {
