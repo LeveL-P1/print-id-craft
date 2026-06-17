@@ -1,10 +1,14 @@
 /**
- * remove.bg API — server-side only (never expose REMOVEBG_API_KEY to the browser).
+ * Paid background removal APIs — server-side only (never expose keys to the browser).
  *
  * Submit fallback chain:
- *   1. Remove.bg (or REMOVEBG_API_URL replica)
- *   2. Poof.bg when remove.bg credits run out
+ *   1. Poof.bg (primary — supports POOFBG_API_KEYS rotation)
+ *   2. Remove.bg (REMOVEBG_API_KEYS rotation)
  *   3. rembg + InSPyReNet, then isnet-general-use (BG_REMOVAL_SERVICE_URL)
+ *
+ * Multi-key env (comma or newline separated, tried in order until credits run out):
+ *   POOFBG_API_KEYS=key1,key2,key3
+ *   REMOVEBG_API_KEYS=key1,key2,key3
  *
  * @see https://www.remove.bg/api
  * @see https://github.com/danielgatis/rembg
@@ -27,8 +31,28 @@ const REMBG_SUBMIT_FALLBACK_MODELS = (
 
 export type SubmitBgProvider = "removebg" | "poofbg" | "rembg-inspyrenet" | "rembg-isnet"
 
+export function parseApiKeys(singleEnv?: string, listEnv?: string): string[] {
+  const fromList = (listEnv || "")
+    .split(/[,;\n]+/)
+    .map((key) => key.trim())
+    .filter(Boolean)
+  if (fromList.length > 0) {
+    return [...new Set(fromList)]
+  }
+  const single = singleEnv?.trim()
+  return single ? [single] : []
+}
+
+function getPoofBgApiKeys(): string[] {
+  return parseApiKeys(process.env.POOFBG_API_KEY, process.env.POOFBG_API_KEYS)
+}
+
+function getRemoveBgApiKeys(): string[] {
+  return parseApiKeys(process.env.REMOVEBG_API_KEY, process.env.REMOVEBG_API_KEYS)
+}
+
 export function isPoofBgConfigured(): boolean {
-  return !!process.env.POOFBG_API_KEY?.trim()
+  return getPoofBgApiKeys().length > 0
 }
 
 function poofBgColorValue(bgColor?: string): string | undefined {
@@ -40,10 +64,11 @@ export async function removeBackgroundWithPoofBg(
   buffer: Buffer,
   contentType: string,
   fileName: string,
-  bgColor?: string
+  bgColor?: string,
+  apiKey?: string
 ): Promise<Buffer> {
-  const apiKey = process.env.POOFBG_API_KEY?.trim()
-  if (!apiKey) {
+  const key = apiKey?.trim() || getPoofBgApiKeys()[0]
+  if (!key) {
     throw new Error("POOFBG_API_KEY is not configured")
   }
 
@@ -68,7 +93,7 @@ export async function removeBackgroundWithPoofBg(
 
   const response = await fetch(POOFBG_API_URL, {
     method: "POST",
-    headers: { "x-api-key": apiKey },
+    headers: { "x-api-key": key },
     body: form,
   })
 
@@ -92,7 +117,7 @@ export async function removeBackgroundWithPoofBg(
 
 export function isRemoveBgConfigured(): boolean {
   if (process.env.REMOVEBG_API_URL?.trim()) return true
-  return !!process.env.REMOVEBG_API_KEY?.trim()
+  return getRemoveBgApiKeys().length > 0
 }
 
 export function isRembgFallbackConfigured(): boolean {
@@ -101,7 +126,7 @@ export function isRembgFallbackConfigured(): boolean {
 
 /** True when submit flow can run (paid APIs and/or rembg service). */
 export function isSubmitPhotoBgConfigured(): boolean {
-  return isRemoveBgConfigured() || isPoofBgConfigured() || isRembgFallbackConfigured()
+  return isPoofBgConfigured() || isRemoveBgConfigured() || isRembgFallbackConfigured()
 }
 
 function getErrorStatus(error: unknown): number {
@@ -128,12 +153,13 @@ function isPaidApiCreditsExhausted(status: number, detail: string): boolean {
   )
 }
 
-function usesOfficialRemoveBg(): boolean {
-  return !!process.env.REMOVEBG_API_KEY?.trim() && !process.env.REMOVEBG_API_URL?.trim()
+function shouldTryNextApiKey(status: number, detail: string): boolean {
+  if (isPaidApiCreditsExhausted(status, detail)) return true
+  return status === 401 || status === 403
 }
 
-function isRemoveBgCreditsExhausted(status: number, detail: string): boolean {
-  return isPaidApiCreditsExhausted(status, detail)
+function usesOfficialRemoveBg(): boolean {
+  return getRemoveBgApiKeys().length > 0 && !process.env.REMOVEBG_API_URL?.trim()
 }
 
 function normalizeBgColorHex(bgColor?: string): string | undefined {
@@ -147,10 +173,10 @@ function removeBgApiUrl(): string {
   ).replace(/\/+$/, "")
 }
 
-function removeBgRequestHeaders(): HeadersInit {
-  const apiKey = process.env.REMOVEBG_API_KEY?.trim()
-  if (apiKey) {
-    return { "X-Api-Key": apiKey }
+function removeBgRequestHeaders(apiKey?: string): HeadersInit {
+  const key = apiKey?.trim() || getRemoveBgApiKeys()[0]
+  if (key) {
+    return { "X-Api-Key": key }
   }
 
   const serviceToken = process.env.BG_REMOVAL_SERVICE_TOKEN?.trim()
@@ -165,11 +191,12 @@ export async function removeBackgroundWithRemoveBg(
   buffer: Buffer,
   contentType: string,
   fileName: string,
-  bgColor?: string
+  bgColor?: string,
+  apiKey?: string
 ): Promise<Buffer> {
   const usingLocalReplica = !!process.env.REMOVEBG_API_URL?.trim()
-  const apiKey = process.env.REMOVEBG_API_KEY?.trim()
-  if (!usingLocalReplica && !apiKey) {
+  const key = apiKey?.trim() || getRemoveBgApiKeys()[0]
+  if (!usingLocalReplica && !key) {
     throw new Error("REMOVEBG_API_KEY is not configured")
   }
 
@@ -191,7 +218,7 @@ export async function removeBackgroundWithRemoveBg(
 
   const response = await fetch(removeBgApiUrl(), {
     method: "POST",
-    headers: removeBgRequestHeaders(),
+    headers: removeBgRequestHeaders(key),
     body: form,
   })
 
@@ -213,7 +240,95 @@ export async function removeBackgroundWithRemoveBg(
   return Buffer.from(await response.arrayBuffer())
 }
 
-  return Buffer.from(await response.arrayBuffer())
+async function tryPoofBgWithKeyRotation(
+  buffer: Buffer,
+  contentType: string,
+  fileName: string,
+  bgColor?: string
+): Promise<Buffer> {
+  const keys = getPoofBgApiKeys()
+  if (!keys.length) {
+    throw new Error("POOFBG_API_KEY is not configured")
+  }
+
+  let lastError: unknown = null
+  for (let i = 0; i < keys.length; i++) {
+    try {
+      const result = await removeBackgroundWithPoofBg(
+        buffer,
+        contentType,
+        fileName,
+        bgColor,
+        keys[i]
+      )
+      if (i > 0) {
+        console.warn(`[photo-bg] Poof.bg succeeded with key #${i + 1} of ${keys.length}`)
+      }
+      return result
+    } catch (error) {
+      lastError = error
+      const status = getErrorStatus(error)
+      const message = getErrorMessage(error)
+      const hasNextKey = i < keys.length - 1
+      if (hasNextKey && shouldTryNextApiKey(status, message)) {
+        console.warn(
+          `[photo-bg] Poof.bg key #${i + 1} of ${keys.length} unavailable (${status || "error"}) — trying next key`
+        )
+        continue
+      }
+      throw error
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("All Poof.bg API keys failed")
+}
+
+async function tryRemoveBgWithKeyRotation(
+  buffer: Buffer,
+  contentType: string,
+  fileName: string,
+  bgColor?: string
+): Promise<Buffer> {
+  const usingLocalReplica = !!process.env.REMOVEBG_API_URL?.trim()
+  if (usingLocalReplica) {
+    return removeBackgroundWithRemoveBg(buffer, contentType, fileName, bgColor)
+  }
+
+  const keys = getRemoveBgApiKeys()
+  if (!keys.length) {
+    throw new Error("REMOVEBG_API_KEY is not configured")
+  }
+
+  let lastError: unknown = null
+  for (let i = 0; i < keys.length; i++) {
+    try {
+      const result = await removeBackgroundWithRemoveBg(
+        buffer,
+        contentType,
+        fileName,
+        bgColor,
+        keys[i]
+      )
+      if (i > 0) {
+        console.warn(`[photo-bg] remove.bg succeeded with key #${i + 1} of ${keys.length}`)
+      }
+      return result
+    } catch (error) {
+      lastError = error
+      const status = getErrorStatus(error)
+      const message = getErrorMessage(error)
+      const hasNextKey = i < keys.length - 1
+      if (hasNextKey && shouldTryNextApiKey(status, message)) {
+        console.warn(
+          `[photo-bg] remove.bg key #${i + 1} of ${keys.length} unavailable (${status || "error"}) — trying next key`
+        )
+        continue
+      }
+      throw error
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("All remove.bg API keys failed")
 }
 
 function providerForRembgModel(model: string): SubmitBgProvider {
@@ -297,7 +412,8 @@ async function tryRembgFallback(
 }
 
 /**
- * Submit form fallback chain: remove.bg → Poof.bg → rembg (InSPyReNet → ISNet).
+ * Submit form fallback chain: Poof.bg → remove.bg → rembg (InSPyReNet → ISNet).
+ * Each paid provider rotates through comma-separated API keys until credits run out.
  */
 export async function removeBackgroundForSubmit(
   buffer: Buffer,
@@ -305,45 +421,26 @@ export async function removeBackgroundForSubmit(
   fileName: string,
   bgColor?: string
 ): Promise<{ buffer: Buffer; provider: SubmitBgProvider }> {
+  if (isPoofBgConfigured()) {
+    try {
+      const result = await tryPoofBgWithKeyRotation(buffer, contentType, fileName, bgColor)
+      return { buffer: result, provider: "poofbg" }
+    } catch (poofErr) {
+      console.warn("[photo-bg] All Poof.bg keys failed — trying remove.bg:", getErrorMessage(poofErr))
+    }
+  }
+
   if (isRemoveBgConfigured()) {
     try {
-      const result = await removeBackgroundWithRemoveBg(buffer, contentType, fileName, bgColor)
+      const result = await tryRemoveBgWithKeyRotation(buffer, contentType, fileName, bgColor)
       return { buffer: result, provider: "removebg" }
     } catch (removeBgErr) {
-      const status = getErrorStatus(removeBgErr)
       const message = getErrorMessage(removeBgErr)
-
-      if (usesOfficialRemoveBg() && isRemoveBgCreditsExhausted(status, message)) {
-        if (isPoofBgConfigured()) {
-          try {
-            console.warn("[photo-bg] remove.bg credits exhausted — trying Poof.bg")
-            const result = await removeBackgroundWithPoofBg(buffer, contentType, fileName, bgColor)
-            return { buffer: result, provider: "poofbg" }
-          } catch (poofErr) {
-            console.warn("[photo-bg] Poof.bg failed — trying rembg+ISNet:", getErrorMessage(poofErr))
-            return tryRembgFallback(buffer, contentType, fileName, bgColor)
-          }
-        }
-
-        return tryRembgFallback(buffer, contentType, fileName, bgColor)
-      }
-
       if (isRembgFallbackConfigured()) {
         console.warn("[photo-bg] remove.bg failed — trying rembg+ISNet:", message)
         return tryRembgFallback(buffer, contentType, fileName, bgColor)
       }
-
       throw removeBgErr
-    }
-  }
-
-  if (isPoofBgConfigured()) {
-    try {
-      const result = await removeBackgroundWithPoofBg(buffer, contentType, fileName, bgColor)
-      return { buffer: result, provider: "poofbg" }
-    } catch (poofErr) {
-      console.warn("[photo-bg] Poof.bg failed — trying rembg+ISNet:", getErrorMessage(poofErr))
-      return tryRembgFallback(buffer, contentType, fileName, bgColor)
     }
   }
 

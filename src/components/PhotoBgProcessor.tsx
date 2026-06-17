@@ -20,8 +20,8 @@ type Props = {
 
 const LIVE_STEPS = [
   { id: "prepare", label: "Preparing photo", match: /prepar/i },
-  { id: "service", label: "Connecting to Remove.bg", match: /send|service|connect|remove\.bg/i },
-  { id: "clean", label: "Removing background", match: /remov|clean|background|remove\.bg/i },
+  { id: "service", label: "Connecting to AI service", match: /send|service|connect|remove\.bg|poof/i },
+  { id: "clean", label: "Removing background", match: /remov|clean|background|remove\.bg|poof/i },
   { id: "color", label: "Applying colour", match: /colour|color|apply|background updated|done|complete|finish|preview/i },
 ] as const
 
@@ -44,10 +44,10 @@ function formatProcessingError(err: unknown) {
     return "We couldn't detect you clearly in the photo. You can continue with your original upload or try a clearer photo."
   }
   if (detail.includes("not configured") || detail.includes("not running")) {
-    return "Remove.bg is unavailable right now. You can continue with your original photo or try again later."
+    return "AI photo preparation is unavailable right now. You can continue with your original photo or try again later."
   }
   if (detail.includes("credits exhausted") || detail.includes("402")) {
-    return "Remove.bg credits are used up. You can continue with your original photo or contact the school."
+    return "Background removal credits are used up. You can continue with your original photo or contact the school."
   }
   return "Photo preparation didn't work this time. You can continue with your original upload or retry."
 }
@@ -234,7 +234,7 @@ export default function PhotoBgProcessor({
         Preparing Your Photo
       </div>
       <p style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>
-        Remove.bg is preparing your photo with school colour
+        AI is preparing your photo with school colour
         {schoolBgColor && (
           <>
             {" "}
@@ -334,7 +334,7 @@ export default function PhotoBgProcessor({
           <p style={{ fontSize: 11, color: '#64748b', textAlign: 'center', marginTop: 14, marginBottom: livePreviewUrl ? 12 : 0, lineHeight: 1.5 }}>
             {livePreviewUrl
               ? "Preview is ready — you can keep your original photo or wait for the final version."
-              : "Remove.bg is preparing your photo. This usually takes a few seconds."}
+              : "AI is preparing your photo. This usually takes a few seconds."}
           </p>
           <div style={{ textAlign: "center" }}>
             <button

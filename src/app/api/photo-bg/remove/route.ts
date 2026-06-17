@@ -142,7 +142,7 @@ export async function POST(req: Request) {
     if (requestedModel === "removebg" || requestedModel === "remove.bg") {
       if (!isSubmitPhotoBgConfigured()) {
         return NextResponse.json(
-          { error: "Background removal is not configured — set REMOVEBG_API_KEY, POOFBG_API_KEY, or BG_REMOVAL_SERVICE_URL" },
+          { error: "Background removal is not configured — set POOFBG_API_KEY, REMOVEBG_API_KEY, or BG_REMOVAL_SERVICE_URL" },
           { status: 503 }
         )
       }

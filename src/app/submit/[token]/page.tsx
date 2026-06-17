@@ -2182,7 +2182,7 @@ export default function SubmitPage() {
             </div>
           )}
 
-          {/* BACKGROUND REMOVAL — Remove.bg API + school colour */}
+          {/* BACKGROUND REMOVAL — Poof.bg / remove.bg API + school colour */}
           {step === "bg" && croppedPhoto && (
             <div>
               <PhotoBgProcessor

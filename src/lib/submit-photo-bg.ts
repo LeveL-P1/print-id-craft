@@ -1,7 +1,7 @@
 /**
- * Submit photo background — Remove.bg API passthrough (official or self-hosted replica).
+ * Submit photo background — Poof.bg / remove.bg API passthrough (server-side chain).
  *
- *   cropped photo → POST /api/photo-bg/remove (removebg)
+ *   cropped photo → POST /api/photo-bg/remove (removebg model)
  *                 → server applies school colour → JPEG
  */
 
@@ -38,7 +38,7 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
 
 function friendlyApiError(status: number, body: string): string {
   if (status === 503) {
-    return "Background removal is not configured — set REMOVEBG_API_KEY, POOFBG_API_KEY, or BG_REMOVAL_SERVICE_URL on the server."
+    return "Background removal is not configured — set POOFBG_API_KEY, REMOVEBG_API_KEY, or BG_REMOVAL_SERVICE_URL on the server."
   }
   if (status === 402) {
     return "Background removal credits exhausted — add credits or wait for rembg fallback."
