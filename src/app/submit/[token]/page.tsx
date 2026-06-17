@@ -1484,26 +1484,6 @@ export default function SubmitPage() {
               {submitting ? "Submitting..." : "✓ Submit Registration"}
             </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setStep("photo")}
-            disabled={submitting}
-            style={{
-              width: '100%',
-              marginTop: 10,
-              padding: '10px',
-              background: 'transparent',
-              border: 'none',
-              color: '#64748b',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: submitting ? 'not-allowed' : 'pointer',
-              textDecoration: 'underline',
-              textUnderlineOffset: 3,
-            }}
-          >
-            Need to change your photo?
-          </button>
         </div>
       </div>
     </div>
