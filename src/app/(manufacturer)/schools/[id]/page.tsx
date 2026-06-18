@@ -16,6 +16,11 @@ import {
 import { photoCacheVersion, studentPhotoUrl as buildStudentPhotoUrl } from "@/lib/student-photo-url"
 import { getFieldRole, resolveEditFieldValue } from "@/lib/field-resolver"
 import {
+  cardDimensionsForOrientation,
+  DEFAULT_CARD_HEIGHT_MM,
+  DEFAULT_CARD_WIDTH_MM,
+} from "@/lib/card-dimensions"
+import {
   stripIndianPrefix,
   validatePublicSubmissionDetails,
   type FormField,
@@ -1943,7 +1948,12 @@ export default function SchoolDetailPage() {
       const statusData = await statusRes.json()
       const job = statusData.data
       if (job?.status === "COMPLETED") {
-        window.open(`/api/jobs/${jobId}/download`, "_blank")
+        const link = document.createElement("a")
+        link.href = `/api/jobs/${jobId}/download`
+        link.setAttribute("download", "")
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
         toast.success(successLabel)
         return true
       }
@@ -2037,11 +2047,10 @@ export default function SchoolDetailPage() {
     }
   }
 
-  // Template orientation updater
+  // Template orientation updater — exact 58×100 mm cutter dimensions
   const handleOrientationChange = async (orientation: "PORTRAIT" | "LANDSCAPE") => {
     try {
-      const widthMm = orientation === "LANDSCAPE" ? 85.6 : 54.0
-      const heightMm = orientation === "LANDSCAPE" ? 54.0 : 85.6
+      const { widthMm, heightMm } = cardDimensionsForOrientation(orientation)
       const res = await fetch(`/api/schools/${schoolId}/template`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -2822,8 +2831,8 @@ export default function SchoolDetailPage() {
                     initialPhotoBgColor={classTemplateEditor.templateData?.photoBgColor || "#FFFFFF"}
                     initialCardSettings={classTemplateEditor.templateData ? {
                       cardSizePreset: "custom",
-                      cardWidth: classTemplateEditor.templateData.cardWidthMm || 85.6,
-                      cardHeight: classTemplateEditor.templateData.cardHeightMm || 53.98,
+                      cardWidth: classTemplateEditor.templateData.cardWidthMm || DEFAULT_CARD_WIDTH_MM,
+                      cardHeight: classTemplateEditor.templateData.cardHeightMm || DEFAULT_CARD_HEIGHT_MM,
                       cardOrientation: classTemplateEditor.templateData.orientation === "LANDSCAPE" ? "landscape" : "portrait",
                       printSides: classTemplateEditor.templateData.hasBackSide ? "both" : "front",
                       cardDpi: classTemplateEditor.templateData.printDpi || 300,
@@ -4343,8 +4352,8 @@ export default function SchoolDetailPage() {
                   initialPhotoBgColor={template.photoBgColor || "#FFFFFF"}
                   initialCardSettings={{
                     cardSizePreset: "custom",
-                    cardWidth: template.cardWidthMm || 85.6,
-                    cardHeight: template.cardHeightMm || 53.98,
+                    cardWidth: template.cardWidthMm || DEFAULT_CARD_WIDTH_MM,
+                    cardHeight: template.cardHeightMm || DEFAULT_CARD_HEIGHT_MM,
                     cardOrientation: template.orientation === "LANDSCAPE" ? "landscape" : "portrait",
                     printSides: template.hasBackSide ? "both" : "front",
                     cardDpi: template.printDpi || 300,
@@ -4707,8 +4716,8 @@ export default function SchoolDetailPage() {
                       <IDCardPreview
                         key={detailPhotoCacheKey}
                         layout={studentTemplate.frontLayout || []}
-                        widthMm={studentTemplate.cardWidthMm || 85.6}
-                        heightMm={studentTemplate.cardHeightMm || 54.0}
+                        widthMm={studentTemplate.cardWidthMm || DEFAULT_CARD_WIDTH_MM}
+                        heightMm={studentTemplate.cardHeightMm || DEFAULT_CARD_HEIGHT_MM}
                         formData={selectedStudent.formData as Record<string, string>}
                         studentPhoto={detailPhotoUrl}
                         schoolLogo={school?.logoUrl || undefined}
@@ -4721,8 +4730,8 @@ export default function SchoolDetailPage() {
                         <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 8, textAlign: 'center' }}>BACK</div>
                         <IDCardPreview
                           layout={studentTemplate.backLayout || []}
-                          widthMm={studentTemplate.cardWidthMm || 85.6}
-                          heightMm={studentTemplate.cardHeightMm || 54.0}
+                          widthMm={studentTemplate.cardWidthMm || DEFAULT_CARD_WIDTH_MM}
+                          heightMm={studentTemplate.cardHeightMm || DEFAULT_CARD_HEIGHT_MM}
                           formData={selectedStudent.formData as Record<string, string>}
                           serialNumber={selectedStudent.serialNumber}
                           scale={3.5}

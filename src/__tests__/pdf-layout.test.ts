@@ -53,9 +53,9 @@ describe("CARD_PRESETS constants", () => {
     )
   })
 
-  it("SCHOOL_ID matches 56 × 88 mm", () => {
-    expect(CARD_PRESETS.SCHOOL_ID.widthMm).toBe(56)
-    expect(CARD_PRESETS.SCHOOL_ID.heightMm).toBe(88)
+  it("SCHOOL_ID matches 58 × 100 mm cutter", () => {
+    expect(CARD_PRESETS.SCHOOL_ID.widthMm).toBe(58)
+    expect(CARD_PRESETS.SCHOOL_ID.heightMm).toBe(100)
   })
 
   it("SCHOOL_ID_LANDSCAPE is the transpose of SCHOOL_ID", () => {
@@ -142,35 +142,35 @@ describe("calculateGridLayout", () => {
     expect(layout.totalPages).toBe(1) // ceil(8/10)
   })
 
-  /* ── 10 Cards on A4 Landscape (56×88mm) ── */
-  it("fits exactly 10 cards (5×2) on A4 landscape with 56×88mm cards", () => {
-    // A4 landscape = 297×210, card=56×88, margin=5, gap=1
-    const layout = calculateGridLayout(297, 210, 56, 88, 5, 1, 10)
+  /* ── 10 Cards on A4 Landscape (58×100mm) ── */
+  it("fits cards on A4 landscape with 58×100mm cards", () => {
+    // A4 landscape = 297×210, card=58×100, margin=5, gap=1
+    const layout = calculateGridLayout(297, 210, 58, 100, 5, 1, 10)
 
-    // printW = 297 - 10 = 287, (287+1)/(56+1) = 288/57 ≈ 5.05 → cols=5
-    expect(layout.cols).toBe(5)
-    // printH = 210 - 10 = 200, (200+1)/(88+1) = 201/89 ≈ 2.26 → rows=2
-    expect(layout.rows).toBe(2)
-    expect(layout.cardsPerPage).toBe(10) // 5×2
-    expect(layout.totalPages).toBe(1) // all 10 cards on 1 page
+    // printW = 287, (287+1)/(58+1) ≈ 4.88 → cols=4
+    expect(layout.cols).toBe(4)
+    // printH = 200, (200+1)/(100+1) ≈ 1.99 → rows=1
+    expect(layout.rows).toBe(1)
+    expect(layout.cardsPerPage).toBe(4)
+    expect(layout.totalPages).toBe(3)
   })
 
-  it("fits 9 cards (3×3) on A4 portrait with 56×88mm cards", () => {
-    // A4 portrait = 210×297, card=56×88, margin=5, gap=2
-    const layout = calculateGridLayout(210, 297, 56, 88, 5, 2, 9)
+  it("fits multiple cards on A4 portrait with 58×100mm cards", () => {
+    // A4 portrait = 210×297, card=58×100, margin=5, gap=2
+    const layout = calculateGridLayout(210, 297, 58, 100, 5, 2, 9)
 
-    // printW = 210 - 10 = 200, (200+2)/(56+2) = 202/58 ≈ 3.48 → cols=3
+    // printW = 200, (200+2)/(58+2) ≈ 3.37 → cols=3
     expect(layout.cols).toBe(3)
-    // printH = 297 - 10 = 287, (287+2)/(88+2) = 289/90 ≈ 3.21 → rows=3
-    expect(layout.rows).toBe(3)
-    expect(layout.cardsPerPage).toBe(9)
-    expect(layout.totalPages).toBe(1)
+    // printH = 287, (287+2)/(100+2) ≈ 2.83 → rows=2
+    expect(layout.rows).toBe(2)
+    expect(layout.cardsPerPage).toBe(6)
+    expect(layout.totalPages).toBe(2)
   })
 
-  it("20 cards of 56×88mm on A4 landscape needs exactly 2 pages", () => {
-    const layout = calculateGridLayout(297, 210, 56, 88, 5, 1, 20)
-    expect(layout.cardsPerPage).toBe(10)
-    expect(layout.totalPages).toBe(2)
+  it("20 cards of 58×100mm on A4 landscape needs multiple pages", () => {
+    const layout = calculateGridLayout(297, 210, 58, 100, 5, 1, 20)
+    expect(layout.cardsPerPage).toBe(4)
+    expect(layout.totalPages).toBe(5)
   })
 
   it("centers cards on page (startX and startY)", () => {

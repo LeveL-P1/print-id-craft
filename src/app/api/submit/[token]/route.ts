@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { DEFAULT_CARD_HEIGHT_MM, DEFAULT_CARD_WIDTH_MM } from "@/lib/card-dimensions"
 import { APP_BUILD_ID } from "@/lib/app-build-id"
 import { buildFormFields, checkSubmissionStatus, type FormField } from "@/lib/submit-fields"
 import { computeSubmitFormRevision } from "@/lib/submit-draft"
@@ -217,8 +218,8 @@ export async function GET(req: Request, props: { params: Promise<{ token: string
         fieldConfig: publicFieldConfig,
         frontLayout: template?.frontLayout || [],
         backLayout: template?.backLayout || [],
-        cardWidthMm: template?.cardWidthMm || 85.6,
-        cardHeightMm: template?.cardHeightMm || 54.0,
+        cardWidthMm: template?.cardWidthMm || DEFAULT_CARD_WIDTH_MM,
+        cardHeightMm: template?.cardHeightMm || DEFAULT_CARD_HEIGHT_MM,
         orientation: template?.orientation || "LANDSCAPE",
         // JPG template data for card preview
         templateImageUrl: template?.templateImageUrl || null,

@@ -6,6 +6,7 @@ import { z } from "zod"
 import { migrateTemplateToPt } from "@/lib/font-size-units"
 import { inferFieldRole } from "@/lib/field-resolver"
 import { getDefaultTemplate, getTemplateByIdForSchool } from "@/lib/template-resolver"
+import { DEFAULT_CARD_HEIGHT_MM, DEFAULT_CARD_WIDTH_MM } from "@/lib/card-dimensions"
 
 const templateSchema = z.object({
   frontLayout: z.any().optional(),
@@ -186,8 +187,8 @@ export async function PUT(req: Request, props: { params: Promise<{ id: string }>
           frontLayout: validated.frontLayout || [],
           backLayout: validated.backLayout || [],
           fieldConfig: fieldConfig || [],
-          cardWidthMm: validated.cardWidthMm || 85.6,
-          cardHeightMm: validated.cardHeightMm || 54.0,
+          cardWidthMm: validated.cardWidthMm || DEFAULT_CARD_WIDTH_MM,
+          cardHeightMm: validated.cardHeightMm || DEFAULT_CARD_HEIGHT_MM,
           printDpi: validated.printDpi || 300,
           orientation: validated.orientation || "PORTRAIT",
           templateImageUrl: validated.templateImageUrl,

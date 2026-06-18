@@ -254,7 +254,7 @@ export type IdSizeConfig = {
 }
 
 const ID_SIZE_PRESETS: Record<string, { width: number; height: number; label: string }> = {
-  "Custom": { width: 85.6, height: 53.98, label: "Custom" },
+  "Custom": { width: 100, height: 58, label: "Custom" },
   "CR-80 Horizontal": { width: 85.6, height: 53.98, label: "CR-80 Horizontal" },
   "CR-80 Vertical": { width: 53.98, height: 85.6, label: "CR-80 Vertical" },
   "School ID (100×58)": { width: 100, height: 58, label: "School ID (100×58)" },

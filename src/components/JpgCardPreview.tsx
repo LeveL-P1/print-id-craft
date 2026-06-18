@@ -6,6 +6,11 @@ import {
   getCardTextWrapMode,
   formatDateValue,
 } from "@/lib/field-resolver"
+import {
+  DEFAULT_CARD_WIDTH_MM,
+  DEFAULT_PRINT_DPI,
+  printCanvasSize,
+} from "@/lib/card-dimensions"
 
 type FieldMapping = {
   id: string
@@ -115,9 +120,9 @@ type JpgCardPreviewProps = {
 }
 
 const MAPPER_REFERENCE_WIDTH = 600
-const PREVIEW_DPI = 300
+const PREVIEW_DPI = DEFAULT_PRINT_DPI
 
-// Bounded LRU image cache — prevents unbounded memory growth when
+// Bounded LRU image cache
 // previewing many students. Template images (long-lived) are protected.
 const IMAGE_CACHE_MAX = 60
 const imageCache = new Map<string, HTMLImageElement>()
@@ -209,7 +214,7 @@ function fitTextToBox(
   userFontSizePt?: number,
   wrapMode: "nowrap" | "wrap" | "multiline" = "wrap",
   fontStyle: string = "normal",
-  cardWidthMm: number = 85.6,
+  cardWidthMm: number = DEFAULT_CARD_WIDTH_MM,
 ): { lines: string[]; fontSize: number; lineHeight: number } {
   const padding = 4 * scale
   const maxW = Math.max(1, boxW - padding * 2)
@@ -333,8 +338,9 @@ export default function JpgCardPreview({
       let w: number
       let h: number
       if (cardWidthMm && cardHeightMm && cardWidthMm > 0 && cardHeightMm > 0) {
-        w = Math.round((cardWidthMm * PREVIEW_DPI) / 25.4) * scale
-        h = Math.round((cardHeightMm * PREVIEW_DPI) / 25.4) * scale
+        const base = printCanvasSize(cardWidthMm, cardHeightMm, PREVIEW_DPI)
+        w = base.widthPx * scale
+        h = base.heightPx * scale
       } else {
         w = img.naturalWidth * scale
         h = img.naturalHeight * scale
@@ -440,7 +446,7 @@ export default function JpgCardPreview({
             const { lines, fontSize, lineHeight: baseLineHeight } = fitTextToBox(
               ctx, String(value), fw, fh, fontFamily, fontWeight, scale,
               w, field.fontSize, getCardTextWrapMode(field.fieldKey, field.textWrap), fStyle,
-              cardWidthMm || 85.6,
+              cardWidthMm || DEFAULT_CARD_WIDTH_MM,
             )
             // Honour the user's lineHeight multiplier if set.
             const userLH = field.lineHeight && field.lineHeight > 0 ? field.lineHeight : 0
@@ -554,7 +560,7 @@ export async function generateJpgCard(
   studentPhoto?: string,
   outputScale: number = 1,
   flagImageUrl?: string,
-  cardWidthMm: number = 85.6,
+  cardWidthMm: number = DEFAULT_CARD_WIDTH_MM,
 ): Promise<string> {
   const canvas = document.createElement("canvas")
   const ctx = canvas.getContext("2d")
@@ -629,7 +635,7 @@ export async function generateJpgCard(
           ctx, String(value), fw, fh, fontFamily, fontWeight, outputScale,
           w, field.fontSize, getCardTextWrapMode(field.fieldKey, field.textWrap),
           "normal",
-          cardWidthMm || 85.6,
+          cardWidthMm || DEFAULT_CARD_WIDTH_MM,
         )
 
         ctx.fillStyle = field.fontColor || "#000"

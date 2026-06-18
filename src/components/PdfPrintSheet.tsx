@@ -1,5 +1,9 @@
 "use client"
 import { useState, useMemo, useCallback, useEffect, useRef } from "react"
+import {
+  CUTTER_HEIGHT_MM,
+  CUTTER_WIDTH_MM,
+} from "@/lib/card-dimensions"
 
 /* Mobile tab for Settings vs Preview */
 type MobileTab = "settings" | "preview"
@@ -64,8 +68,8 @@ export default function PdfPrintSheet({ cards, schoolName, onClose, printSetup }
   const initPosY = hasPrintSetup ? printSetup!.v1stPosition : 0
   // If h2ndPosition / v2ndPosition are set, use them as custom card sizes
   const initCardPreset = hasPrintSetup && printSetup!.h2ndPosition > 0 && printSetup!.v2ndPosition > 0 ? "CUSTOM" : "SCHOOL_ID_LANDSCAPE"
-  const initCardW = hasPrintSetup && printSetup!.h2ndPosition > 0 ? printSetup!.h2ndPosition : 88
-  const initCardH = hasPrintSetup && printSetup!.v2ndPosition > 0 ? printSetup!.v2ndPosition : 56
+  const initCardW = hasPrintSetup && printSetup!.h2ndPosition > 0 ? printSetup!.h2ndPosition : CUTTER_HEIGHT_MM
+  const initCardH = hasPrintSetup && printSetup!.v2ndPosition > 0 ? printSetup!.v2ndPosition : CUTTER_WIDTH_MM
 
   /* ── State ── */
   const [pageSizeKey, setPageSizeKey] = useState(initPageSizeKey)
@@ -568,7 +572,7 @@ export default function PdfPrintSheet({ cards, schoolName, onClose, printSetup }
                   background: "linear-gradient(135deg, #f0fdf4, #dcfce7)",
                   border: "1px solid #bbf7d0", fontSize: 11, color: "#166534",
                 }}>
-                  🪪 <strong>PVC Mode Active</strong> — All settings locked to factory spec: 56×88mm cards, 5×2 grid, 1.7mm margins, 3.4/3.0mm gaps, crop marks with 1mm offset
+                  🪪 <strong>PVC Mode Active</strong> — All settings locked to factory spec: {CUTTER_WIDTH_MM}×{CUTTER_HEIGHT_MM}mm cards, 5×2 grid, 1.7mm margins, 3.4/3.0mm gaps, crop marks with 1mm offset
                 </div>
               )}
             </SettingsSection>
@@ -986,7 +990,7 @@ export default function PdfPrintSheet({ cards, schoolName, onClose, printSetup }
               lineHeight: 1.5,
             }}>
               <strong>💡 Tip:</strong> For best print results, ensure your card template
-              images are at least <strong>661×1039 pixels</strong> (300 DPI at 56×88mm).
+              images are at least <strong>{Math.round((CUTTER_WIDTH_MM * 300) / 25.4)}×{Math.round((CUTTER_HEIGHT_MM * 300) / 25.4)} pixels</strong> (300 DPI at {CUTTER_WIDTH_MM}×{CUTTER_HEIGHT_MM}mm).
               Higher resolution source images = sharper printed cards.
             </div>
           </div>
@@ -1005,7 +1009,7 @@ export default function PdfPrintSheet({ cards, schoolName, onClose, printSetup }
         }}>
           <div style={{ fontSize: 12, color: pvcMode ? "#166534" : "#94a3b8" }}>
             {pvcMode ? "🪪 PVC · " : ""}{cards.length} cards → {layout.totalPages} page(s) at {layout.cols}×{layout.rows} grid
-            {pvcMode && " · 56×88mm · 1.7mm margins"}
+            {pvcMode && ` · ${CUTTER_WIDTH_MM}×${CUTTER_HEIGHT_MM}mm · 1.7mm margins`}
           </div>
           <div style={{ display: "flex", gap: 10 }}>
             <button

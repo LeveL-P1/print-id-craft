@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { buildFormFields, type FormField } from "@/lib/submit-fields"
 import { migrateTemplateToPt } from "@/lib/font-size-units"
 import { getDefaultTemplate } from "@/lib/template-resolver"
+import { DEFAULT_CARD_HEIGHT_MM, DEFAULT_CARD_WIDTH_MM } from "@/lib/card-dimensions"
 import { DIVISIONS, parseClassOptions, resolveEffectiveClassOptions } from "@/lib/section-class"
 
 /**
@@ -158,8 +159,8 @@ export async function GET(req: Request, props: { params: Promise<{ token: string
         fieldConfig: resolvedFieldConfig,
         frontLayout: template?.frontLayout || [],
         backLayout: template?.backLayout || [],
-        cardWidthMm: template?.cardWidthMm || 85.6,
-        cardHeightMm: template?.cardHeightMm || 54.0,
+        cardWidthMm: template?.cardWidthMm || DEFAULT_CARD_WIDTH_MM,
+        cardHeightMm: template?.cardHeightMm || DEFAULT_CARD_HEIGHT_MM,
         orientation: template?.orientation || "LANDSCAPE",
         templateImageUrl: template?.templateImageUrl || null,
         fieldMappings: rawMappings,

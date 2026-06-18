@@ -12,6 +12,7 @@ import {
 } from "@/lib/field-resolver"
 import { formatClassSection } from "@/lib/section-class"
 import { APP_BUILD_ID } from "@/lib/app-build-id"
+import { DEFAULT_CARD_HEIGHT_MM, DEFAULT_CARD_WIDTH_MM } from "@/lib/card-dimensions"
 import { applyFixedBranchToFormData } from "@/lib/fixed-branch"
 import {
   computeSubmitFormRevision,
@@ -1344,8 +1345,8 @@ export default function SubmitPage() {
                     </div>
                     <IDCardPreview 
                       layout={cardSide === 'front' ? config?.frontLayout || [] : config?.backLayout || []} 
-                      widthMm={config?.cardWidthMm || 85.6}
-                      heightMm={config?.cardHeightMm || 54}
+                      widthMm={config?.cardWidthMm || DEFAULT_CARD_WIDTH_MM}
+                      heightMm={config?.cardHeightMm || DEFAULT_CARD_HEIGHT_MM}
                       formData={formData}
                       config={config}
                       croppedPhoto={croppedPhoto}

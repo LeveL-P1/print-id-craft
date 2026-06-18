@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo, useCallback } from "react"
 import { useSession, signOut } from "next-auth/react"
 import dynamic from "next/dynamic"
 import { toast } from "sonner"
+import { DEFAULT_CARD_HEIGHT_MM, DEFAULT_CARD_WIDTH_MM } from "@/lib/card-dimensions"
 
 const IDCardPreview = dynamic(() => import("@/components/IDCardPreview"), { ssr: false })
 const JpgCardPreview = dynamic(() => import("@/components/JpgCardPreview"), { ssr: false })
@@ -326,7 +327,12 @@ export default function TeacherDashboard() {
       const statusData = await statusRes.json()
       const job = statusData.data
       if (job?.status === "COMPLETED") {
-        window.open(`/api/jobs/${jobId}/download`, "_blank")
+        const link = document.createElement("a")
+        link.href = `/api/jobs/${jobId}/download`
+        link.setAttribute("download", "")
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
         toast.success(successLabel)
         return true
       }
@@ -1060,8 +1066,8 @@ export default function TeacherDashboard() {
                               <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>FRONT</div>
                               <IDCardPreview
                                 layout={studentTemplate.frontLayout || []}
-                                widthMm={studentTemplate.cardWidthMm || 85.6}
-                                heightMm={studentTemplate.cardHeightMm || 54.0}
+                                widthMm={studentTemplate.cardWidthMm || DEFAULT_CARD_WIDTH_MM}
+                                heightMm={studentTemplate.cardHeightMm || DEFAULT_CARD_HEIGHT_MM}
                                 formData={selectedStudent.formData as Record<string, string>}
                                 studentPhoto={selectedStudent.photoUrl}
                                 serialNumber={selectedStudent.serialNumber}
@@ -1073,8 +1079,8 @@ export default function TeacherDashboard() {
                                 <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>BACK</div>
                                 <IDCardPreview
                                   layout={studentTemplate.backLayout || []}
-                                  widthMm={studentTemplate.cardWidthMm || 85.6}
-                                  heightMm={studentTemplate.cardHeightMm || 54.0}
+                                  widthMm={studentTemplate.cardWidthMm || DEFAULT_CARD_WIDTH_MM}
+                                  heightMm={studentTemplate.cardHeightMm || DEFAULT_CARD_HEIGHT_MM}
                                   formData={selectedStudent.formData as Record<string, string>}
                                   serialNumber={selectedStudent.serialNumber}
                                   scale={3.2}
@@ -1125,8 +1131,8 @@ export default function TeacherDashboard() {
                 initialPhotoBgColor={(templateData as any)?.photoBgColor || "#FFFFFF"}
                 initialCardSettings={templateData ? {
                   cardSizePreset: "custom",
-                  cardWidth: (templateData as any).cardWidthMm || 85.6,
-                  cardHeight: (templateData as any).cardHeightMm || 53.98,
+                  cardWidth: (templateData as any).cardWidthMm || DEFAULT_CARD_WIDTH_MM,
+                  cardHeight: (templateData as any).cardHeightMm || DEFAULT_CARD_HEIGHT_MM,
                   cardOrientation: (templateData as any).orientation === "LANDSCAPE" ? "landscape" : "portrait",
                   printSides: (templateData as any).hasBackSide ? "both" : "front",
                   cardDpi: (templateData as any).printDpi || 300,

@@ -10,6 +10,14 @@ import {
 } from "@/lib/field-resolver"
 import { PrintDialog, type PrintConfig } from "./IDMakerDialogs"
 import { generateDirectPdf } from "@/lib/pdf-layout"
+import {
+  DEFAULT_CARD_HEIGHT_MM,
+  DEFAULT_CARD_WIDTH_MM,
+  DEFAULT_PRINT_DPI,
+  bmpPixelsPerMeter,
+  printCanvasSize,
+  resolveCardDimensions,
+} from "@/lib/card-dimensions"
 
 type FieldMapping = {
   id: string
@@ -176,9 +184,7 @@ function clearStudentImageCache() {
   }
 }
 
-// ── Print resolution limits ──
-const MIN_PRINT_W = 661   // 300 DPI minimum (56mm)
-const PRINT_DPI = 300     // standard PVC print DPI
+const PRINT_DPI = DEFAULT_PRINT_DPI
 
 // Shared measurement canvas for text metrics (SVG renderer + fitTextToBoxCanvas).
 // Avoids creating thousands of throwaway canvases during batch generation.
@@ -208,10 +214,7 @@ function releaseCanvas(canvas: HTMLCanvasElement) {
   _canvasPool.push(canvas)
 }
 
-/**
- * Convert millimetres to pixels at the given DPI.
- * 1 inch = 25.4 mm.
- */
+/** @deprecated Use printCanvasSize / mmToPrintPx from @/lib/card-dimensions */
 function mmToPx(mm: number, dpi: number = PRINT_DPI): number {
   return Math.round((mm * dpi) / 25.4)
 }
@@ -285,7 +288,7 @@ function fitTextToBoxCanvas(
   userFontSizePt?: number,
   wrapMode: "nowrap" | "wrap" | "multiline" = "wrap",
   fontStyle: string = "normal",
-  cardWidthMm: number = 85.6,
+  cardWidthMm: number = DEFAULT_CARD_WIDTH_MM,
 ): { lines: string[]; fontSize: number; lineHeight: number } {
   const padding = 4
   const maxW = Math.max(1, boxW - padding * 2)
@@ -363,7 +366,7 @@ function fitTextToBoxCanvas(
 }
 
 /**
- * Renders an ID card at the 56:88 mm card ratio, using the template's
+ * Renders an ID card at the configured mm size (default 58×100 mm cutter),
  * full native resolution for maximum sharpness (minimum 300 DPI).
  *
  * The template is stretched to fill the canvas. Because field positions
@@ -383,29 +386,24 @@ async function renderIdCard(
   const templateImg = await getCachedImage(templateImageUrl)
   if (!templateImg) throw new Error("Failed to load template")
 
-  // Canvas dimensions are derived from the user-entered card size in mm
-  // at PRINT_DPI, so the rendered card has the EXACT aspect ratio that
-  // jsPDF will place it into on the printed page. This eliminates the
-  // squash/stretch that occurs when the template image's aspect ratio
-  // differs from the card's mm aspect ratio.
+  // Canvas dimensions: each axis from exact mm × DPI / 25.4 so PDF/JPEG/BMP
+  // placement at cardWidthMm × cardHeightMm matches the physical cutter.
+  const dims = resolveCardDimensions(cardWidthMm, cardHeightMm)
   let printW: number
   let printH: number
   if (cardWidthMm && cardHeightMm && cardWidthMm > 0 && cardHeightMm > 0) {
-    printW = Math.max(MIN_PRINT_W, mmToPx(cardWidthMm))
-    // Maintain the user's mm aspect ratio exactly.
-    printH = Math.round((printW * cardHeightMm) / cardWidthMm)
+    ;({ widthPx: printW, heightPx: printH } = printCanvasSize(dims.widthMm, dims.heightMm))
   } else {
     // Backward-compat: if card size not provided, use template image's
     // native resolution (legacy behaviour).
-    printW = Math.max(MIN_PRINT_W, templateImg.naturalWidth)
-    const templateAspect = templateImg.naturalHeight / templateImg.naturalWidth
-    printH = Math.round(printW * templateAspect)
+    printW = templateImg.naturalWidth
+    printH = templateImg.naturalHeight
   }
 
   const { canvas, ctx } = acquireCanvas(printW, printH)
 
   // Draw template stretched to fill the card canvas.
-  // The template IS the card design — stretching to 56:88 is intentional.
+  // The template IS the card design — stretched to the exact cutter mm size.
   ctx.drawImage(templateImg, 0, 0, printW, printH)
 
   // Draw all mapped fields
@@ -484,7 +482,7 @@ async function renderIdCard(
         const { lines, fontSize, lineHeight: baseLineHeight } = fitTextToBoxCanvas(
           ctx, value, fw, fh, fontFamily, fontWeight,
           printW, field.fontSize, getCardTextWrapMode(field.fieldKey, field.textWrap), fStyle,
-          cardWidthMm || 85.6,
+          cardWidthMm || DEFAULT_CARD_WIDTH_MM,
         )
         // Honour the user's lineHeight multiplier if set (default 1.2 for multiline, ~1.15 otherwise).
         const userLH = field.lineHeight && field.lineHeight > 0 ? field.lineHeight : 0
@@ -568,8 +566,7 @@ async function renderIdCardSvg(
   let w: number
   let h: number
   if (cardWidthMm && cardHeightMm && cardWidthMm > 0 && cardHeightMm > 0) {
-    w = mmToPx(cardWidthMm)
-    h = mmToPx(cardHeightMm)
+    ;({ widthPx: w, heightPx: h } = printCanvasSize(cardWidthMm, cardHeightMm))
   } else {
     w = templateImg.naturalWidth
     h = templateImg.naturalHeight
@@ -621,8 +618,8 @@ async function renderIdCardSvg(
         const svgTextDecor = field.textDecoration && field.textDecoration !== "none" ? field.textDecoration : ""
         // SVG renderer uses the same pt-based formula as the raster
         // renderer + editor so vector exports match preview pixel-for-pixel.
-        const svgPxPerPt = w > 0 && (cardWidthMm || 85.6) > 0
-          ? (w * 25.4) / ((cardWidthMm || 85.6) * 72)
+        const svgPxPerPt = w > 0 && (cardWidthMm || DEFAULT_CARD_WIDTH_MM) > 0
+          ? (w * 25.4) / ((cardWidthMm || DEFAULT_CARD_WIDTH_MM) * 72)
           : 0
         const userPx =
           field.fontSize && field.fontSize > 0 && svgPxPerPt > 0
@@ -883,8 +880,9 @@ function encodeRgbaToBmpBuffer(pixels: Uint8ClampedArray, w: number, h: number):
   view.setUint16(28, 24, true)
   view.setUint32(30, 0, true)
   view.setUint32(34, pixelDataSize, true)
-  view.setInt32(38, 11811, true)        // X pixels/meter ≈ 300 DPI
-  view.setInt32(42, 11811, true)        // Y pixels/meter ≈ 300 DPI
+  const pxPerM = bmpPixelsPerMeter()
+  view.setInt32(38, pxPerM, true)
+  view.setInt32(42, pxPerM, true)
   view.setUint32(46, 0, true)
   view.setUint32(50, 0, true)
 
@@ -1089,7 +1087,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
   const [progress, setProgress] = useState({ current: 0, total: 0, status: "" })
   const [previewCards, setPreviewCards] = useState<{ serialNumber: string; frontDataUrl: string; backDataUrl?: string }[]>([])
   const [pdfPrintCards, setPdfPrintCards] = useState<{ serialNumber: string; frontDataUrl: string; backDataUrl?: string }[]>([])
-  const [lastCardDims, setLastCardDims] = useState({ w: 85.6, h: 54 })
+  const [lastCardDims, setLastCardDims] = useState({ w: DEFAULT_CARD_WIDTH_MM, h: DEFAULT_CARD_HEIGHT_MM })
   // Preview-first download flow: after rendering, hold a closure that performs
   // the actual file write. User must click "Download" to commit. This lets them
   // verify the layout (page size, card size, grid) matches their cutter setup
@@ -1144,8 +1142,8 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (cancelled || !data?.success || !data?.data) return
-        const w = Number(data.data.cardWidthMm) || 85.6
-        const h = Number(data.data.cardHeightMm) || 54
+        const w = Number(data.data.cardWidthMm) || DEFAULT_CARD_WIDTH_MM
+        const h = Number(data.data.cardHeightMm) || DEFAULT_CARD_HEIGHT_MM
         setTemplateCardDims({ w, h })
         setLastCardDims({ w, h })
 
@@ -1333,7 +1331,7 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
           const chunk = students.slice(i, i + CHUNK_SIZE)
           const promises = chunk.map(async (student: any) => {
             try {
-              // Renders at fixed 661×1039 (300 DPI, 56×88mm) as JPEG
+              // Renders at 685×1181 px (300 DPI, 58×100 mm cutter) as PNG
               const frontDataUrl = await renderIdCard(templateImageUrl, fieldMappings, student, getFlagUrl(student), cardWidthMm, cardHeightMm)
               let backDataUrl: string | undefined
               if (hasBackSide && backTemplateImageUrl && backFieldMappings?.length > 0) {
@@ -1359,8 +1357,8 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
 
         // Compute the actual grid that generateDirectPdf will use, so the
         // preview panel shows EXACTLY what the cutter will see.
-        const cw = cardWidthMm || 85.6
-        const ch = cardHeightMm || 54
+        const cw = cardWidthMm || DEFAULT_CARD_WIDTH_MM
+        const ch = cardHeightMm || DEFAULT_CARD_HEIGHT_MM
         setLastCardDims({ w: cw, h: ch })
         const hPitch = printConfig.h2ndPosition > 0 ? printConfig.h2ndPosition : cw
         const vPitch = printConfig.v2ndPosition > 0 ? printConfig.v2ndPosition : ch
@@ -1479,8 +1477,8 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
         }
 
         setPreviewCards(previewData)
-        const cdrCw = cardWidthMm || 85.6
-        const cdrCh = cardHeightMm || 54
+        const cdrCw = cardWidthMm || DEFAULT_CARD_WIDTH_MM
+        const cdrCh = cardHeightMm || DEFAULT_CARD_HEIGHT_MM
         setLastCardDims({ w: cdrCw, h: cdrCh })
         const cdrClassName = classes.find((c) => c.id === selectedClassId)?.name || "All"
         const cdrStudentIds = [...studentIds]
@@ -1539,8 +1537,8 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
           backDataUrl: c.backDataUrl,
         })))
 
-        const bmpCw = cardWidthMm || 85.6
-        const bmpCh = cardHeightMm || 54
+        const bmpCw = cardWidthMm || DEFAULT_CARD_WIDTH_MM
+        const bmpCh = cardHeightMm || DEFAULT_CARD_HEIGHT_MM
         setLastCardDims({ w: bmpCw, h: bmpCh })
         const bmpStudentIds = renderedCards.map(c => c.id)
         const bmpRendered = renderedCards.slice()
@@ -1662,8 +1660,8 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
           }
         }
 
-        const jpegCw = cardWidthMm || 85.6
-        const jpegCh = cardHeightMm || 54
+        const jpegCw = cardWidthMm || DEFAULT_CARD_WIDTH_MM
+        const jpegCh = cardHeightMm || DEFAULT_CARD_HEIGHT_MM
         setLastCardDims({ w: jpegCw, h: jpegCh })
         const jpegClassName = classes.find((c) => c.id === selectedClassId)?.name || "All"
         const jpegStudentIds = renderedCards.map((c) => c.id)

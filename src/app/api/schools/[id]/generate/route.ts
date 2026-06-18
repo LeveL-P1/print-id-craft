@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { studentPhotoUrl } from "@/lib/student-photo-url"
+import { DEFAULT_CARD_HEIGHT_MM, DEFAULT_CARD_WIDTH_MM } from "@/lib/card-dimensions"
 import { getDefaultTemplate, getTemplateForClass } from "@/lib/template-resolver"
 
 export const maxDuration = 60; // Vercel function timeout config
@@ -102,8 +103,8 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
         backTemplateImageUrl: template.backTemplateImageUrl || null,
         backFieldMappings: (template.backFieldMappings as any[]) || [],
         hasBackSide: template.hasBackSide || false,
-        cardWidthMm: template.cardWidthMm || 85.6,
-        cardHeightMm: template.cardHeightMm || 54,
+        cardWidthMm: template.cardWidthMm || DEFAULT_CARD_WIDTH_MM,
+        cardHeightMm: template.cardHeightMm || DEFAULT_CARD_HEIGHT_MM,
         orientation: template.orientation || "PORTRAIT",
         students: renderData,
         totalCount: renderData.length,

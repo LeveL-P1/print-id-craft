@@ -1,4 +1,9 @@
 import { prisma } from "@/lib/prisma"
+import {
+  DEFAULT_CARD_HEIGHT_MM,
+  DEFAULT_CARD_WIDTH_MM,
+  PDF_PT_PER_MM,
+} from "@/lib/card-dimensions"
 import { getDefaultTemplate } from "@/lib/template-resolver"
 import { storageUpload } from "@/lib/storage"
 import { reportError } from "@/lib/observability"
@@ -178,12 +183,11 @@ export async function processGeneratePrintBatch(schoolId: string, payload: Gener
 
   const template = await getDefaultTemplate(schoolId)
   const bleedMm = 3
-  const mmToPoints = 2.8346
-  const cardWidthMm = template?.cardWidthMm || 85.6
-  const cardHeightMm = template?.cardHeightMm || 54.0
-  const pageW = Math.round((cardWidthMm + bleedMm * 2) * mmToPoints * 100) / 100
-  const pageH = Math.round((cardHeightMm + bleedMm * 2) * mmToPoints * 100) / 100
-  const bleedPt = Math.round(bleedMm * mmToPoints * 100) / 100
+  const cardWidthMm = template?.cardWidthMm || DEFAULT_CARD_WIDTH_MM
+  const cardHeightMm = template?.cardHeightMm || DEFAULT_CARD_HEIGHT_MM
+  const pageW = Math.round((cardWidthMm + bleedMm * 2) * PDF_PT_PER_MM * 100) / 100
+  const pageH = Math.round((cardHeightMm + bleedMm * 2) * PDF_PT_PER_MM * 100) / 100
+  const bleedPt = Math.round(bleedMm * PDF_PT_PER_MM * 100) / 100
 
   const frontPath = `batches/${schoolId}/${batchId}/front.pdf`
   const backPath = `batches/${schoolId}/${batchId}/back.pdf`

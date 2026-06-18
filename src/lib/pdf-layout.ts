@@ -3,6 +3,13 @@
  * All functions are side-effect-free and framework-independent.
  */
 
+import {
+  CUTTER_HEIGHT_MM,
+  CUTTER_WIDTH_MM,
+  DEFAULT_CARD_HEIGHT_MM,
+  DEFAULT_CARD_WIDTH_MM,
+} from "@/lib/card-dimensions"
+
 /* ─── Types ─── */
 export type PageSize = {
   label: string
@@ -52,22 +59,22 @@ export const PAGE_SIZES: Record<string, PageSize> = {
 export const CARD_PRESETS: Record<string, CardPreset> = {
   CR80: { label: "CR-80 / ISO (85.6 × 54 mm)", widthMm: 85.6, heightMm: 54 },
   CR80_PORTRAIT: { label: "CR-80 Portrait (54 × 85.6 mm)", widthMm: 54, heightMm: 85.6 },
-  SCHOOL_ID: { label: "School ID (56 × 88 mm)", widthMm: 56, heightMm: 88 },
-  SCHOOL_ID_LANDSCAPE: { label: "School ID Landscape (88 × 56 mm)", widthMm: 88, heightMm: 56 },
+  SCHOOL_ID: { label: "School ID (58 × 100 mm)", widthMm: CUTTER_WIDTH_MM, heightMm: CUTTER_HEIGHT_MM },
+  SCHOOL_ID_LANDSCAPE: { label: "School ID Landscape (100 × 58 mm)", widthMm: CUTTER_HEIGHT_MM, heightMm: CUTTER_WIDTH_MM },
   HALF_A4: { label: "Half A4 (105 × 74 mm)", widthMm: 105, heightMm: 74 },
-  CUSTOM: { label: "Custom Size", widthMm: 85.6, heightMm: 54 },
+  CUSTOM: { label: "Custom Size", widthMm: DEFAULT_CARD_WIDTH_MM, heightMm: DEFAULT_CARD_HEIGHT_MM },
 }
 
 /* ─── PVC Print Configuration (Aaryans Exact Spec) ─── */
 export const PVC_PRINT_CONFIG = {
-  cardW: 56,       // mm
-  cardH: 88,       // mm
+  cardW: CUTTER_WIDTH_MM,       // 58 mm
+  cardH: CUTTER_HEIGHT_MM,      // 100 mm
   pageW: 297,      // A4 landscape width
   pageH: 210,      // A4 landscape height
   marginX: 1.7,    // left/right margin
-  marginY: 15.5,   // top/bottom margin
-  gapH: 3.4,       // horizontal gap between cards
-  gapV: 3.0,       // vertical gap between cards
+  marginY: 5.0,    // top/bottom margin
+  gapH: 0.9,       // horizontal gap between cards
+  gapV: 0.0,       // vertical gap between cards
   cols: 5,
   rows: 2,
   bleed: 1.5,      // mm bleed on all sides
@@ -75,8 +82,8 @@ export const PVC_PRINT_CONFIG = {
   cropMarkLen: 3.0,  // mm crop mark length
   cropMarkOff: 1.0,  // mm offset from card edge
   // Verification:
-  // Width:  5×56 + 4×3.4 + 2×1.7 = 280 + 13.6 + 3.4 = 297mm ✅
-  // Height: 2×88 + 1×3.0 + 2×15.5 = 176 + 3.0 + 31.0 = 210mm ✅
+  // Width:  5×58 + 4×0.9 + 2×1.7 = 290 + 3.6 + 3.4 = 297mm ✅
+  // Height: 2×100 + 1×0.0 + 2×5.0 = 200 + 0 + 10 = 210mm ✅
 } as const
 
 export type PvcCardPosition = { x: number; y: number; col: number; row: number }
@@ -127,7 +134,7 @@ export function calculatePvcLayout(totalCards: number): GridLayout {
 export const QUICK_PRESETS: QuickPreset[] = [
   {
     label: "📋 Aaryans Print (2×5)",
-    description: "88×56mm landscape cards · A4 Portrait · 2×5 grid",
+    description: "100×58mm landscape cards · A4 Portrait · 2×5 grid",
     pageSizeKey: "A4",
     cardPresetKey: "SCHOOL_ID_LANDSCAPE",
     marginMm: 3,
@@ -136,8 +143,8 @@ export const QUICK_PRESETS: QuickPreset[] = [
     expectedGrid: "2×5",
   },
   {
-    label: "🪪 PVC Print (56×88)",
-    description: "Exact 5×2 · 1.7mm margins · Bleed + Crop marks",
+    label: "🪪 PVC Print (58×100)",
+    description: "Exact 5×2 · 58×100mm cutter · Bleed + Crop marks",
     pageSizeKey: "A4",
     cardPresetKey: "SCHOOL_ID",
     marginMm: 1.7,
@@ -148,7 +155,7 @@ export const QUICK_PRESETS: QuickPreset[] = [
   },
   {
     label: "10 Cards on A4",
-    description: "56×88mm cards · A4 Landscape · 5×2 grid",
+    description: "58×100mm cards · A4 Landscape · 5×2 grid",
     pageSizeKey: "A4",
     cardPresetKey: "SCHOOL_ID",
     marginMm: 5,
@@ -158,7 +165,7 @@ export const QUICK_PRESETS: QuickPreset[] = [
   },
   {
     label: "9 Cards on A4",
-    description: "56×88mm cards · A4 Portrait · 3×3 grid",
+    description: "58×100mm cards · A4 Portrait · 3×3 grid",
     pageSizeKey: "A4",
     cardPresetKey: "SCHOOL_ID",
     marginMm: 5,

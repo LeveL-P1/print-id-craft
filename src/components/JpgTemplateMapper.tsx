@@ -390,16 +390,17 @@ export default function JpgTemplateMapper({
 
   // ── Card Settings State ──
   const CARD_SIZE_PRESETS = [
+    { id: "school_id", label: "School ID (58×100)", width: 100, height: 58, desc: "Cutter die 58×100 mm — default" },
     { id: "cr80", label: "CR-80 (Standard)", width: 85.6, height: 53.98, desc: "ISO/IEC 7810 ID-1 — most common" },
     { id: "cr79", label: "CR-79 (Adhesive)", width: 83.9, height: 51.4, desc: "For adhesive-backed overlays" },
     { id: "cr100", label: "CR-100 (Large)", width: 104, height: 66, desc: "Military CAC / oversized" },
     { id: "a4third", label: "A4 Third", width: 99, height: 55, desc: "1/3 A4 size badge" },
-    { id: "custom", label: "Custom Size", width: 85.6, height: 53.98, desc: "Enter your own dimensions" },
+    { id: "custom", label: "Custom Size", width: 100, height: 58, desc: "Enter your own dimensions" },
   ]
 
-  const [cardSizePreset, setCardSizePreset] = useState(initialCardSettings?.cardSizePreset || "cr80")
-  const [cardWidth, setCardWidth] = useState(initialCardSettings?.cardWidth || 85.6)   // mm
-  const [cardHeight, setCardHeight] = useState(initialCardSettings?.cardHeight || 53.98) // mm
+  const [cardSizePreset, setCardSizePreset] = useState(initialCardSettings?.cardSizePreset || "school_id")
+  const [cardWidth, setCardWidth] = useState(initialCardSettings?.cardWidth || 100)   // mm (landscape default)
+  const [cardHeight, setCardHeight] = useState(initialCardSettings?.cardHeight || 58) // mm
   const [cardOrientation, setCardOrientation] = useState<"landscape" | "portrait">(initialCardSettings?.cardOrientation || "landscape")
   const [printSides, setPrintSides] = useState<"front" | "both">(initialCardSettings?.printSides || "front")
   const [cardDpi, setCardDpi] = useState(initialCardSettings?.cardDpi || 300)
@@ -411,8 +412,8 @@ export default function JpgTemplateMapper({
   const [fixedBranch, setFixedBranch] = useState(initialCardSettings?.fixedBranch || "")
 
   // String-based intermediates for width/height inputs so user can type freely
-  const [cardWidthStr, setCardWidthStr] = useState(String(initialCardSettings?.cardWidth || 85.6))
-  const [cardHeightStr, setCardHeightStr] = useState(String(initialCardSettings?.cardHeight || 53.98))
+  const [cardWidthStr, setCardWidthStr] = useState(String(initialCardSettings?.cardWidth || 100))
+  const [cardHeightStr, setCardHeightStr] = useState(String(initialCardSettings?.cardHeight || 58))
 
   // Handle card size preset change
   const handleCardSizeChange = (presetId: string) => {
