@@ -8,7 +8,7 @@ async function main() {
   });
   
   console.log('--- USERS ---');
-  console.log(users.map(u =\u003e ({
+  console.log(users.map(u => ({
     id: u.id,
     name: u.name,
     email: u.email,
@@ -23,10 +23,10 @@ async function main() {
   
   console.log('\n--- STUDENTS COUNT ---');
   const countsBySchool = {};
-  students.forEach(s =\u003e {
+  students.forEach(s => {
     countsBySchool[s.schoolId] = (countsBySchool[s.schoolId] || 0) + 1;
   });
   console.log(countsBySchool);
 }
 
-main().catch(console.error).finally(() =\u003e prisma.$disconnect());
+main().catch(console.error).finally(() => prisma.$disconnect());

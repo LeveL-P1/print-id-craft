@@ -6,6 +6,7 @@ import {
   collectExportDataColumns,
   getStudentFullName,
   safePhotoBaseName,
+  type StudentFormData,
 } from "@/lib/export/student-export"
 import { buildStudentExportEntry } from "@/lib/export/build-student-export-entry"
 
@@ -66,7 +67,7 @@ describe("safePhotoBaseName", () => {
 
 describe("collectExportDataColumns", () => {
   it("includes every formData key and preserves fieldConfig order", () => {
-    const students = [
+    const students: Array<{ formData: StudentFormData }> = [
       {
         formData: {
           Name: "PE",

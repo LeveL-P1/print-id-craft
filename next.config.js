@@ -1,4 +1,5 @@
 const { withSentryConfig } = require('@sentry/nextjs')
+const path = require('path')
 
 const supabaseImageHost = (() => {
   try {
@@ -12,6 +13,8 @@ const supabaseImageHost = (() => {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Monorepo-style workspace: lock file tracing to this app root.
+  outputFileTracingRoot: path.join(__dirname),
   env: {
     NEXT_PUBLIC_APP_BUILD_ID:
       process.env.VERCEL_GIT_COMMIT_SHA ||

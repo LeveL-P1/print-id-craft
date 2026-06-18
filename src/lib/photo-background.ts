@@ -437,7 +437,7 @@ export async function repairTransparentBlobHoles(
 export const BG_ALPHA_CUTOFF = 20
 
 /** rembg / ISNet / BiRefNet masks need full client repair + defringe (not pre-composited Gemini). */
-export function useFullClientMaskPipeline(model?: string): boolean {
+export function needsFullClientMaskPipeline(model?: string): boolean {
   return model !== "gemini"
 }
 
@@ -881,7 +881,7 @@ export function recoverHairByColor(original: ImageData, mask: ImageData): ImageD
  *  8. Original RGB alignment
  */
 export function enhanceForegroundMask(original: ImageData, mask: ImageData, model?: string): ImageData {
-  const fullPrep = useFullClientMaskPipeline(model)
+  const fullPrep = needsFullClientMaskPipeline(model)
   const repaired = repairForegroundMaskHoles(original, mask, DEFAULT_MASK_ENHANCE)
   
   let current = repaired
@@ -1104,7 +1104,7 @@ export function compositeMaskImageDataOntoPlainColor(
   const h = mask.height
   const out = new Uint8ClampedArray(w * h * 4)
   const { r: tr, g: tg, b: tb } = target
-  const fullPrep = useFullClientMaskPipeline(model)
+  const fullPrep = needsFullClientMaskPipeline(model)
   const wallColor = fullPrep ? getEdgeColorFromImageData(original) : null
 
   // --- Pass 1: Alpha composite (cutout sticker onto colour) ---

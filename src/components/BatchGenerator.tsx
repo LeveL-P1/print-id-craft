@@ -2116,8 +2116,8 @@ export default function BatchGenerator({ schoolId, schoolName, classes }: BatchG
               className="btn btn-outline"
               title="Clear saved Print Setup and reset to card dimension defaults"
               onClick={async () => {
-                const w = templateCardDims?.w || 56
-                const h = templateCardDims?.h || 88
+                const w = templateCardDims?.w ?? DEFAULT_CARD_WIDTH_MM
+                const h = templateCardDims?.h ?? DEFAULT_CARD_HEIGHT_MM
                 const defaults: PrintConfig = {
                   paper: "A4 Horizontal", paperWidth: 297, paperHeight: 210,
                   // 3 mm horizontal gap + 15 mm vertical gap between cards
