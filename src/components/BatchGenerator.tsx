@@ -439,7 +439,7 @@ async function renderIdCard(
           ctx.save()
           pathRoundedRect(ctx, fx, fy, fw, fh, radiusPx)
           ctx.clip()
-          drawImageContain(ctx, photoImg, fx, fy, fw, fh)
+          ctx.drawImage(photoImg, 0, 0, photoImg.naturalWidth, photoImg.naturalHeight, dx, dy, dw, dh)
           ctx.restore()
         }
       }
@@ -590,10 +590,27 @@ async function renderIdCardSvg(
     if (field.type === "photo") {
       if (student.photoUrl) {
         const photoDataUrl = await imageToDataUrl(student.photoUrl)
-        // clipPath for aspect-ratio crop
+        const radiusPx = ((field.photoBorderRadius || 0) / BATCH_EDITOR_REFERENCE_WIDTH) * w
+        const borderPx = ((field.photoBorderWidth || 0) / BATCH_EDITOR_REFERENCE_WIDTH) * w
+        const radius = Math.max(0, Math.min(radiusPx, Math.min(fw, fh) / 2))
+
+        // clipPath for aspect-ratio crop + border radius
         const clipId = `clip-${field.id}`
-        lines.push(`  <defs><clipPath id="${clipId}"><rect x="${fx}" y="${fy}" width="${fw}" height="${fh}" /></clipPath></defs>`)
+        const clipRect = radius > 0
+          ? `<rect x="${fx}" y="${fy}" width="${fw}" height="${fh}" rx="${radius}" ry="${radius}" />`
+          : `<rect x="${fx}" y="${fy}" width="${fw}" height="${fh}" />`
+
+        lines.push(`  <defs><clipPath id="${clipId}">${clipRect}</clipPath></defs>`)
         lines.push(`  <image href="${photoDataUrl}" x="${fx}" y="${fy}" width="${fw}" height="${fh}" preserveAspectRatio="xMidYMid slice" clip-path="url(#${clipId})" />`)
+
+        if (borderPx > 0) {
+          const borderColor = field.photoBorderColor || "#000000"
+          const inset = borderPx / 2
+          const borderRad = Math.max(0, radius - inset)
+          const borderRect = borderRad > 0
+            ? `<rect x="${fx + inset}" y="${fy + inset}" width="${fw - borderPx}" height="${fh - borderPx}" rx="${borderRad}" ry="${borderRad}" fill="none" stroke="${borderColor}" stroke-width="${borderPx}" />`
+            : `<rect x="${fx + inset}" y="${fy + inset}" width="${fw - borderPx}" height="${fh - borderPx}" fill="none" stroke="${borderColor}" stroke-width="${borderPx}" />`
+        }
       }
     } else if (field.type === "flag") {
       if (flagImageUrl) {

@@ -513,7 +513,12 @@ export default function JpgTemplateMapper({
       .replace(/^_|_$/g, "") || `field_${Date.now()}`
   }
 
-  const addFieldMapping = (fieldKey: string, label: string, type: "text" | "photo" | "flag" = "text") => {
+  const addFieldMapping = (
+    fieldKey: string,
+    label: string,
+    type: "text" | "photo" | "flag" = "text",
+    initialRadius?: number,
+  ) => {
     // Prevent duplicate fieldKeys
     if (mappings.find((m) => m.fieldKey === fieldKey)) {
       alert(`Field "${label}" is already placed on the template.`)
@@ -523,6 +528,7 @@ export default function JpgTemplateMapper({
     pushToHistory(mappings)
     const isDateField = fieldKey === "dateOfBirth" || fieldKey.toLowerCase().includes("date")
     const isPrefixedAddress = isPrefixedAddressField(fieldKey)
+    const isCircularPhoto = type === "photo" && initialRadius === 999
     const newMapping: FieldMapping = {
       id: `field-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       fieldKey,
@@ -530,8 +536,8 @@ export default function JpgTemplateMapper({
       type,
       x: type === "photo" ? 5 : type === "flag" ? 75 : 40,
       y: type === "photo" ? 25 : type === "flag" ? 5 : 30 + mappings.filter((m) => m.type === "text").length * 6,
-      width: type === "photo" ? 18 : type === "flag" ? 12 : isPrefixedAddress ? 55 : 30,
-      height: type === "photo" ? 32 : type === "flag" ? 18 : isPrefixedAddress ? 8 : 4.5,
+      width: type === "photo" ? (isCircularPhoto ? 20 : 18) : type === "flag" ? 12 : isPrefixedAddress ? 55 : 30,
+      height: type === "photo" ? (isCircularPhoto ? 20 : 32) : type === "flag" ? 18 : isPrefixedAddress ? 8 : 4.5,
       fontSize: 14,
       fontColor: "#000000",
       fontWeight: fieldKey === "name" || fieldKey === "fullName" ? "bold" : "normal",
@@ -546,7 +552,7 @@ export default function JpgTemplateMapper({
       dateFormat: isDateField ? "DD/MM/YYYY" : undefined,
       photoBorderWidth: type === "photo" ? 0 : undefined,
       photoBorderColor: type === "photo" ? "#000000" : undefined,
-      photoBorderRadius: type === "photo" ? 0 : undefined,
+      photoBorderRadius: type === "photo" ? (initialRadius ?? 0) : undefined,
     }
     setMappings((prev) => [...prev, newMapping])
     setSelectedId(newMapping.id)
@@ -3356,26 +3362,48 @@ export default function JpgTemplateMapper({
 
             {/* Photo button */}
             {!mappings.find((m) => m.type === "photo") && (
-              <button
-                onClick={() => addFieldMapping("photo", "Student Photo", "photo")}
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  border: "1.5px dashed #3b82f6",
-                  borderRadius: 8,
-                  background: "#eff6ff",
-                  color: "#2563eb",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  marginBottom: 8,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                }}
-              >
-                📷 Add Photo Placeholder
-              </button>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <button
+                  onClick={() => addFieldMapping("photo", "Student Photo", "photo")}
+                  style={{
+                    flex: 1,
+                    padding: "10px 8px",
+                    border: "1.5px dashed #3b82f6",
+                    borderRadius: 8,
+                    background: "#eff6ff",
+                    color: "#2563eb",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                  }}
+                >
+                  📷 Rect Photo
+                </button>
+                <button
+                  onClick={() => addFieldMapping("photo", "Student Photo", "photo", 999)}
+                  style={{
+                    flex: 1,
+                    padding: "10px 8px",
+                    border: "1.5px dashed #3b82f6",
+                    borderRadius: 8,
+                    background: "#eff6ff",
+                    color: "#2563eb",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                  }}
+                >
+                  ⚪ Circular Photo
+                </button>
+              </div>
             )}
 
             {/* Class - Division button (single combined placeholder) */}

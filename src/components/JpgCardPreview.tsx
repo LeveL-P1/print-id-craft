@@ -392,7 +392,7 @@ export default function JpgCardPreview({
               ctx.save()
               pathRoundedRect(ctx, fx, fy, fw, fh, radiusPx)
               ctx.clip()
-              drawImageContain(ctx, photoImg, fx, fy, fw, fh)
+              ctx.drawImage(photoImg, 0, 0, photoImg.naturalWidth, photoImg.naturalHeight, dx, dy, dw, dh)
               ctx.restore()
             } catch (err) {
               ctx.save()
@@ -602,7 +602,7 @@ export async function generateJpgCard(
           ctx.save()
           pathRoundedRect(ctx, fx, fy, fw, fh, radiusPx)
           ctx.clip()
-          drawImageContain(ctx, photoImg, fx, fy, fw, fh)
+          ctx.drawImage(photoImg, 0, 0, photoImg.naturalWidth, photoImg.naturalHeight, dx, dy, dw, dh)
           ctx.restore()
         } catch {}
       }
